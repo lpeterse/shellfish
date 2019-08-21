@@ -52,7 +52,6 @@ pub trait Parser: Sized {
     fn parse(p: &mut Input) -> Option<Self>;
 }
 
-
 impl Parser for usize {
     fn parse(p: &mut Input) -> Option<usize> {
         let i = p.take_u32be()?;

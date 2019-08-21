@@ -5,22 +5,21 @@ use crate::parser::*;
 
 #[derive(Copy, Clone, Debug)]
 pub enum AgentRequest {
-    RequestIdentities = 0x11,
+    RequestIdentities = 11,
 }
 
 pub enum AgentResponse {
-    IdentitiesAnswer(Vec<(String, Vec<u8>)>),
+    IdentitiesAnswer(Vec<(Vec<u8>,String)>),
     Unknown(u8)
 }
 
-#[derive(Default)]
 pub struct AgentCodec {
-    max_packet_size: usize
+    pub max_packet_size: usize
 }
 
-impl AgentCodec {
-    pub fn new(max_packet_size: usize) -> AgentCodec {
-        AgentCodec { max_packet_size }
+impl Default for AgentCodec {
+    fn default() -> Self {
+        Self { max_packet_size: 35000 }
     }
 }
 
@@ -72,6 +71,7 @@ impl Decoder for AgentCodec {
     }
 }
 
+#[derive(Debug)]
 pub enum AgentCodecError {
     IoError(std::io::Error),
     MaxPacketSizeExceeded(usize),

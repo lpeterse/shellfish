@@ -5,8 +5,6 @@ authors = ["Lars Petersen <info@lars-petersen.net>"]
 edition = "2018"
 
 [dependencies]
-#ring = "0.16.7"
-#ed25519-dalek = "0.9.1"
 tokio = "0.1.22"
 futures = "0.1.28"
 bytes = "0.4.12"
