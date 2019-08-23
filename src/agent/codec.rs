@@ -2,6 +2,7 @@ use bytes::{BytesMut, BufMut};
 use tokio::codec::{Encoder, Decoder};
 
 use crate::parser::*;
+use crate::parser_ext::*;
 use crate::keys::*;
 
 #[derive(Copy, Clone, Debug)]
