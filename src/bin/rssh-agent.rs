@@ -1,11 +1,9 @@
-
 use tokio::prelude::*;
 use rssh::agent::*;
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let agent = LocalAgent::new();
-    let future = agent.request_identities()
-        .map(|ids| println!("{:?}", ids))
-        .map_err(|e| println!("{:?}", e));
-    tokio::run(future);
+    let ids = agent.request_identities().await;
+    println!("{:?}", ids)
 }

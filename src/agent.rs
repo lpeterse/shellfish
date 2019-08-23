@@ -3,6 +3,7 @@ use tokio::net::unix::UnixStream;
 use tokio::codec::Framed;
 
 use self::codec::*;
+use crate::keys::PublicKey;
 
 mod codec;
 
@@ -10,21 +11,19 @@ mod codec;
 //    Ed25519PublicKey([u8;32])
 //}
 
-pub type PublicKey = Vec<u8>;
 
 pub enum Signature {
     Ed25519Signature([u8;64])
 }
 
 type Comment = String;
-type Flags = u32;
-type AgentFuture<T, E> = Box<dyn Future<Item = T, Error = E> + Send + 'static>;
+type AgentFuture<'a, T, E> = std::pin::Pin<Box<dyn Future<Output=Result<T,E>> + Send + 'a>>;
 
 pub trait Agent {
     type Error;
 
-    fn request_identities(&self) -> AgentFuture<Vec<(PublicKey, Comment)>, Self::Error>;
-    fn sign_digest(&self, key: &PublicKey, digest: &[u8], flags: Flags) -> AgentFuture<Signature, Self::Error>;
+    fn request_identities(&self) -> AgentFuture<'_, Vec<(PublicKey, Comment)>, Self::Error>;
+    //fn sign_digest(&self, key: &PublicKey, digest: &[u8], flags: Flags) -> AgentFuture<Signature, Self::Error>;
 }
 
 pub struct LocalAgent {
@@ -52,12 +51,6 @@ impl From<AgentCodecError> for LocalAgentError {
     }
 }
 
-impl <T> From<(AgentCodecError,T)> for LocalAgentError {
-    fn from((e, _): (AgentCodecError, T)) -> Self {
-        LocalAgentError::CodecError(e)
-    }
-}
-
 impl LocalAgent {
     pub fn new() -> Self {
         Self {
@@ -69,26 +62,26 @@ impl LocalAgent {
 impl Agent for LocalAgent {
     type Error = LocalAgentError;
 
-    fn request_identities(&self) -> AgentFuture<Vec<(PublicKey, Comment)>, Self::Error> {
-        match self.path {
-            None => Box::new(futures::future::err(LocalAgentError::EnvironmentVariableNotFound)),
-            Some(ref p) => {
-                let future = UnixStream::connect(std::path::Path::new(p))
-                    .map_err(LocalAgentError::from)
-                    .map(|s| Framed::new(s, AgentCodec::default()))
-                    .and_then(|s| s.send(AgentRequest::RequestIdentities).map_err(LocalAgentError::from))
-                    .and_then(|s| s.into_future().map_err(LocalAgentError::from))
-                    .and_then(|(x,_)| match x {
-                        Some(AgentResponse::IdentitiesAnswer(v)) => Ok(v),
-                        None                                     => Err(LocalAgentError::ConnectionClosed),
-                        _                                        => Err(LocalAgentError::ProtocolError("unexpected response")),
-                    });
-                Box::new(future)
+    fn request_identities(&self) -> AgentFuture<'_, Vec<(PublicKey, Comment)>, Self::Error> {
+        Box::pin(async move {
+            match self.path.clone() {
+                None => Err(LocalAgentError::EnvironmentVariableNotFound),
+                Some(p) => {
+                    let s = UnixStream::connect(std::path::Path::new(&p)).await?;
+                    let mut s = Framed::new(s, AgentCodec::default());
+                    s.send(AgentRequest::RequestIdentities).await?;
+                    match s.into_future().map(|(x,_)| x).await {
+                        None                                         => Err(LocalAgentError::ConnectionClosed),
+                        Some(Ok(AgentResponse::IdentitiesAnswer(v))) => Ok(v),
+                        Some(Ok(_))                                  => Err(LocalAgentError::ProtocolError("unexpected response")),
+                        Some(Err(e))                                 => Err(LocalAgentError::from(e)),
+                    }
+                }
             }
-        }
+        })
     }
 
-    fn sign_digest(&self, key: &PublicKey, digest: &[u8], flags: Flags) -> AgentFuture<Signature, Self::Error> {
-        Box::new(futures::future::err(LocalAgentError::ConnectionClosed))
-    }
+    //fn sign_digest(&self, key: &PublicKey, digest: &[u8], flags: Flags) -> AgentFuture<Signature, Self::Error> {
+    //    Box::new(futures::future::err(LocalAgentError::ConnectionClosed))
+    //}
 }

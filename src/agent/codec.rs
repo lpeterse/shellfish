@@ -2,6 +2,7 @@ use bytes::{BytesMut, BufMut};
 use tokio::codec::{Encoder, Decoder};
 
 use crate::parser::*;
+use crate::keys::*;
 
 #[derive(Copy, Clone, Debug)]
 pub enum AgentRequest {
@@ -9,7 +10,7 @@ pub enum AgentRequest {
 }
 
 pub enum AgentResponse {
-    IdentitiesAnswer(Vec<(Vec<u8>,String)>),
+    IdentitiesAnswer(Vec<(PublicKey,String)>),
     Unknown(u8)
 }
 
@@ -46,7 +47,7 @@ impl Decoder for AgentCodec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<AgentResponse>, AgentCodecError> {
 
-        let mut p = Input::from(&mut buf[..]);
+        let mut p = Context::from(&buf[..]);
 
         let len: usize = match Parser::parse(&mut p) {
             None => return Ok(None), // not enough input
@@ -84,8 +85,8 @@ impl From<std::io::Error> for AgentCodecError {
     }
 }
 
-impl Parser for AgentResponse {
-    fn parse(p: &mut Input) -> Option<Self> {
+impl <'s> Parser<'s> for AgentResponse {
+    fn parse(p: &mut Context<'s>) -> Option<Self> {
         match p.take_u8()? {
             12 => Parser::parse(p).map(AgentResponse::IdentitiesAnswer),
             n  => Some(AgentResponse::Unknown(n)),
