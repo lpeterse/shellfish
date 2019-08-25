@@ -1,3 +1,5 @@
+use num::BigUint;
+
 use crate::codec::{Encoder, Decoder};
 
 pub trait SshCodec<'a>: Sized {
@@ -92,5 +94,38 @@ impl <'a,T> SshCodec<'a> for Vec<T>
             v.push(SshCodec::decode(c)?);
         }
         Some(v)
+    }
+}
+
+impl <'a> SshCodec<'a> for BigUint
+{
+    fn size(&self) -> usize {
+        let vec = self.to_bytes_be();
+        let bytes = vec.as_slice();
+        if bytes[0] > 127 {
+            4 + 1 + bytes.len()
+        } else {
+            4 + bytes.len()
+        }
+    }
+    fn encode(&self, c: &mut Encoder<'a>) {
+        let vec = self.to_bytes_be();
+        let bytes = vec.as_slice(); // bytes is non-empty
+        if bytes[0] > 127 {
+            c.push_u32be(1 + bytes.len() as u32);
+            c.push_u8(0);
+            c.push_bytes(bytes);
+        } else {
+            c.push_u32be(bytes.len() as u32);
+            c.push_bytes(bytes);
+        }
+    }
+    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+        let len = c.take_u32be()?;
+        let bytes = c.take_bytes(len as usize)?;
+        if bytes.is_empty() { return None; };
+        let mut i = 0;
+        while i < bytes.len() && bytes[i] == 0 { i += 1 };
+        Some(BigUint::from_bytes_be(&bytes[i..]))
     }
 }
