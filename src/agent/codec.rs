@@ -11,7 +11,7 @@ pub enum AgentRequest {
 }
 
 pub enum AgentResponse {
-    IdentitiesAnswer(Vec<(PublicKey,String)>),
+    IdentitiesAnswer(Vec<(PublicKey, String)>),
     Unknown(u8)
 }
 
@@ -63,7 +63,7 @@ impl codec::Decoder for AgentCodec {
             return Ok(None); // not enough input
         }
 
-        match SshCode::decode(&mut p) {
+        match SshCodec::decode(&mut p) {
             None => Err(AgentCodecError::SyntaxError),
             Some(r) => {
                 buf.advance(4 + len); // remove from input buffer
@@ -86,7 +86,7 @@ impl From<std::io::Error> for AgentCodecError {
     }
 }
 
-impl <'s> SshCode<'s> for AgentResponse {
+impl <'s> SshCodec<'s> for AgentResponse {
     fn size(&self) -> usize {
         panic!("")
     }
@@ -95,7 +95,7 @@ impl <'s> SshCode<'s> for AgentResponse {
     }
     fn decode(p: &mut Decoder<'s>) -> Option<Self> {
         match p.take_u8()? {
-            12 => panic!(""), //Decode::decode(p).map(AgentResponse::IdentitiesAnswer),
+            12 => Some(AgentResponse::IdentitiesAnswer(SshCodec::decode(p)?)),
             n  => Some(AgentResponse::Unknown(n)),
         }
     }

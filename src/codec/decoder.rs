@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Copy, Clone, Debug)]
 pub struct Decoder<'a> (pub &'a [u8]);
 
 impl <'a> Decoder<'a> {
@@ -86,9 +87,15 @@ impl <'a> Decoder<'a> {
         Some(r)
     }
 
-    //pub fn take_context(self: &mut Self, n: usize) -> Option<Decoder<'a>> {
-    //    self.take_bytes(n).map(Decoder)
-    //}
+    pub fn take_decoder(self: &mut Self, len: usize) -> Option<Self> {
+        if self.0.len() < len {
+            None
+        } else {
+            let r = &self.0[..len];
+            self.0 = &self.0[len..];
+            Some(Self(r))
+        }
+    }
 }
 
 impl <'a> From<&'a [u8]> for Decoder<'a> {

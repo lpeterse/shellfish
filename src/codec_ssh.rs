@@ -1,64 +1,96 @@
-use crate::codec::{Codec, Encoder, Decoder};
+use crate::codec::{Encoder, Decoder};
 
-pub trait SshCode<'a>: Sized {
+pub trait SshCodec<'a>: Sized {
     fn size(&self) -> usize;
     fn encode(&self, c: &mut Encoder<'a>);
     fn decode(c: &mut Decoder<'a>) -> Option<Self>;
 }
 
-pub struct Ssh<T> (pub T);
-
-impl <'a,T> Codec<'a> for Ssh<T>
-    where
-        T: SshCode<'a>
-{
+impl <'a> SshCodec<'a> for String {
     fn size(&self) -> usize {
-        self.0.size()
+        4 + self.as_bytes().len()
     }
     fn encode(&self, c: &mut Encoder<'a>) {
-        self.0.encode(c)
+        c.push_u32be(self.as_bytes().len() as u32);
+        c.push_string(self);
     }
     fn decode(c: &mut Decoder<'a>) -> Option<Self> {
-        SshCode::decode(c).map(Ssh)
+        let len = c.take_u32be()?;
+        c.take_string(len as usize)
     }
 }
 
-/*
-impl <'s> Code<'s> for usize {
-    fn size(&self) {}
-    fn decode(c: &mut Decoder<'s>) -> Option<Self> {
-        let n = c.take_u32be()?;
-        Some(n as usize)
+impl <'a> SshCodec<'a> for &'a str {
+    fn size(&self) -> usize {
+        4 + self.as_bytes().len()
+    }
+    fn encode(&self, c: &mut Encoder<'a>) {
+        c.push_u32be(self.as_bytes().len() as u32);
+        c.push_str(self);
+    }
+    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+        let len = c.take_u32be()?;
+        c.take_str(len as usize)
     }
 }
 
-impl <'s> Decode<'s> for String {
-    fn decode(c: &mut Decoder) -> Option<Self> {
-        let size = Decode::decode(c)?;
-        c.take_string(size)
-    }
-}
-
-impl <'s,T> Decode<'s> for Vec<T>
-    where
-        T: Decode<'s>,
+impl <'a,T,Q> SshCodec<'a> for (T,Q)
+    where 
+        T: SshCodec<'a>,
+        Q: SshCodec<'a>,
 {
-    fn decode(c: &mut Decoder<'s>) -> Option<Self> {
-        let n = Decode::decode(c)?;
-        let mut v = Vec::with_capacity(n);
-        for _ in 0..n {
-            v.push(Decode::decode(c)?);
+    fn size(&self) -> usize {
+        self.0.size() + self.1.size()
+    }
+    fn encode(&self, c: &mut Encoder<'a>) {
+        self.0.encode(c);
+        self.1.encode(c);
+    }
+    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+        let t = SshCodec::decode(c)?;
+        let q = SshCodec::decode(c)?;
+        Some((t,q))
+    }
+}
+
+impl <'a> SshCodec<'a> for Vec<u8>
+{
+    fn size(&self) -> usize {
+        4 + self.len()
+    }
+    fn encode(&self, c: &mut Encoder<'a>) {
+        c.push_u32be(self.len() as u32);
+        c.push_bytes(self.as_slice());
+    }
+    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+        let len = c.take_u32be()?;
+        Some(Vec::from(c.take_bytes(len as usize)?))
+    }
+}
+
+impl <'a,T> SshCodec<'a> for Vec<T>
+    where
+        T: SshCodec<'a>,
+{
+    fn size(&self) -> usize {
+        let mut r = 4;
+        for x in self {
+            r += x.size();
+        }
+        r
+    }
+    fn encode(&self, c: &mut Encoder<'a>) {
+        c.push_u32be(self.len() as u32);
+        for x in self {
+            SshCodec::encode(x, c);
+        }
+    }
+    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+        let len = c.take_u32be()?;
+        let mut v = Vec::with_capacity(len as usize);
+        for _ in 0..len {
+            v.push(SshCodec::decode(c)?);
         }
         Some(v)
     }
 }
-
-impl <'s> Decode<'s> for Decoder<'s> 
-{
-    fn decode(c: &mut Decoder<'s>) -> Option<Self> {
-        let n: u32 = c.take_u32be()?;
-        let r: &[u8] = c.take_bytes(n as usize)?;
-        Some(Decoder(&r))
-    }
-}
-*/
