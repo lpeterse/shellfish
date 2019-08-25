@@ -1,4 +1,3 @@
-use tokio::prelude::*;
 use rssh::agent::*;
 
 #[tokio::main]

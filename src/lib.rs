@@ -1,4 +1,4 @@
 pub mod agent;
-pub mod parser;
-pub mod parser_ext;
+pub mod codec;
+pub mod codec_ssh;
 pub mod keys;

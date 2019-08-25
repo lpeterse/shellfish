@@ -1,8 +1,8 @@
 use bytes::{BytesMut, BufMut};
-use tokio::codec::{Encoder, Decoder};
+use tokio::codec as codec;
 
-use crate::parser::*;
-use crate::parser_ext::*;
+use crate::codec::*;
+use crate::codec_ssh::*;
 use crate::keys::*;
 
 #[derive(Copy, Clone, Debug)]
@@ -25,7 +25,7 @@ impl Default for AgentCodec {
     }
 }
 
-impl Encoder for AgentCodec {
+impl codec::Encoder for AgentCodec {
     type Item = AgentRequest;
     type Error = AgentCodecError;
 
@@ -42,17 +42,17 @@ impl Encoder for AgentCodec {
     }
 }
 
-impl Decoder for AgentCodec {
+impl codec::Decoder for AgentCodec {
     type Item = AgentResponse;
     type Error = AgentCodecError;
 
     fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<AgentResponse>, AgentCodecError> {
 
-        let mut p = Context::from(&buf[..]);
+        let mut p = Decoder::from(&buf[..]);
 
-        let len: usize = match Parser::parse(&mut p) {
+        let len: usize = match p.take_u32be() {
             None => return Ok(None), // not enough input
-            Some(s) => s,
+            Some(s) => s as usize,
         };
 
         if len > self.max_packet_size {
@@ -63,7 +63,7 @@ impl Decoder for AgentCodec {
             return Ok(None); // not enough input
         }
 
-        match Parser::parse(&mut p) {
+        match SshCode::decode(&mut p) {
             None => Err(AgentCodecError::SyntaxError),
             Some(r) => {
                 buf.advance(4 + len); // remove from input buffer
@@ -86,10 +86,16 @@ impl From<std::io::Error> for AgentCodecError {
     }
 }
 
-impl <'s> Parser<'s> for AgentResponse {
-    fn parse(p: &mut Context<'s>) -> Option<Self> {
+impl <'s> SshCode<'s> for AgentResponse {
+    fn size(&self) -> usize {
+        panic!("")
+    }
+    fn encode(&self, c: &mut Encoder<'s>) {
+        panic!("")
+    }
+    fn decode(p: &mut Decoder<'s>) -> Option<Self> {
         match p.take_u8()? {
-            12 => Parser::parse(p).map(AgentResponse::IdentitiesAnswer),
+            12 => panic!(""), //Decode::decode(p).map(AgentResponse::IdentitiesAnswer),
             n  => Some(AgentResponse::Unknown(n)),
         }
     }
