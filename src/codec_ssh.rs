@@ -89,7 +89,9 @@ impl <'a,T> SshCodec<'a> for Vec<T>
     }
     fn decode(c: &mut Decoder<'a>) -> Option<Self> {
         let len = c.take_u32be()?;
-        let mut v = Vec::with_capacity(len as usize);
+        // NB: Don't use `with_capacity` here as it might
+        // lead to remote triggered resource exhaustion
+        let mut v = Vec::new();
         for _ in 0..len {
             v.push(SshCodec::decode(c)?);
         }
@@ -123,9 +125,48 @@ impl <'a> SshCodec<'a> for BigUint
     fn decode(c: &mut Decoder<'a>) -> Option<Self> {
         let len = c.take_u32be()?;
         let bytes = c.take_bytes(len as usize)?;
-        if bytes.is_empty() { return None; };
-        let mut i = 0;
-        while i < bytes.len() && bytes[i] == 0 { i += 1 };
-        Some(BigUint::from_bytes_be(&bytes[i..]))
+        if bytes.is_empty() {
+            Some(Self::from(0 as usize))
+        } else {
+            let mut i = 0;
+            while i < bytes.len() && bytes[i] == 0 { i += 1 };
+            Some(BigUint::from_bytes_be(&bytes[i..]))
+        }
+    }
+}
+
+pub enum NameList {}
+
+impl NameList {
+    pub fn size<T: AsRef<[u8]>>(vec: &Vec<T>) -> usize {
+        let mut size = 4;
+        let mut names = vec.iter();
+        if let Some(name) = names.next() {
+            size += name.as_ref().len();
+            for name in names {
+                size += 1 + name.as_ref().len();
+            }
+        }
+        size
+    }
+    pub fn encode<T: AsRef<[u8]>>(vec: &Vec<T>, c: &mut Encoder) {
+        c.push_u32be(NameList::size(vec) as u32 - 4);
+        let mut names = vec.iter();
+        if let Some(name) = names.next() {
+            c.push_bytes(name.as_ref());
+            for name in names {
+                c.push_u8(',' as u8);
+                c.push_bytes(name.as_ref());
+            }
+        }
+    }
+    pub fn decode<'a, T: std::convert::TryFrom<&'a [u8]>>(c: &mut Decoder<'a>) -> Option<Vec<T>> {
+        let len = c.take_u32be()?;
+        let bytes = c.take_bytes(len as usize)?;
+        let mut vec = Vec::new();
+        for name in bytes.split(|c| c == &(',' as u8)) {
+            vec.push(std::convert::TryFrom::try_from(name).ok()?);
+        }
+        vec.into()
     }
 }

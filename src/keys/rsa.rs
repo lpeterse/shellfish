@@ -1,9 +1,11 @@
 use num::BigUint;
+use quickcheck::{Arbitrary, Gen};
+use rand::Rng;
 
 use crate::codec::*;
 use crate::codec_ssh::*;
 
-#[derive(Clone, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub struct RsaPublicKey {
     pub public_e: BigUint,
     pub public_n: BigUint,
@@ -11,10 +13,12 @@ pub struct RsaPublicKey {
 
 impl <'a> SshCodec<'a> for RsaPublicKey {
     fn size(&self) -> usize {
-        0
+        SshCodec::size(&self.public_e) +
+        SshCodec::size(&self.public_n)
     }
-    fn encode(&self,c: &mut Encoder<'a>) {
-
+    fn encode(&self, c: &mut Encoder<'a>) {
+        SshCodec::encode(&self.public_e, c);
+        SshCodec::encode(&self.public_n, c);
     }
     fn decode(c: &mut Decoder<'a>) -> Option<Self> {
         let e = SshCodec::decode(c)?;
@@ -26,18 +30,30 @@ impl <'a> SshCodec<'a> for RsaPublicKey {
     }
 }
 
-/*
-getRsaPublicKey :: Get RSA.PublicKey
-getRsaPublicKey = do
-    (e,_) <- getIntegerAndSize
-    (n,s) <- getIntegerAndSize
-    when (s > 8192 `div` 8) (fail "key size not supported")
-    pure $ RSA.PublicKey s n e
-    where
-        -- Observing the encoded length is far cheaper than calculating the
-        -- log2 of the resulting integer.
-        getIntegerAndSize :: Get (Integer, Int)
-        getIntegerAndSize = do
-            ws <- dropWhile (== 0) . (BA.unpack :: BS.ByteString -> [Word8]) <$> getString -- remove leading 0 bytes
-            pure (foldl' (\acc w8-> acc * 256 + fromIntegral w8) 0 ws, length ws)
-*/
+impl Arbitrary for RsaPublicKey {
+    fn arbitrary<G: Gen>(g: &mut G) -> Self {
+        let e: usize = g.gen();
+        let n: usize = g.gen();
+        Self {
+            public_e: BigUint::from(e),
+            public_n: BigUint::from(n),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    extern crate quickcheck;
+    extern crate quickcheck_macros;
+    use quickcheck_macros::*;
+    use super::*;
+
+    #[quickcheck]
+    fn test_ssh_codec_quick(x: RsaPublicKey) -> bool {
+        let mut buf = vec![0;SshCodec::size(&x)];
+        let mut encoder = Encoder::from(&mut buf[..]);
+        SshCodec::encode(&x, &mut encoder);
+        let mut decoder = Decoder::from(&buf[..]);
+        SshCodec::decode(&mut decoder) == Some(x)
+    }
+}

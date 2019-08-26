@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug)]
 pub struct Encoder<'a> {
     pub pos: usize,
     pub buf: &'a mut [u8],
@@ -28,7 +29,7 @@ impl <'a> Encoder<'a> {
     }
 
     pub fn push_bytes(self: &mut Self, x: &[u8]) {
-        let b: &mut[u8] = &mut self.buf[self.pos..x.len()];
+        let b: &mut[u8] = &mut self.buf[self.pos..self.pos + x.len()];
         b.copy_from_slice(x);
         self.pos += x.len();
     }

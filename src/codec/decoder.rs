@@ -81,6 +81,17 @@ impl <'a> Decoder<'a> {
         }
     }
 
+    pub fn take_bytes_into(self: &mut Self, dst: &mut [u8]) -> Option<()> {
+        let len = dst.len();
+        if self.0.len() < len {
+            None
+        } else {
+            dst.copy_from_slice(&self.0[..len]);
+            self.0 = &self.0[len..];
+            Some(())
+        }
+    }
+
     pub fn take_all(self: &mut Self) -> Option<&'a [u8]> {
         let r = &self.0[..];
         self.0 = &self.0[0..0];
