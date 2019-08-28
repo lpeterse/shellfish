@@ -1,6 +1,5 @@
-use tokio::prelude::*;
-use tokio::net::unix::UnixStream;
-use tokio::codec::Framed;
+use async_std::prelude::*;
+use async_std::net::UnixStream;
 
 use self::codec::*;
 use crate::keys::PublicKey;

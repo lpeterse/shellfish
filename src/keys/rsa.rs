@@ -1,6 +1,4 @@
 use num::BigUint;
-use quickcheck::{Arbitrary, Gen};
-use rand::Rng;
 
 use crate::codec::*;
 use crate::codec_ssh::*;
@@ -27,33 +25,5 @@ impl <'a> SshCodec<'a> for RsaPublicKey {
             public_e: e,
             public_n: n,
         })
-    }
-}
-
-impl Arbitrary for RsaPublicKey {
-    fn arbitrary<G: Gen>(g: &mut G) -> Self {
-        let e: usize = g.gen();
-        let n: usize = g.gen();
-        Self {
-            public_e: BigUint::from(e),
-            public_n: BigUint::from(n),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    extern crate quickcheck;
-    extern crate quickcheck_macros;
-    use quickcheck_macros::*;
-    use super::*;
-
-    #[quickcheck]
-    fn test_ssh_codec_quick(x: RsaPublicKey) -> bool {
-        let mut buf = vec![0;SshCodec::size(&x)];
-        let mut encoder = Encoder::from(&mut buf[..]);
-        SshCodec::encode(&x, &mut encoder);
-        let mut decoder = Decoder::from(&buf[..]);
-        SshCodec::decode(&mut decoder) == Some(x)
     }
 }

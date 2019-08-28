@@ -1,97 +1,98 @@
 mod message;
 
 pub use self::message::*;
-
-use crate::algorithms::*;
 use crate::codec::*;
 use crate::codec_ssh::*;
-use crate::language::*;
 
-#[derive(Debug,Clone,Copy)]
-pub struct KexCookie ([u8;16]);
+use std::char;
+use async_std::task::{spawn, JoinHandle, sleep};
+use async_std::io::{Read, Write};
 
-#[derive(Debug,Clone)]
-pub struct KexInit {
-    pub cookie: KexCookie,
-    pub kex_algorithms: Vec<KexAlgorithm>,
-    pub server_host_key_algorithms: Vec<HostKeyAlgorithm>,
-    pub encryption_algorithms_client_to_server: Vec<EncryptionAlgorithm>,
-    pub encryption_algorithms_server_to_client: Vec<EncryptionAlgorithm>,
-    pub mac_algorithms_client_to_server: Vec<MacAlgorithm>,
-    pub mac_algorithms_server_to_client: Vec<MacAlgorithm>,
-    pub compression_algorithms_client_to_server: Vec<CompressionAlgorithm>,
-    pub compression_algorithms_server_to_client: Vec<CompressionAlgorithm>,
-    pub languages_client_to_server: Vec<Language>,
-    pub languages_server_to_client: Vec<Language>,
-    pub first_packet_follows: bool
+pub struct Transport {
+    task: JoinHandle<()>
 }
 
-impl KexInit {
-    pub fn new(cookie: KexCookie) -> Self {
+impl Transport{
+    pub async fn new<T: Read + Write>(stream: T) -> Self {
+        let task = spawn(async move {
+            sleep(std::time::Duration::from_secs(2)).await;
+            println!("HUHU");
+        });
+
         Self {
-            cookie: cookie,
-            kex_algorithms: vec![KexAlgorithm::Curve25519Sha256AtLibsshDotOrg],
-            server_host_key_algorithms: vec![HostKeyAlgorithm::SshEd25519],
-            encryption_algorithms_client_to_server: vec![EncryptionAlgorithm::Chacha20Poly1305AtOpensshDotCom],
-            encryption_algorithms_server_to_client: vec![EncryptionAlgorithm::Chacha20Poly1305AtOpensshDotCom],
-            mac_algorithms_client_to_server: vec![],
-            mac_algorithms_server_to_client: vec![],
-            compression_algorithms_client_to_server: vec![],
-            compression_algorithms_server_to_client: vec![],
-            languages_client_to_server: vec![],
-            languages_server_to_client: vec![],
-            first_packet_follows: false
+            task
         }
     }
 }
 
-impl <'a> SshCodec<'a> for KexInit {
+#[derive(Clone)]
+pub struct Identification {
+    version: Vec<u8>,
+    comment: Option<Vec<u8>>,
+}
+
+impl <'a> SshCodec<'a> for Identification {
     fn size(&self) -> usize {
-        1 + 16 + 1 + 4
-        + NameList::size(&self.kex_algorithms)
-        + NameList::size(&self.server_host_key_algorithms)
-        + NameList::size(&self.encryption_algorithms_client_to_server)
-        + NameList::size(&self.encryption_algorithms_server_to_client)
-        + NameList::size(&self.mac_algorithms_client_to_server)
-        + NameList::size(&self.mac_algorithms_server_to_client)
-        + NameList::size(&self.compression_algorithms_client_to_server)
-        + NameList::size(&self.compression_algorithms_server_to_client)
-        + NameList::size(&self.languages_client_to_server)
-        + NameList::size(&self.languages_server_to_client)
+        b"SSH-2.0-".len()
+        + self.version.len()
+        + match self.comment { None => 0, Some(ref x) => 1 + x.len() }
+        + 2 
     }
     fn encode(&self, c: &mut Encoder<'a>) {
-        c.push_u8(20);
-        c.push_bytes(&self.cookie.0[..]);
-        NameList::encode(&self.kex_algorithms,c);
-        NameList::encode(&self.server_host_key_algorithms,c);
-        NameList::encode(&self.encryption_algorithms_client_to_server,c);
-        NameList::encode(&self.encryption_algorithms_server_to_client,c);
-        NameList::encode(&self.mac_algorithms_client_to_server,c);
-        NameList::encode(&self.mac_algorithms_server_to_client,c);
-        NameList::encode(&self.compression_algorithms_client_to_server,c);
-        NameList::encode(&self.compression_algorithms_server_to_client,c);
-        NameList::encode(&self.languages_client_to_server,c);
-        NameList::encode(&self.languages_server_to_client,c);
-        c.push_u8(self.first_packet_follows as u8);
-        c.push_u32be(0);
+        c.push_bytes(b"SSH-2.0-");
+        c.push_bytes(&self.version);
+        match self.comment { None => (), Some(ref x) => { c.push_u8(0x20); c.push_bytes(&x); }};
+        c.push_u8(0x0d);
+        c.push_u8(0x0a);
     }
     fn decode(c: &mut Decoder<'a>) -> Option<Self> {
-        c.take_u8().and_then(|x| if x == 20 { Some(()) } else { None })?;
-        let r = Self {
-            cookie: { let mut x = [0;16]; c.take_bytes_into(&mut x)?; KexCookie(x) },
-            kex_algorithms: NameList::decode(c)?,
-            server_host_key_algorithms: NameList::decode(c)?,
-            encryption_algorithms_client_to_server: NameList::decode(c)?,
-            encryption_algorithms_server_to_client: NameList::decode(c)?,
-            mac_algorithms_client_to_server: NameList::decode(c)?,
-            mac_algorithms_server_to_client: NameList::decode(c)?,
-            compression_algorithms_client_to_server: NameList::decode(c)?,
-            compression_algorithms_server_to_client: NameList::decode(c)?,
-            languages_client_to_server: NameList::decode(c)?,
-            languages_server_to_client: NameList::decode(c)?,
-            first_packet_follows: c.take_u8().map(|x| x != 0)?,
-        };
-        c.take_u32be()?;
-        r.into()
+        c.match_bytes(b"SSH-2.0-")?;
+        let version = c.take_while(|x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != 0x13)?;
+        match c.take_u8() {
+            Some(0x13) => {
+                c.take_u8().filter(|x| *x == 0x10)?;
+                Some(Self { version: version.into(), comment: None })
+            },
+            Some(0x20) => {
+                let comment = c.take_while(|x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != 0x13)?;
+                c.take_u8().filter(|x| *x == 0x10)?;
+                Some(Self { version: version.into(), comment: Some(comment.into()) })
+            },
+            _ => None,
+        }
+    }
+}
+
+async fn read_version_string<T: Read + futures::io::AsyncRead + Unpin>(mut stream: T) -> async_std::io::Result<(Identification, Vec<u8>)> {
+
+    let mut buf = [0;255];
+
+    loop {
+        let len = Read::read(&mut stream, &mut buf).await?;
+        fn take_line<'a>(input: &'a [u8]) -> Option<&'a [u8]> {
+            let mut d = Decoder(input);
+            let v = d.take_while(|x| x != 0x13)?;
+            d.take_u8().filter(|x| *x == 0x13)?;
+            d.take_u8().filter(|x| *x == 0x10)?;
+            Some(v)
+        }
+        //take_line(len);
+        panic!("")
+    }
+}
+
+
+pub struct RingBuffer<T> {
+    off: usize,
+    len: usize,
+    buf: T
+}
+
+impl <T> RingBuffer<T> {
+    pub fn shrink(&mut self, len: usize) {
+
+    }
+    pub fn extend(&mut self, len: usize) {
+
     }
 }

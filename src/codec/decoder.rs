@@ -16,6 +16,10 @@ impl <'a> Decoder<'a> {
         Codec::decode(self)
     }
 
+    pub fn match_bytes(self: &mut Self, bytes: &[u8]) -> Option<()> {
+        self.take_bytes(bytes.len()).filter(|x| *x == bytes).map(drop)
+    }
+
     pub fn take_u8(self: &mut Self) -> Option<u8> {
         let (head, tail) = self.0.split_first()?;
         self.0 = tail;
@@ -97,6 +101,13 @@ impl <'a> Decoder<'a> {
         self.0 = &self.0[0..0];
         Some(r)
     }
+
+    pub fn take_while<F>(self: &mut Self, pred: F) -> Option<&'a [u8]> 
+        where
+            F: FnOnce(u8) -> bool + Sized
+    {
+        panic!("take_while")
+    } 
 
     pub fn take_decoder(self: &mut Self, len: usize) -> Option<Self> {
         if self.0.len() < len {
