@@ -1,24 +1,29 @@
+use std::convert::TryFrom;
+
 #[derive(Debug,Clone)]
 pub enum HostKeyAlgorithm {
     SshEd25519,
-    Unknown(Vec<u8>),
+    Unknown(String),
 }
 
 impl AsRef<[u8]> for HostKeyAlgorithm {
     fn as_ref(&self) -> &[u8] {
         match self {
             HostKeyAlgorithm::SshEd25519 => b"ssh-ed25519",
-            HostKeyAlgorithm::Unknown(s) => s,
+            HostKeyAlgorithm::Unknown(s) => s.as_bytes(),
         }
     }
 }
 
-impl From<&[u8]> for HostKeyAlgorithm {
-    fn from(x: &[u8]) -> Self {
-        if x == HostKeyAlgorithm::SshEd25519.as_ref() {
+impl TryFrom<&[u8]> for HostKeyAlgorithm {
+
+    type Error = std::string::FromUtf8Error;
+
+    fn try_from(x: &[u8]) -> Result<Self, std::string::FromUtf8Error> {
+        Ok(if x == HostKeyAlgorithm::SshEd25519.as_ref() {
             HostKeyAlgorithm::SshEd25519
         } else {
-            HostKeyAlgorithm::Unknown(Vec::from(x))
-        }
+            HostKeyAlgorithm::Unknown(String::from_utf8(Vec::from(x))?)
+        })
     }
 }

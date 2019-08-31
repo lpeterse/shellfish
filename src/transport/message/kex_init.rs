@@ -3,8 +3,19 @@ use crate::codec::*;
 use crate::codec_ssh::*;
 use crate::language::*;
 
+use rand::rngs::{OsRng};
+use rand::{RngCore};
+
 #[derive(Debug,Clone,Copy)]
 pub struct KexCookie ([u8;16]);
+
+impl KexCookie {
+    pub fn new() -> Self {
+        let mut cookie: [u8;16] = [0;16];
+        OsRng.fill_bytes(&mut cookie);
+        Self(cookie)
+    }
+}
 
 #[derive(Debug,Clone)]
 pub struct KexInit {
@@ -32,8 +43,8 @@ impl KexInit {
             encryption_algorithms_server_to_client: vec![EncryptionAlgorithm::Chacha20Poly1305AtOpensshDotCom],
             mac_algorithms_client_to_server: vec![],
             mac_algorithms_server_to_client: vec![],
-            compression_algorithms_client_to_server: vec![],
-            compression_algorithms_server_to_client: vec![],
+            compression_algorithms_client_to_server: vec![CompressionAlgorithm::None],
+            compression_algorithms_server_to_client: vec![CompressionAlgorithm::None],
             languages_client_to_server: vec![],
             languages_server_to_client: vec![],
             first_packet_follows: false

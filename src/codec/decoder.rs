@@ -5,8 +5,16 @@ pub struct Decoder<'a> (pub &'a [u8]);
 
 impl <'a> Decoder<'a> {
 
+    pub fn is_empty(self: &Self) -> bool {
+        self.0.is_empty()
+    }
+
     pub fn remaining(self: &Self) -> usize {
         self.0.len()
+    }
+
+    pub fn take_eoi(self: &Self) -> Option<()> {
+        if self.0.is_empty() { Some(()) } else { None }
     }
 
     pub fn take<T>(self: &mut Self) -> Option<T>
@@ -102,11 +110,17 @@ impl <'a> Decoder<'a> {
         Some(r)
     }
 
-    pub fn take_while<F>(self: &mut Self, pred: F) -> Option<&'a [u8]> 
+    pub fn take_while<F>(self: &mut Self, mut pred: F) -> Option<&'a [u8]> 
         where
-            F: FnOnce(u8) -> bool + Sized
+            F: FnMut(u8) -> bool + Sized
     {
-        panic!("take_while")
+        let mut i = 0;
+        while i < self.0.len() && pred(self.0[i]) {
+            i += 1;
+        }
+        let r = &self.0[..i];
+        self.0 = &self.0[i..];
+        Some(r)
     } 
 
     pub fn take_decoder(self: &mut Self, len: usize) -> Option<Self> {

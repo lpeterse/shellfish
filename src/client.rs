@@ -16,17 +16,36 @@ impl Client {
         Client {}
     }
 
-    pub async fn connect<A: ToSocketAddrs>(self, addr: A) -> Connection {
-        let stream = TcpStream::connect(addr).await.unwrap();
-        let transport: Transport = Transport::new(stream).await;
-        Connection {
+    pub async fn connect<A: ToSocketAddrs>(self, addr: A) -> Result<Connection, ConnectError> {
+
+        let stream = TcpStream::connect(addr)
+            .await
+            .map_err(ConnectError::ConnectError)?;
+
+        let mut transport: Transport<TcpStream> = Transport::new(stream)
+            .await
+            .map_err(ConnectError::TransportError)?;
+
+        let msg: Message<&'static [u8]> = Message(b"sdjkah");
+        let mut commands = futures::future::ready(msg);
+
+        Ok(Connection {
             transport
-        }
+        })
     }
 }
 
+pub enum ConnectError {
+    ConnectError(std::io::Error),
+    TransportError(TransportError),
+}
+
 pub struct Connection {
-    transport: Transport,
+    transport: Transport<TcpStream>,
+}
+
+impl Connection {
+
 }
 
 pub struct Session {

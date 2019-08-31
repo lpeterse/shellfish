@@ -1,98 +1,103 @@
+mod error;
+mod identification;
 mod message;
+mod packet;
 
 pub use self::message::*;
+pub use self::identification::*;
+pub use self::error::*;
+pub use self::packet::*;
+
+use crate::buffer::*;
 use crate::codec::*;
 use crate::codec_ssh::*;
 
-use std::char;
+use std::convert::{From};
 use async_std::task::{spawn, JoinHandle, sleep};
 use async_std::io::{Read, Write};
+use futures::stream::Stream;
+use futures::io::{AsyncRead,AsyncWrite};
 
-pub struct Transport {
-    task: JoinHandle<()>
+pub struct Transport<T> {
+    stream: Buffer<T>,
+    buf: [u8;32000],
 }
 
-impl Transport{
-    pub async fn new<T: Read + Write>(stream: T) -> Self {
-        let task = spawn(async move {
-            sleep(std::time::Duration::from_secs(2)).await;
-            println!("HUHU");
-        });
+impl <T> Transport<T> 
+    where
+        T: Read + futures::io::AsyncRead + Unpin,
+        T: Write + futures::io::AsyncWrite + Unpin,
+{
 
-        Self {
-            task
-        }
+    pub async fn new(mut stream: T) -> TransportResult<Self> {
+        let mut buffer = Buffer::new(stream);
+
+        // Send own version string
+        let id = Identification::default();
+        let mut enc = Encoder::from(buffer.alloc(SshCodec::size(&id) + 2).await?);
+        SshCodec::encode(&id, &mut enc);
+        enc.push_u8('\r' as u8);
+        enc.push_u8('\n' as u8);
+        buffer.flush().await?;
+
+        // Drop lines until remote SSH-2.0- version string is recognized
+        let id: Identification = loop {
+            let line = buffer.read_line(Identification::MAX_LEN).await?;
+            match SshCodec::decode(&mut Decoder(line)) {
+                None => (),
+                Some(id) => break id,
+            }
+        };
+
+        // Read packet size
+        //buffer.fetch(8).await?; // Don't decode size before 8 bytes have arrived
+        let packet_size = Decoder(buffer.read_exact(4).await?).take_u32be().unwrap() as usize;
+        println!("SIZE {}", packet_size);
+        let packet = &mut buffer.read_exact(packet_size).await?[1..];
+        println!("{:?}, {:?}, {:?}", id, Identification::default(), packet);
+        let packet: KexInit = SshCodec::decode(&mut Decoder(packet)).unwrap();
+        println!("{:?}, {:?}, {:?}", id, Identification::default(), packet);
+
+        // Send KexInit packet
+        let packet = Packet::new(KexInit::new(KexCookie::new()));
+        let packet_size = SshCodec::size(&packet);
+        let mut enc = Encoder::from(buffer.alloc(4 + packet_size).await?);
+        println!("PPPP {}", 4 + packet_size);
+        enc.push_u32be(packet_size as u32);
+        SshCodec::encode(&packet, &mut enc);
+        buffer.flush().await?;
+
+        // Read next packet
+        let packet_size = Decoder(buffer.read_exact(4).await?).take_u32be().unwrap() as usize;
+        println!("SIZE {}", packet_size);
+        //let packet = 
+
+        //let a = buffer.read(255).await?;
+        //let mut buf = [0;255];
+        //SshCodec::encode(&)
+        //Identification::default().write(&mut stream, &mut buffer).await?;
+        //let (id, leftover) = Identification::read(&mut stream, &mut buf).await?;
+
+
+        //let mut buf_read = Vec::from(leftover);
+        //let mut buf_write = Vec::with_capacity(32000);
+
+        //let cookie = initial_kex().await?;
+
+        Ok(Self {
+            stream: buffer,
+            buf: [0;32000],
+        })
     }
-}
 
-#[derive(Clone)]
-pub struct Identification {
-    version: Vec<u8>,
-    comment: Option<Vec<u8>>,
-}
-
-impl <'a> SshCodec<'a> for Identification {
-    fn size(&self) -> usize {
-        b"SSH-2.0-".len()
-        + self.version.len()
-        + match self.comment { None => 0, Some(ref x) => 1 + x.len() }
-        + 2 
+    pub async fn read_message<'a>(&'a mut self) -> TransportResult<Message<&'a [u8]>> {
+        Ok(Message(&self.buf[23..]))
     }
-    fn encode(&self, c: &mut Encoder<'a>) {
-        c.push_bytes(b"SSH-2.0-");
-        c.push_bytes(&self.version);
-        match self.comment { None => (), Some(ref x) => { c.push_u8(0x20); c.push_bytes(&x); }};
-        c.push_u8(0x0d);
-        c.push_u8(0x0a);
-    }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
-        c.match_bytes(b"SSH-2.0-")?;
-        let version = c.take_while(|x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != 0x13)?;
-        match c.take_u8() {
-            Some(0x13) => {
-                c.take_u8().filter(|x| *x == 0x10)?;
-                Some(Self { version: version.into(), comment: None })
-            },
-            Some(0x20) => {
-                let comment = c.take_while(|x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != 0x13)?;
-                c.take_u8().filter(|x| *x == 0x10)?;
-                Some(Self { version: version.into(), comment: Some(comment.into()) })
-            },
-            _ => None,
-        }
-    }
-}
 
-async fn read_version_string<T: Read + futures::io::AsyncRead + Unpin>(mut stream: T) -> async_std::io::Result<(Identification, Vec<u8>)> {
-
-    let mut buf = [0;255];
-
-    loop {
-        let len = Read::read(&mut stream, &mut buf).await?;
-        fn take_line<'a>(input: &'a [u8]) -> Option<&'a [u8]> {
-            let mut d = Decoder(input);
-            let v = d.take_while(|x| x != 0x13)?;
-            d.take_u8().filter(|x| *x == 0x13)?;
-            d.take_u8().filter(|x| *x == 0x10)?;
-            Some(v)
-        }
-        //take_line(len);
+    pub async fn write_message<X: AsRef<[u8]>>(&mut self, msg: Message<X>) -> TransportResult<()> {
         panic!("")
     }
 }
 
+pub struct Message<T: AsRef<[u8]>> (pub T);
 
-pub struct RingBuffer<T> {
-    off: usize,
-    len: usize,
-    buf: T
-}
-
-impl <T> RingBuffer<T> {
-    pub fn shrink(&mut self, len: usize) {
-
-    }
-    pub fn extend(&mut self, len: usize) {
-
-    }
-}
