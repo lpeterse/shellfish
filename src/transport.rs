@@ -9,6 +9,7 @@ pub use self::error::*;
 pub use self::packet::*;
 
 use crate::buffer::*;
+use crate::keys::*;
 use crate::codec::*;
 use crate::codec_ssh::*;
 
@@ -67,10 +68,21 @@ impl <T> Transport<T>
         SshCodec::encode(&packet, &mut enc);
         buffer.flush().await?;
 
+        // Send KexEcdhInit packet
+        let packet = Packet::new(KexEcdhInit::new(Ed25519PublicKey::new()));
+        let packet_size = SshCodec::size(&packet);
+        let mut enc = Encoder::from(buffer.alloc(4 + packet_size).await?);
+        enc.push_u32be(packet_size as u32);
+        SshCodec::encode(&packet, &mut enc);
+        buffer.flush().await?;
+
         // Read next packet
         let packet_size = Decoder(buffer.read_exact(4).await?).take_u32be().unwrap() as usize;
         println!("SIZE {}", packet_size);
-        //let packet = 
+        let packet = &mut buffer.read_exact(packet_size).await?[1..];
+        println!("{:?}", packet);
+        let packet: KexEcdhReply = SshCodec::decode(&mut Decoder(packet)).unwrap();
+        println!("{:?}", packet);
 
         //let a = buffer.read(255).await?;
         //let mut buf = [0;255];

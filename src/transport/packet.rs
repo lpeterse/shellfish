@@ -1,6 +1,11 @@
 use crate::codec_ssh::*;
 use crate::codec::*;
 
+const BLOCK_SIZE: usize = 8;
+const PADDING_MIN_SIZE: usize = 4;
+const PACKET_LEN_SIZE: usize = 4;
+const PADDING_LEN_SIZE: usize = 1;
+
 pub struct Packet<T> {
     payload: T
 }
@@ -14,7 +19,6 @@ impl <T> Packet<T> {
 impl <'a, T: SshCodec<'a>> SshCodec<'a> for Packet<T> {
     fn size(&self) -> usize {
         let s = self.payload.size();
-        println!("SSS {}", 1 + s + padding_by_payload_size(s));
         1 + s + padding_by_payload_size(s)
     }
     fn encode(&self, c: &mut Encoder<'a>) {
@@ -26,18 +30,13 @@ impl <'a, T: SshCodec<'a>> SshCodec<'a> for Packet<T> {
         }
     }
     fn decode(c: &mut Decoder<'a>) -> Option<Self> {
-        let padding = c.take_u8()?;
+        let _padding = c.take_u8().filter(|x| x % 8 == 0)?;
         let payload =  SshCodec::decode(c)?;
         Some(Packet { payload })
     }
 }
 
 fn padding_by_payload_size(payload_size: usize) -> usize {
-    const BLOCK_SIZE: usize = 16;
-    const PADDING_MIN_SIZE: usize = 4;
-    const PACKET_LEN_SIZE: usize = 4;
-    const PADDING_LEN_SIZE: usize = 1;
-
     let len = PACKET_LEN_SIZE + PADDING_LEN_SIZE + payload_size;
     let padding = BLOCK_SIZE - (len % BLOCK_SIZE);
 
