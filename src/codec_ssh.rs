@@ -170,3 +170,30 @@ impl NameList {
         vec.into()
     }
 }
+
+pub struct MPInt<'a> (&'a [u8]);
+
+impl <'a> SshCodec<'a> for MPInt<'a> {
+    fn size(&self) -> usize {
+        4 + if self.0[0] > 127 { 1 } else { 0 } + self.0.len()
+    }
+    fn encode(&self, c: &mut Encoder<'a>) {
+        let len = self.0.len();
+        if self.0[0] > 127 {
+            c.push_u32be(len as u32 + 1);
+            c.push_u8(0);
+        } else {
+            c.push_u32be(len as u32);
+        }
+        c.push_bytes(self.0);
+    }
+    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+        let len = c.take_u32be()? as usize;
+        let bytes = c.take_bytes(len)?;
+        if bytes[0] > 127 { // TODO: out of bounds
+            Some(MPInt(&bytes[1..]))
+        } else {
+            Some(MPInt(bytes))
+        }
+    }
+}

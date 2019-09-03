@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub enum EncryptionAlgorithm {
     Chacha20Poly1305AtOpensshDotCom,
     Unknown(String)

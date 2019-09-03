@@ -3,8 +3,8 @@ use crate::codec::*;
 use crate::codec_ssh::*;
 use crate::language::*;
 
-use rand::rngs::{OsRng};
-use rand::{RngCore};
+use rand_core::RngCore;
+use rand_os::OsRng;
 
 #[derive(Debug,Clone,Copy)]
 pub struct KexCookie ([u8;16]);
@@ -12,7 +12,7 @@ pub struct KexCookie ([u8;16]);
 impl KexCookie {
     pub fn new() -> Self {
         let mut cookie: [u8;16] = [0;16];
-        OsRng.fill_bytes(&mut cookie);
+        OsRng::new().unwrap().fill_bytes(&mut cookie);
         Self(cookie)
     }
 }

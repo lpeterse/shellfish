@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub enum HostKeyAlgorithm {
     SshEd25519,
     Unknown(String),

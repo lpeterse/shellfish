@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-#[derive(Debug,Clone)]
+#[derive(Debug,Clone,PartialEq)]
 pub enum KexAlgorithm {
     Curve25519Sha256AtLibsshDotOrg,
     Unknown(String),
