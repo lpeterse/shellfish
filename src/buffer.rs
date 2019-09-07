@@ -10,7 +10,7 @@ pub struct Buffer<S> {
     read_buf: Box<[u8]>,
     read_rng: Range<usize>,
     write_buf: Box<[u8]>,
-    write_rng: Range<usize>,
+    write_end: usize,
 }
 
 impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
@@ -25,7 +25,7 @@ impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
             read_buf: vec(),
             read_rng: Range { start: 0, end: 0 },
             write_buf: vec(),
-            write_rng: Range { start: 0, end: 0 },
+            write_end: 0,
         }
     }
 
@@ -89,6 +89,15 @@ impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
         }
     }
 
+    pub async fn peek_exact(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
+        while self.read_rng.len() < len {
+            if self.fill().await? == 0 {
+                return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "during buffer.peek_exact()"))
+            }
+        }
+        Ok(&mut self.read_buf[self.read_rng.start ..][.. len])
+    }
+
     pub async fn read_exact(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
         while self.read_rng.len() < len {
             if self.fill().await? == 0 {
@@ -129,13 +138,34 @@ impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
     }
 
     pub async fn alloc(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
-        self.write_rng.end += len;
-        Ok(&mut self.write_buf[..])
+        let available = self.write_buf.len() - self.write_end;
+        if available < len {
+            self.flush().await?;
+        }
+        let available = self.write_buf.len();
+        if available < len {
+            let mut new_size = available;
+            loop {
+                new_size *= 2;
+                if new_size >= MAX_BUFFER_SIZE {
+                    return Err(std::io::Error::new(std::io::ErrorKind::Other, "max buffer size exhausted"))
+                };
+                if new_size >= len {
+                    break
+                };
+            }
+            let mut vec = Vec::with_capacity(new_size);
+            vec.resize(new_size, 0);
+            self.write_buf = vec.into_boxed_slice();
+        }
+        let start = self.write_end;
+        self.write_end += len;
+        Ok(&mut self.write_buf[start .. self.write_end])
     }
 
     pub async fn flush(&mut self) -> async_std::io::Result<()> {
-        self.stream.write_all(&self.write_buf[.. self.write_rng.end]).await?;
-        self.write_rng.end = 0;
+        self.stream.write_all(&self.write_buf[.. self.write_end]).await?;
+        self.write_end = 0;
         Ok(())
     }
 }
@@ -171,17 +201,17 @@ mod test {
     }
 
     impl AsyncWrite for ChunkedStream {
-        fn poll_write(self: std::pin::Pin<&mut Self>, cx: &mut futures::task::Context, buf: &[u8])
+        fn poll_write(self: std::pin::Pin<&mut Self>, _cx: &mut futures::task::Context, _buf: &[u8])
             -> futures::task::Poll<Result<usize, futures::io::Error>> {
             panic!("")
         }
 
-        fn poll_flush(self: std::pin::Pin<&mut Self>, cx: &mut futures::task::Context)
+        fn poll_flush(self: std::pin::Pin<&mut Self>, _cx: &mut futures::task::Context)
              -> futures::task::Poll<Result<(), futures::io::Error>> {
             panic!("")
         }
 
-        fn poll_close(self: std::pin::Pin<&mut Self>, cx: &mut futures::task::Context)
+        fn poll_close(self: std::pin::Pin<&mut Self>, _cx: &mut futures::task::Context)
             -> futures::task::Poll<Result<(), futures::io::Error>> {
             panic!("")
         }
@@ -319,7 +349,7 @@ mod test {
             let r = ChunkedStream(vec![vec![1,2], vec![3,4]]);
             let mut b = Buffer::new(r);
             assert_eq!(b.read_exact(3).await.unwrap(), [1,2,3]);
-            assert_eq!(b.read_exact(3).await.unwrap(), []);
+            assert!(b.read_exact(3).await.unwrap_err().kind() == std::io::ErrorKind::UnexpectedEof);
         });
     }
 

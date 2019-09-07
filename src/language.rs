@@ -1,5 +1,7 @@
+use std::convert::TryFrom;
+
 #[derive(Debug,Clone)]
-pub struct Language (Vec<u8>);
+pub struct Language (String);
 
 impl AsRef<[u8]> for Language {
     fn as_ref(&self) -> &[u8] {
@@ -7,8 +9,10 @@ impl AsRef<[u8]> for Language {
     }
 }
 
-impl From<&[u8]> for Language {
-    fn from(x: &[u8]) -> Self {
-        Self(Vec::from(x))
+impl TryFrom<&[u8]> for Language {
+    type Error = std::string::FromUtf8Error;
+
+    fn try_from(x: &[u8]) -> Result<Self,Self::Error> {
+        Ok(Self(String::from_utf8(Vec::from(x))?))
     }
 }

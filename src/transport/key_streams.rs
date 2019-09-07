@@ -1,23 +1,24 @@
 use sha2::{Sha256, Digest};
 
+#[derive(Debug)]
 pub enum KeyStreams {
     KeyStreamsSha256(KeyStreamsSha256)
 }
 
 impl KeyStreams {
-    pub fn new_sha256(k: &[u8], h: &[u8], sid: &[u8]) -> Self {
-        KeyStreams::KeyStreamsSha256(KeyStreamsSha256::new(k, h, sid))
+    pub fn new_sha256<S: AsRef<[u8]>>(k: &[u8], h: &[u8], sid: S) -> Self {
+        Self::KeyStreamsSha256(KeyStreamsSha256::new(k, h, sid.as_ref()))
     }
 
     pub fn c<'a>(&'a mut self) -> KeyStream<'a> {
         match self {
-            KeyStreams::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.c())
+            Self::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.c())
         }
     }
 
     pub fn d<'a>(&'a mut self) -> KeyStream<'a> {
         match self {
-            KeyStreams::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.d())
+            Self::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.d())
         }
     }
 }
@@ -31,7 +32,7 @@ pub struct KeyStreamsSha256 {
 
 impl KeyStreamsSha256 {
     fn new(k: &[u8], h: &[u8], sid: &[u8]) -> Self {
-        KeyStreamsSha256 {
+        Self {
             k: Vec::from(k),
             h: Vec::from(h),
             sid: Vec::from(sid),
@@ -45,6 +46,12 @@ impl KeyStreamsSha256 {
 
     fn d<'a>(&'a mut self) -> KeyStreamSha256<'a> {
         KeyStreamSha256::new(&mut self.state, &self.k, &self.h, &self.sid, 'D')
+    }
+}
+
+impl std::fmt::Debug for KeyStreamsSha256 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KexKeyStreams256 (...)")
     }
 }
 

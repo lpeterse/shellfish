@@ -1,5 +1,4 @@
 use crate::codec::*;
-use crate::codec_ssh::*;
 
 pub use self::curve25519::*;
 pub use self::ed25519::*;
@@ -18,37 +17,37 @@ pub enum PublicKey {
     UnknownPublicKey(UnknownPublicKey),
 }
 
-impl <'a> SshCodec<'a> for PublicKey {
+impl <'a> Codec<'a> for PublicKey {
     fn size(&self) -> usize {
         4 + match self {
-            PublicKey::Ed25519PublicKey(k) => SshCodec::size(&"ssh-ed25519") + k.size(),
-            PublicKey::RsaPublicKey(k) => SshCodec::size(&"ssh-rsa") + k.size(),
-            PublicKey::UnknownPublicKey(k) => SshCodec::size(&k.algo) + k.key.len(),
+            PublicKey::Ed25519PublicKey(k) => Codec::size(&"ssh-ed25519") + k.size(),
+            PublicKey::RsaPublicKey(k) => Codec::size(&"ssh-rsa") + k.size(),
+            PublicKey::UnknownPublicKey(k) => Codec::size(&k.algo) + k.key.len(),
         }
     }
-    fn encode(&self,c: &mut Encoder<'a>) {
+    fn encode<E: Encoder>(&self,c: &mut E) {
         c.push_u32be((self.size() - 4) as u32);
         match self {
             PublicKey::Ed25519PublicKey(k) => {
-                SshCodec::encode(&"ssh-ed25519", c);
-                SshCodec::encode(k, c);
+                Codec::encode(&"ssh-ed25519", c);
+                Codec::encode(k, c);
             },
             PublicKey::RsaPublicKey(k) => {
-                SshCodec::encode(&"ssh-rsa", c);
-                SshCodec::encode(k, c);
+                Codec::encode(&"ssh-rsa", c);
+                Codec::encode(k, c);
             },
             PublicKey::UnknownPublicKey(k) => {
-                SshCodec::encode(&k.algo, c);
-                c.push_bytes(k.key.as_slice());
+                Codec::encode(&k.algo, c);
+                c.push_bytes(&k.key.as_slice());
             }
         }
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
-        let mut dec = c.take_decoder(len as usize)?;
-        Some(match SshCodec::decode(&mut dec)? {
-            "ssh-ed25519" => PublicKey::Ed25519PublicKey(SshCodec::decode(&mut dec)?),
-            "ssh-rsa" => PublicKey::RsaPublicKey(SshCodec::decode(&mut dec)?),
+        let mut dec = BDecoder(c.take_bytes(len as usize)?);
+        Some(match Codec::decode(&mut dec)? {
+            "ssh-ed25519" => PublicKey::Ed25519PublicKey(Codec::decode(&mut dec)?),
+            "ssh-rsa" => PublicKey::RsaPublicKey(Codec::decode(&mut dec)?),
             algo => PublicKey::UnknownPublicKey(UnknownPublicKey {
                 algo: String::from(algo),
                 key:  Vec::from(dec.take_all()?),
@@ -64,31 +63,31 @@ pub enum Signature {
     UnknownSignature(UnknownSignature),
 }
 
-impl <'a> SshCodec<'a> for Signature {
+impl <'a> Codec<'a> for Signature {
     fn size(&self) -> usize {
         4 + match self {
-            Signature::Ed25519Signature(k) => SshCodec::size(&"ssh-ed25519") + k.size(),
-            Signature::UnknownSignature(k) => SshCodec::size(&k.algo) + k.signature.len(),
+            Signature::Ed25519Signature(k) => Codec::size(&"ssh-ed25519") + k.size(),
+            Signature::UnknownSignature(k) => Codec::size(&k.algo) + k.signature.len(),
         }
     }
-    fn encode(&self,c: &mut Encoder<'a>) {
+    fn encode<E: Encoder>(&self,c: &mut E) {
         c.push_u32be((self.size() - 4) as u32);
         match self {
             Signature::Ed25519Signature(k) => {
-                SshCodec::encode(&"ssh-ed25519", c);
-                SshCodec::encode(k, c);
+                Codec::encode(&"ssh-ed25519", c);
+                Codec::encode(k, c);
             },
             Signature::UnknownSignature(k) => {
-                SshCodec::encode(&k.algo, c);
-                c.push_bytes(k.signature.as_slice());
+                Codec::encode(&k.algo, c);
+                c.push_bytes(&k.signature.as_slice());
             }
         }
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
-        let mut dec = c.take_decoder(len as usize)?;
-        Some(match SshCodec::decode(&mut dec)? {
-            "ssh-ed25519" => Signature::Ed25519Signature(SshCodec::decode(&mut dec)?),
+        let mut dec = BDecoder(c.take_bytes(len as usize)?);
+        Some(match Codec::decode(&mut dec)? {
+            "ssh-ed25519" => Signature::Ed25519Signature(Codec::decode(&mut dec)?),
             algo => Signature::UnknownSignature(UnknownSignature {
                 algo: String::from(algo),
                 signature:  Vec::from(dec.take_all()?),

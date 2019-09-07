@@ -1,8 +1,7 @@
 use crate::codec::*;
-use crate::codec_ssh::*;
 
 #[derive(PartialEq, Clone, Debug)]
-pub struct Ed25519PublicKey ([u8;32]);
+pub struct Ed25519PublicKey (pub [u8;32]);
 
 impl Ed25519PublicKey {
     pub fn new() -> Self {
@@ -10,18 +9,18 @@ impl Ed25519PublicKey {
     }
 }
 
-impl <'a> SshCodec<'a> for Ed25519PublicKey {
+impl <'a> Codec<'a> for Ed25519PublicKey {
     fn size(&self) -> usize {
         4 + 32
     }
-    fn encode(&self, c: &mut Encoder<'a>) {
+    fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u32be(32);
         c.push_bytes(&self.0);
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let mut k = [0;32];
         c.take_u32be().filter(|x| x == &32)?;
-        c.take_bytes_into(&mut k)?;
+        c.take_into(&mut k)?;
         Some(Ed25519PublicKey(k))
     }
 }
@@ -41,18 +40,19 @@ impl std::fmt::Debug for Ed25519Signature {
     }
 }
 
-impl <'a> SshCodec<'a> for Ed25519Signature {
+impl <'a> Codec<'a> for Ed25519Signature {
     fn size(&self) -> usize {
         4 + 64
     }
-    fn encode(&self, c: &mut Encoder<'a>) {
+    fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u32be(64);
-        c.push_bytes(&self.0);
+        let x: &[u8] = &self.0[..];
+        c.push_bytes(&x);
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let mut k = [0;64];
         c.take_u32be().filter(|x| x == &64)?;
-        c.take_bytes_into(&mut k)?;
+        c.take_into(&mut k)?;
         Some(Self(k))
     }
 }

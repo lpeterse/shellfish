@@ -1,21 +1,7 @@
 use crate::algorithm::*;
 use crate::codec::*;
-use crate::codec_ssh::*;
 use crate::language::*;
-
-use rand_core::RngCore;
-use rand_os::OsRng;
-
-#[derive(Debug,Clone,Copy)]
-pub struct KexCookie ([u8;16]);
-
-impl KexCookie {
-    pub fn new() -> Self {
-        let mut cookie: [u8;16] = [0;16];
-        OsRng::new().unwrap().fill_bytes(&mut cookie);
-        Self(cookie)
-    }
-}
+use super::*;
 
 #[derive(Debug,Clone)]
 pub struct KexInit {
@@ -34,6 +20,8 @@ pub struct KexInit {
 }
 
 impl KexInit {
+    pub const MSG_NUMBER: u8 = 20;
+
     pub fn new(cookie: KexCookie) -> Self {
         Self {
             cookie: cookie,
@@ -52,7 +40,7 @@ impl KexInit {
     }
 }
 
-impl <'a> SshCodec<'a> for KexInit {
+impl <'a> Codec<'a> for KexInit {
     fn size(&self) -> usize {
         1 + 16 + 1 + 4
         + NameList::size(&self.kex_algorithms)
@@ -66,39 +54,39 @@ impl <'a> SshCodec<'a> for KexInit {
         + NameList::size(&self.languages_client_to_server)
         + NameList::size(&self.languages_server_to_client)
     }
-    fn encode(&self, c: &mut Encoder<'a>) {
-        c.push_u8(20);
-        c.push_bytes(&self.cookie.0[..]);
-        NameList::encode(&self.kex_algorithms,c);
-        NameList::encode(&self.server_host_key_algorithms,c);
-        NameList::encode(&self.encryption_algorithms_client_to_server,c);
-        NameList::encode(&self.encryption_algorithms_server_to_client,c);
-        NameList::encode(&self.mac_algorithms_client_to_server,c);
-        NameList::encode(&self.mac_algorithms_server_to_client,c);
-        NameList::encode(&self.compression_algorithms_client_to_server,c);
-        NameList::encode(&self.compression_algorithms_server_to_client,c);
-        NameList::encode(&self.languages_client_to_server,c);
-        NameList::encode(&self.languages_server_to_client,c);
-        c.push_u8(self.first_packet_follows as u8);
-        c.push_u32be(0);
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u8(Self::MSG_NUMBER);
+        e.push_bytes(&self.cookie);
+        NameList::encode(&self.kex_algorithms,e);
+        NameList::encode(&self.server_host_key_algorithms,e);
+        NameList::encode(&self.encryption_algorithms_client_to_server,e);
+        NameList::encode(&self.encryption_algorithms_server_to_client,e);
+        NameList::encode(&self.mac_algorithms_client_to_server,e);
+        NameList::encode(&self.mac_algorithms_server_to_client,e);
+        NameList::encode(&self.compression_algorithms_client_to_server,e);
+        NameList::encode(&self.compression_algorithms_server_to_client,e);
+        NameList::encode(&self.languages_client_to_server,e);
+        NameList::encode(&self.languages_server_to_client,e);
+        e.push_u8(self.first_packet_follows as u8);
+        e.push_u32be(0);
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
-        c.take_u8().and_then(|x| if x == 20 { Some(()) } else { None })?;
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.take_u8().and_then(|x| if x == Self::MSG_NUMBER { Some(()) } else { None })?;
         let r = Self {
-            cookie: KexCookie({ let mut x = [0;16]; c.take_bytes_into(&mut x)?; x }),
-            kex_algorithms: NameList::decode(c)?,
-            server_host_key_algorithms: NameList::decode(c)?,
-            encryption_algorithms_client_to_server: NameList::decode(c)?,
-            encryption_algorithms_server_to_client: NameList::decode(c)?,
-            mac_algorithms_client_to_server: NameList::decode(c)?,
-            mac_algorithms_server_to_client: NameList::decode(c)?,
-            compression_algorithms_client_to_server: NameList::decode(c)?,
-            compression_algorithms_server_to_client: NameList::decode(c)?,
-            languages_client_to_server: NameList::decode(c)?,
-            languages_server_to_client: NameList::decode(c)?,
-            first_packet_follows: c.take_u8().map(|x| x != 0)?,
+            cookie: KexCookie({ let mut x = [0;16]; d.take_into(&mut x)?; x }),
+            kex_algorithms: NameList::decode(d)?,
+            server_host_key_algorithms: NameList::decode(d)?,
+            encryption_algorithms_client_to_server: NameList::decode(d)?,
+            encryption_algorithms_server_to_client: NameList::decode(d)?,
+            mac_algorithms_client_to_server: NameList::decode(d)?,
+            mac_algorithms_server_to_client: NameList::decode(d)?,
+            compression_algorithms_client_to_server: NameList::decode(d)?,
+            compression_algorithms_server_to_client: NameList::decode(d)?,
+            languages_client_to_server: NameList::decode(d)?,
+            languages_server_to_client: NameList::decode(d)?,
+            first_packet_follows: d.take_u8().map(|x| x != 0)?,
         };
-        c.take_u32be()?;
+        d.take_u32be()?;
         r.into()
     }
 }

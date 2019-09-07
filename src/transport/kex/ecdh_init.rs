@@ -1,5 +1,4 @@
 use crate::codec::*;
-use crate::codec_ssh::*;
 
 #[derive(Clone, Debug)]
 pub struct KexEcdhInit {
@@ -14,18 +13,18 @@ impl KexEcdhInit {
     }
 }
 
-impl <'a> SshCodec<'a> for KexEcdhInit {
+impl <'a> Codec<'a> for KexEcdhInit {
     fn size(&self) -> usize {
-        1 + SshCodec::size(&self.dh_public)
+        1 + Codec::size(&self.dh_public)
     }
-    fn encode(&self, c: &mut Encoder<'a>) {
+    fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u8(30);
-        SshCodec::encode(&self.dh_public, c);
+        Codec::encode(&self.dh_public, c);
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u8().filter(|x| x == &30)?;
         Some(Self {
-            dh_public: SshCodec::decode(c)?
+            dh_public: Codec::decode(c)?
         })
     }
 }

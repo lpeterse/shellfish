@@ -1,7 +1,6 @@
 use num::BigUint;
 
 use crate::codec::*;
-use crate::codec_ssh::*;
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct RsaPublicKey {
@@ -9,18 +8,18 @@ pub struct RsaPublicKey {
     pub public_n: BigUint,
 }
 
-impl <'a> SshCodec<'a> for RsaPublicKey {
+impl <'a> Codec<'a> for RsaPublicKey {
     fn size(&self) -> usize {
-        SshCodec::size(&self.public_e) +
-        SshCodec::size(&self.public_n)
+        Codec::size(&self.public_e) +
+        Codec::size(&self.public_n)
     }
-    fn encode(&self, c: &mut Encoder<'a>) {
-        SshCodec::encode(&self.public_e, c);
-        SshCodec::encode(&self.public_n, c);
+    fn encode<E: Encoder>(&self, c: &mut E) {
+        Codec::encode(&self.public_e, c);
+        Codec::encode(&self.public_n, c);
     }
-    fn decode(c: &mut Decoder<'a>) -> Option<Self> {
-        let e = SshCodec::decode(c)?;
-        let n = SshCodec::decode(c)?;
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        let e = Codec::decode(c)?;
+        let n = Codec::decode(c)?;
         Some(RsaPublicKey {
             public_e: e,
             public_n: n,

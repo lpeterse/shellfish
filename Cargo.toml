@@ -13,3 +13,8 @@ x25519-dalek = "0.5.2"
 rand_core = "0.4.2"
 rand_os = "0.1.1"
 sha2 = "0.8.0"
+chacha20 = { version = "0.2.1", features = ["legacy"] }
+poly1305 = "0.3.0"
+
+[profile.release]
+lto = true
