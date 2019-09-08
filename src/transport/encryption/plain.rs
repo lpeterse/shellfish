@@ -18,8 +18,6 @@ impl PlainEncryptionContext {
     pub fn encrypt_packet(&self, _pc: u64, layout: PacketLayout, buf: &mut [u8]) {
         layout.put_len(buf);
         layout.pad_zero(buf);
-        println!("LAYOUT {:?}", &layout);
-        println!("BUFFER {:?}", &buf);
     }
 
     pub fn decrypt_buffer_size(&self, _pc: u64, len: &[u8]) -> Option<usize> {

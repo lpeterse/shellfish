@@ -175,6 +175,18 @@ impl NameList {
         }
         vec.into()
     }
+    pub fn decode_str<'a, D: Decoder<'a>>(c: &mut D) -> Option<Vec<&'a str>> {
+        let len = c.take_u32be()?;
+        let mut vec = Vec::new();
+        if len > 0 {
+            println!("XXX {:?}", 0);
+            let bytes: &'a [u8] = c.take_bytes(len as usize)?;
+            for name in bytes.split(|c| c == &(',' as u8)) {
+                vec.push(std::str::from_utf8(name).ok()?);
+            }
+        }
+        vec.into()
+    }
 }
 
 pub struct MPInt<'a> (pub &'a [u8]);
@@ -203,3 +215,91 @@ impl <'a> Codec<'a> for MPInt<'a> {
         }
     }
 }
+
+pub enum E2<A,B> {
+    A(A),
+    B(B),
+}
+
+impl <'a,A,B> Codec<'a> for E2<A,B>
+    where
+        A: Codec<'a>,
+        B: Codec<'a>,
+{
+    fn size(&self) -> usize {
+        match self {
+            Self::A(x) => Codec::size(x),
+            Self::B(x) => Codec::size(x),
+        }
+    }
+    fn encode<E: Encoder>(&self, c: &mut E) {
+        match self {
+            Self::A(x) => Codec::encode(x,c),
+            Self::B(x) => Codec::encode(x,c)
+        }
+    }
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        None.or_else(|| {
+                let mut d_ = d.clone();
+                let r = Codec::decode(&mut d_).map(Self::A);
+                if r.is_some() { *d = d_ };
+                r
+            })
+            .or_else(|| {
+                let mut d_ = d.clone();
+                let r = Codec::decode(&mut d_).map(Self::B);
+                if r.is_some() { *d = d_ };
+                r
+            })
+    }
+}
+
+pub enum E3<A,B,C> {
+    A(A),
+    B(B),
+    C(C),
+}
+
+impl <'a,A,B,C> Codec<'a> for E3<A,B,C>
+    where
+        A: Codec<'a>,
+        B: Codec<'a>,
+        C: Codec<'a>,
+{
+    fn size(&self) -> usize {
+        match self {
+            Self::A(x) => Codec::size(x),
+            Self::B(x) => Codec::size(x),
+            Self::C(x) => Codec::size(x),
+        }
+    }
+    fn encode<E: Encoder>(&self, c: &mut E) {
+        match self {
+            Self::A(x) => Codec::encode(x,c),
+            Self::B(x) => Codec::encode(x,c),
+            Self::C(x) => Codec::encode(x,c)
+
+        }
+    }
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        None.or_else(|| {
+                let mut d_ = d.clone();
+                let r = Codec::decode(&mut d_).map(Self::A);
+                if r.is_some() { *d = d_ };
+                r
+            })
+            .or_else(|| {
+                let mut d_ = d.clone();
+                let r = Codec::decode(&mut d_).map(Self::B);
+                if r.is_some() { *d = d_ };
+                r
+            })
+            .or_else(|| {
+                let mut d_ = d.clone();
+                let r = Codec::decode(&mut d_).map(Self::C);
+                if r.is_some() { *d = d_ };
+                r
+            })
+    }
+}
+

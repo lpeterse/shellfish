@@ -1,11 +1,19 @@
+mod debug;
+mod disconnect;
 mod encryption;
 mod error;
 mod identification;
 mod kex;
 mod key_streams;
-mod session_id;
 mod packet_layout;
+mod session_id;
+mod ignore;
+mod unimplemented;
+mod service_request;
+mod service_accept;
 
+pub use self::debug::*;
+pub use self::disconnect::*;
 pub use self::encryption::*;
 pub use self::error::*;
 pub use self::identification::*;
@@ -13,19 +21,29 @@ pub use self::kex::*;
 pub use self::key_streams::*;
 pub use self::packet_layout::*;
 pub use self::session_id::*;
+pub use self::ignore::*;
+pub use self::unimplemented::*;
+pub use self::service_request::*;
+pub use self::service_accept::*;
 
 use crate::buffer::*;
 use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use futures::io::{AsyncRead, AsyncWrite};
-use std::convert::{From, TryInto};
+use std::convert::{From};
 use std::time::{Duration, Instant};
+use async_std::net::{TcpStream};
+use log;
 
 pub enum Role {
     Client,
     Server,
 }
+
+pub trait TransportStream: Read + AsyncRead + Unpin + Write + AsyncWrite + Unpin + Send + 'static {}
+
+impl TransportStream for TcpStream {}
 
 pub struct Transport<T> {
     role: Role,
@@ -51,11 +69,6 @@ where
 {
     const REKEY_BYTES: u64 = 1000_000_000;
     const REKEY_INTERVAL: Duration = Duration::from_secs(3600);
-
-    const PACKET_LEN_SIZE: usize = 4;
-    //const PADDING_LEN_SIZE: usize = 1;
-    //const PADDING_MIN_SIZE: usize = 4;
-    const BLOCK_SIZE: usize = 16;
 
     const MAX_BUFFER_SIZE: usize = 35_000;
 
@@ -117,6 +130,7 @@ where
     }
 
     async fn kex(&mut self, remote: Option<KexInit>) -> TransportResult<()> {
+        log::debug!("kex start");
         let local_init = KexInit::new(KexCookie::random());
         self.send_raw(&local_init).await?;
         self.flush().await?;
@@ -124,6 +138,7 @@ where
             None => self.receive_raw().await?,
             Some(init) => init,
         };
+        log::debug!("kex foo");
 
         let sid = match self.role {
             Role::Client => {
@@ -164,6 +179,7 @@ where
         self.kex_last_bytes_sent = self.bytes_sent;
         // The session id will only be set after the initial key exchange
         sid.map(|s| self.session_id = s);
+        log::debug!("kex complete");
         Ok(())
     }
 
@@ -201,17 +217,21 @@ where
     }
 
     async fn receive_raw<'a, M: Codec<'a>>(&'a mut self) -> TransportResult<M> {
+        let pc = self.packets_received;
         self.packets_received += 1;
-        self.stream.fetch(2 * Self::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
+        self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
 
         let len: &[u8] = self.stream.peek_exact(4).await?;
-
-        let buffer_size = self.decryption_ctx.decrypt_buffer_size(self.packets_received, len)
+        let buffer_size = self
+            .decryption_ctx
+            .decrypt_buffer_size(pc, len)
             .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
             .ok_or(TransportError::MessageIntegrity)?;
 
         let buffer = self.stream.read_exact(buffer_size).await?;
-        let packet = self.decryption_ctx.decrypt_packet(self.packets_received, buffer)
+        let packet = self
+            .decryption_ctx
+            .decrypt_packet(pc, buffer)
             .ok_or(TransportError::MessageIntegrity)?;
 
         Codec::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
@@ -221,6 +241,4 @@ where
 #[cfg(test)]
 mod test {
     use super::*;
-
 }
-

@@ -1,4 +1,4 @@
-pub trait Decoder<'a> {
+pub trait Decoder<'a>: Clone {
     fn remaining(&self) -> usize;
     fn is_eoi(&self) -> bool;
     fn take_eoi(&self) -> Option<()>;
