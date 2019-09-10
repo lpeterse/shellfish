@@ -1,5 +1,6 @@
 mod channel;
-mod channel_type;
+mod command;
+mod state;
 mod lowest_key_map;
 mod msg_channel_open;
 mod msg_channel_open_confirmation;
@@ -12,7 +13,10 @@ use self::msg_channel_open::*;
 use self::msg_channel_open_confirmation::*;
 use self::msg_channel_open_failure::*;
 use self::msg_global_request::*;
-use super::user_auth::*;
+use self::command::*;
+use self::state::*;
+use super::user_auth;
+use crate::agent::*;
 use crate::codec::*;
 use crate::transport::*;
 
@@ -23,11 +27,8 @@ use futures::sink::SinkExt;
 use futures::stream::StreamExt;
 use async_std::task;
 
-pub enum Command {
-    Disconnect
-}
-
 pub struct Connection {
+    command: mpsc::Sender<Command>,
     // Dropping the connection causes the oneshot sender "canary"
     // to be dropped. The handler task is supposed to listen
     // to this with highest priority and terminate itself gracefully.
@@ -35,73 +36,42 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub fn new<T: TransportStream>(t: Transport<T>) -> Self {
-        let (s,r) = oneshot::channel();
+    pub async fn new_authenticated<T: TransportStream>(agent: &mut Agent, mut t: Transport<T>) -> Result<Self, TransportError> {
+        user_auth::authenticate(agent, &mut t).await?;
+        let (s1,r1) = oneshot::channel();
+        let (s2,r2) = mpsc::channel(1);
         task::spawn(async move {
             ConnectionState {
-                canary: r,
+                canary: r1,
+                commands: r2,
                 transport: t,
                 channels: LowestKeyMap::new(256),
             }.run().await
         });
-        Connection { _canary: s }
+        Ok(Connection { command: s2, _canary: s1 })
     }
-}
 
-pub struct ConnectionState<T> {
-    canary: oneshot::Receiver<()>,
-    transport: Transport<T>,
-    channels: LowestKeyMap<ChannelState>,
-}
-
-impl<T: TransportStream> ConnectionState<T> {
-
-    pub async fn run(self) {
-
-    }
-    //pub async fn authenticate(mut transport: Transport<T>) -> Result<Self, UserAuthError> {
-    //    authenticate(&mut transport).await?;
-    //    Ok(ConnectionState {
-    //        transport,
-    //        channels: LowestKeyMap::new(256),
-    //    })
-    //}
-
-    pub async fn channel(&mut self) -> Result<Channel, ChannelOpenError> {
+    pub async fn open_session(&mut self) -> Result<Channel<Session>,ChannelOpenError> {
         let (s,r) = oneshot::channel();
-        self.channels.insert(|_|
-            ChannelState::Opening(OpeningChannel { notify:s })
-        );
-        let req: MsgChannelOpen<'_, Session> = MsgChannelOpen {
-            sender_channel: 0,
-            initial_window_size: 23,
-            maximum_packet_size: 23,
-            channel_type: SessionData {},
+        let request = Command::ChannelOpenSession(ChannelOpen {
+                result: s
+            });
+        self.command.send(request).map_err(|_| ChannelOpenError::ConnectionLost).await?;
+        let response = r.map_err(|_| ChannelOpenError::ConnectionLost).await??;
+        let channel: Channel<Session> = Channel {
+            id: response.id,
+            request: (),
+            confirmation: (),
         };
-        self.transport.send(&req).await?;
-        self.transport.flush().await?;
-
-        Ok(Channel {})
-    }
-
-    async fn send<'a, M: Codec<'a>>(&mut self, msg: &M) -> TransportResult<()> {
-        self.transport.send(msg).await
-    }
-
-    async fn receive<'a, M: Codec<'a>>(&'a mut self) -> Result<M, TransportError> {
-        self.transport.receive().await
+        Ok(channel)
     }
 }
-
-#[derive(Debug)]
-pub struct Channel {}
-
-#[derive(Debug)]
-pub struct Process {}
 
 #[derive(Debug)]
 pub enum ChannelOpenError {
+    ConnectionLost,
     TransportError(TransportError),
+    ChannelOpenFailure(ChannelOpenFailure),
 }
 
 impl From<TransportError> for ChannelOpenError {
@@ -110,7 +80,8 @@ impl From<TransportError> for ChannelOpenError {
     }
 }
 
-#[derive(Debug)]
-pub enum SessionError {
-    Foobar,
+impl From<ChannelOpenFailure> for ChannelOpenError {
+    fn from(e: ChannelOpenFailure) -> Self {
+        Self::ChannelOpenFailure(e)
+    }
 }

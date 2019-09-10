@@ -8,6 +8,7 @@ pub use self::method::*;
 pub use self::success::*;
 pub use self::failure::*;
 
+use crate::agent::*;
 use crate::codec::*;
 use crate::transport::*;
 
@@ -16,8 +17,7 @@ use futures::io::{AsyncRead, AsyncWrite};
 use std::convert::{From, TryInto};
 use std::time::{Duration, Instant};
 
-
-pub async fn authenticate<T: TransportStream>(transport: &mut Transport<T>) -> Result<(), UserAuthError> {
+pub async fn authenticate<T: TransportStream>(agent: &mut Agent, transport: &mut Transport<T>) -> Result<(), TransportError> {
     println!("CONNECTED: {:?}", "ASD");
     let req = ServiceRequest::user_auth();
     transport.send(&req).await?;
@@ -42,15 +42,4 @@ pub async fn authenticate<T: TransportStream>(transport: &mut Transport<T>) -> R
         }
     }
     Ok(())
-}
-
-#[derive(Debug)]
-pub enum UserAuthError {
-    TransportError(TransportError)
-}
-
-impl From<TransportError> for UserAuthError {
-    fn from(e: TransportError) -> Self {
-        Self::TransportError(e)
-    }
 }

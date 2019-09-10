@@ -1,4 +1,4 @@
-//pub mod agent;
+pub mod agent;
 pub mod algorithm;
 pub mod buffer;
 pub mod client;

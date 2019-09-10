@@ -1,18 +1,18 @@
 use crate::language::*;
 use crate::codec::*;
 
-pub struct MsgChannelOpenFailure<'a> {
+pub struct MsgChannelOpenFailure {
     pub recipient_channel: u32,
     pub reason_code: u32,
-    pub description: &'a str,
+    pub description: String,
     pub language: Language,
 }
 
-impl<'a> MsgChannelOpenFailure<'a> {
+impl<'a> MsgChannelOpenFailure {
     const MSG_NUMBER: u8 = 91;
 }
 
-impl<'a> Codec<'a> for MsgChannelOpenFailure<'a> {
+impl<'a> Codec<'a> for MsgChannelOpenFailure {
     fn size(&self) -> usize {
         1 + 4 + 4
         + Codec::size(&self.description)

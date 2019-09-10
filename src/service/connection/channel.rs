@@ -1,6 +1,17 @@
+mod type_;
+
+use super::*;
+pub use self::type_::*;
+
 use futures::channel::oneshot;
 use futures::channel::mpsc;
 use std::collections::VecDeque;
+
+pub struct Channel<T: ChannelType> {
+    pub id: u32,
+    pub request: <T as ChannelType>::Request,
+    pub confirmation: <T as ChannelType>::Confirmation,
+}
 
 pub enum ChannelState {
     Opening(OpeningChannel),

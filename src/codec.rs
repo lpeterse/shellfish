@@ -12,6 +12,18 @@ pub trait Codec<'a>: Sized {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self>;
 }
 
+impl <'a> Codec<'a> for () {
+    fn size(&self) -> usize {
+        0
+    }
+    fn encode<E: Encoder>(&self, c: &mut E) {
+        // Nothing to do
+    }
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        Some(())
+    }
+}
+
 impl <'a> Codec<'a> for String {
     fn size(&self) -> usize {
         4 + self.as_bytes().len()
@@ -37,6 +49,20 @@ impl <'a> Codec<'a> for &'a str {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         c.take_str(len as usize)
+    }
+}
+
+impl <'a> Codec<'a> for &'a [u8] {
+    fn size(&self) -> usize {
+        4 + self.len()
+    }
+    fn encode<E: Encoder>(&self, c: &mut E) {
+        c.push_u32be(self.len() as u32);
+        c.push_bytes(self);
+    }
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        let len = c.take_u32be()?;
+        c.take_bytes(len as usize)
     }
 }
 

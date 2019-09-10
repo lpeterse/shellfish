@@ -98,6 +98,13 @@ impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
         Ok(&mut self.read_buf[self.read_rng.start ..][.. len])
     }
 
+    pub async fn read_u32be(&mut self) -> async_std::io::Result<u32> {
+        let x = self.read_exact(4).await?;
+        let mut y = [0;4];
+        y.copy_from_slice(x);
+        Ok(u32::from_be_bytes(y))
+    }
+
     pub async fn read_exact(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
         while self.read_rng.len() < len {
             if self.fill().await? == 0 {
