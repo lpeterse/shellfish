@@ -9,13 +9,14 @@ mod msg_global_request;
 
 use self::channel::*;
 use self::lowest_key_map::*;
-use self::msg_channel_open::*;
-use self::msg_channel_open_confirmation::*;
-use self::msg_channel_open_failure::*;
-use self::msg_global_request::*;
+//use self::msg_channel_open::*;
+//use self::msg_channel_open_confirmation::*;
+//use self::msg_channel_open_failure::*;
+//use self::msg_global_request::*;
 use self::command::*;
 use self::state::*;
-use super::user_auth;
+use super::*;
+use super::user_auth::*;
 use crate::agent::*;
 use crate::codec::*;
 use crate::transport::*;
@@ -24,8 +25,6 @@ use futures::channel::oneshot;
 use futures::channel::mpsc;
 use futures::future::TryFutureExt;
 use futures::sink::SinkExt;
-use futures::stream::StreamExt;
-use async_std::task;
 
 pub struct Connection {
     command: mpsc::Sender<Command>,
@@ -36,11 +35,13 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub async fn new_authenticated<T: TransportStream>(agent: &mut Agent, mut t: Transport<T>) -> Result<Self, TransportError> {
-        user_auth::authenticate(agent, &mut t).await?;
+    pub const SERVICE_NAME: &'static str = "ssh-connection";
+
+    pub async fn new<T: TransportStream>(mut t: Transport<T>, user_name: &str, agent: &mut Agent) -> Result<Self, UserAuthError> {
+        UserAuth::authenticate(&mut t, Self::NAME, user_name, agent).await?;
         let (s1,r1) = oneshot::channel();
         let (s2,r2) = mpsc::channel(1);
-        task::spawn(async move {
+        async_std::task::spawn(async move {
             ConnectionState {
                 canary: r1,
                 commands: r2,
@@ -65,6 +66,10 @@ impl Connection {
         };
         Ok(channel)
     }
+}
+
+impl Service for Connection {
+    const NAME: &'static str = "ssh-connection";
 }
 
 #[derive(Debug)]

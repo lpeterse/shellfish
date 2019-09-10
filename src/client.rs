@@ -14,22 +14,22 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(config: Config, agent: Agent) -> Self {
+    pub fn new(_: Config, agent: Agent) -> Self {
         Client { agent }
     }
 
     pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<Connection, ConnectError> {
         let stream = TcpStream::connect(addr).await?;
         let transport: Transport<TcpStream> = Transport::new(stream, Role::Client).await?;
-        Ok(Connection::new_authenticated(&mut self.agent, transport).await?)
+        Ok(Connection::new(transport, &"username", &mut self.agent).await?)
     }
 }
 
 #[derive(Debug)]
 pub enum ConnectError {
-    NoAgent,
     ConnectError(std::io::Error),
     TransportError(TransportError),
+    UserAuthError(UserAuthError),
 }
 
 impl From<std::io::Error> for ConnectError {
@@ -41,5 +41,11 @@ impl From<std::io::Error> for ConnectError {
 impl From<TransportError> for ConnectError {
     fn from(e: TransportError) -> Self {
         Self::TransportError(e)
+    }
+}
+
+impl From<UserAuthError> for ConnectError {
+    fn from(e: UserAuthError) -> Self {
+        Self::UserAuthError(e)
     }
 }

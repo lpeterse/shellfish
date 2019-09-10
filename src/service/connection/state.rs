@@ -1,13 +1,8 @@
 use super::*;
-use crate::codec::*;
 use crate::transport::*;
 
 use futures::channel::oneshot;
 use futures::channel::mpsc;
-use futures::future::TryFutureExt;
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
-use async_std::task;
 
 pub struct ConnectionState<T> {
     pub canary: oneshot::Receiver<()>,
@@ -47,12 +42,4 @@ impl<T: TransportStream> ConnectionState<T> {
 
         Ok(Channel {})
     }*/
-
-    async fn send<'a, M: Codec<'a>>(&mut self, msg: &M) -> TransportResult<()> {
-        self.transport.send(msg).await
-    }
-
-    async fn receive<'a, M: Codec<'a>>(&'a mut self) -> Result<M, TransportError> {
-        self.transport.receive().await
-    }
 }

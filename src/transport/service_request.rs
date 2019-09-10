@@ -5,14 +5,6 @@ pub struct ServiceRequest<'a> (pub &'a str);
 
 impl <'a> ServiceRequest<'a> {
     const MSG_NUMBER: u8 = 5;
-
-    pub fn user_auth() -> Self {
-        Self("ssh-userauth")
-    }
-
-    pub fn connection() -> Self {
-        Self("ssh-connection")
-    }
 }
 
 impl<'a> Codec<'a> for ServiceRequest<'a> {

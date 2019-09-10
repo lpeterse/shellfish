@@ -1,45 +1,76 @@
-mod request;
-mod method;
-mod success;
 mod failure;
+mod method;
+mod request;
+mod success;
 
-pub use self::request::*;
-pub use self::method::*;
-pub use self::success::*;
 pub use self::failure::*;
+pub use self::method::*;
+pub use self::request::*;
+pub use self::success::*;
 
+use super::Service;
 use crate::agent::*;
 use crate::codec::*;
 use crate::transport::*;
 
-use async_std::io::{Read, Write};
-use futures::io::{AsyncRead, AsyncWrite};
-use std::convert::{From, TryInto};
-use std::time::{Duration, Instant};
+pub struct UserAuth {}
 
-pub async fn authenticate<T: TransportStream>(agent: &mut Agent, transport: &mut Transport<T>) -> Result<(), TransportError> {
-    println!("CONNECTED: {:?}", "ASD");
-    let req = ServiceRequest::user_auth();
-    transport.send(&req).await?;
-    transport.flush().await?;
-    let res: ServiceAccept<'_> = transport.receive().await?;
-    let req: Request = Request {
-        user_name: "lpetersen",
-        service_name: "ssh-connection",
-        method: Method::Password(Password("1234567890".into()))
-    };
-    println!("ABC {:?}", res);
-    transport.send(&req).await?;
-    transport.flush().await?;
-    match transport.receive().await? {
-        E2::A(x) => {
-            let _: Success = x;
-            println!("{:?}", x);
-        },
-        E2::B(x) => {
-            let _: Failure = x;
-            println!("{:?}", x);
+impl Service for UserAuth {
+    const NAME: &'static str = "ssh-userauth";
+}
+
+impl UserAuth {
+    pub async fn authenticate<T: TransportStream>(
+        transport: &mut Transport<T>,
+        service_name: &str,
+        user_name: &str,
+        agent: &mut Agent
+    ) -> Result<(), UserAuthError> {
+
+        transport.request_service(Self::NAME).await?;
+        let identities = agent.identities().await?;
+        for (public_key,_) in identities {
+            let req: Request<Pubkey> = Request {
+                user_name,
+                service_name,
+                method: Pubkey {
+                    algorithm: &"",
+                    public_key: public_key,
+                    signature: None
+                },
+            };
+            transport.send(&req).await?;
+            transport.flush().await?;
+            match transport.receive().await? {
+                E2::A(x) => {
+                    let _: Success = x;
+                    return Ok(())
+                },
+                E2::B(x) => {
+                    let _: Failure = x;
+                    if !x.methods.contains(&Pubkey::NAME) { break };
+                }
+            }
         }
+        Err(UserAuthError::NoMoreAuthMethods)
     }
-    Ok(())
+}
+
+#[derive(Debug)]
+pub enum UserAuthError {
+    NoMoreAuthMethods,
+    AgentError(AgentError),
+    TransportError(TransportError),
+}
+
+impl From<AgentError> for UserAuthError {
+    fn from(e: AgentError) -> Self {
+        Self::AgentError(e)
+    }
+}
+
+impl From<TransportError> for UserAuthError {
+    fn from(e: TransportError) -> Self {
+        Self::TransportError(e)
+    }
 }

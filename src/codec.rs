@@ -16,10 +16,10 @@ impl <'a> Codec<'a> for () {
     fn size(&self) -> usize {
         0
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
+    fn encode<E: Encoder>(&self, _: &mut E) {
         // Nothing to do
     }
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+    fn decode<D: Decoder<'a>>(_: &mut D) -> Option<Self> {
         Some(())
     }
 }
@@ -205,7 +205,6 @@ impl NameList {
         let len = c.take_u32be()?;
         let mut vec = Vec::new();
         if len > 0 {
-            println!("XXX {:?}", 0);
             let bytes: &'a [u8] = c.take_bytes(len as usize)?;
             for name in bytes.split(|c| c == &(',' as u8)) {
                 vec.push(std::str::from_utf8(name).ok()?);
@@ -328,4 +327,3 @@ impl <'a,A,B,C> Codec<'a> for E3<A,B,C>
             })
     }
 }
-

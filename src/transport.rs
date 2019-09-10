@@ -117,6 +117,14 @@ where
         self.kex(None).await
     }
 
+    pub async fn request_service(&mut self, service_name: &str) -> Result<(), TransportError> {
+        let req = ServiceRequest(service_name);
+        self.send_raw(&req).await?;
+        self.flush().await?;
+        let _: ServiceAccept<'_> = self.receive_raw().await?;
+        Ok(())
+    }
+
     async fn rekey_if_necessary(&mut self) -> TransportResult<()> {
         let bytes_sent_since = self.bytes_sent - self.kex_last_bytes_sent;
         let bytes_received_since = self.bytes_received - self.kex_last_bytes_received;
@@ -240,5 +248,5 @@ where
 
 #[cfg(test)]
 mod test {
-    use super::*;
+    //use super::*;
 }

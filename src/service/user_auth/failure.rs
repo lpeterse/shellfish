@@ -2,8 +2,8 @@ use crate::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct Failure<'a> {
-    methods: Vec<&'a str>,
-    partial_success: bool,
+    pub methods: Vec<&'a str>,
+    pub partial_success: bool,
 }
 
 impl <'a> Failure<'a> {

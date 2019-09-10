@@ -1,7 +1,5 @@
 pub use super::*;
 
-use crate::codec::*;
-
 #[derive(Clone, Debug)]
 pub struct MsgChannelOpen<T: ChannelType> {
     pub sender_channel: u32,

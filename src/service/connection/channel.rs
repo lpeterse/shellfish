@@ -1,6 +1,5 @@
 mod type_;
 
-use super::*;
 pub use self::type_::*;
 
 use futures::channel::oneshot;

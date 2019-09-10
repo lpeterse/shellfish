@@ -2,11 +2,6 @@ use crate::language::*;
 use super::*;
 
 use futures::channel::oneshot;
-use futures::channel::mpsc;
-use futures::future::TryFutureExt;
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
-use async_std::task;
 
 pub enum Command {
     ChannelOpenSession(ChannelOpen<Session>)
