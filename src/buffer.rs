@@ -171,6 +171,7 @@ impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
     }
 
     pub async fn flush(&mut self) -> async_std::io::Result<()> {
+        println!("{:?}", &self.write_buf[.. self.write_end]);
         self.stream.write_all(&self.write_buf[.. self.write_end]).await?;
         self.write_end = 0;
         Ok(())

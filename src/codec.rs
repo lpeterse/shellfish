@@ -6,10 +6,10 @@ use num::BigUint;
 pub use self::encoder::*;
 pub use self::decoder::*;
 
-pub trait Codec<'a>: Sized {
+pub trait Codec: Sized {
     fn size(&self) -> usize;
     fn encode<E: Encoder>(&self, c: &mut E);
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self>;
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>;
 }
 
 impl <'a> Codec<'a> for () {

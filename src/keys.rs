@@ -1,18 +1,17 @@
-use crate::codec::*;
-
-pub use self::curve25519::*;
-pub use self::ed25519::*;
-pub use self::rsa::*;
-pub use self::unknown::*;
-
 mod curve25519;
-mod ed25519;
 mod rsa;
 mod unknown;
 
+pub use self::curve25519::*;
+pub use self::rsa::*;
+pub use self::unknown::*;
+
+use crate::codec::*;
+use crate::algorithm::*;
+
 #[derive(Clone, Debug)]
 pub enum PublicKey {
-    Ed25519PublicKey(Ed25519PublicKey),
+    Ed25519PublicKey(<SshEd25519 as SignatureAlgorithm>::PublicKey),
     RsaPublicKey(RsaPublicKey),
     UnknownPublicKey(UnknownPublicKey),
 }
@@ -20,7 +19,7 @@ pub enum PublicKey {
 impl <'a> Codec<'a> for PublicKey {
     fn size(&self) -> usize {
         4 + match self {
-            PublicKey::Ed25519PublicKey(k) => Codec::size(&"ssh-ed25519") + k.size(),
+            PublicKey::Ed25519PublicKey(k) => k.size(),
             PublicKey::RsaPublicKey(k) => Codec::size(&"ssh-rsa") + k.size(),
             PublicKey::UnknownPublicKey(k) => Codec::size(&k.algo) + k.key.len(),
         }
@@ -29,7 +28,6 @@ impl <'a> Codec<'a> for PublicKey {
         c.push_u32be((self.size() - 4) as u32);
         match self {
             PublicKey::Ed25519PublicKey(k) => {
-                Codec::encode(&"ssh-ed25519", c);
                 Codec::encode(k, c);
             },
             PublicKey::RsaPublicKey(k) => {
@@ -42,24 +40,16 @@ impl <'a> Codec<'a> for PublicKey {
             }
         }
     }
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let len = c.take_u32be()?;
-        let mut dec = BDecoder(c.take_bytes(len as usize)?);
-        Some(match Codec::decode(&mut dec)? {
-            "ssh-ed25519" => PublicKey::Ed25519PublicKey(Codec::decode(&mut dec)?),
-            "ssh-rsa" => PublicKey::RsaPublicKey(Codec::decode(&mut dec)?),
-            algo => PublicKey::UnknownPublicKey(UnknownPublicKey {
-                algo: String::from(algo),
-                key:  Vec::from(dec.take_all()?),
-            }),
-        })
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        Some(PublicKey::Ed25519PublicKey(Codec::decode(d)?))
     }
 }
 
-
+// TODO: Should be removable..
 #[derive(Clone, Debug)]
 pub enum Signature {
-    Ed25519Signature(Ed25519Signature),
+    // TODO SshEd..
+    Ed25519Signature(<SshEd25519 as SignatureAlgorithm>::Signature),
     UnknownSignature(UnknownSignature),
 }
 

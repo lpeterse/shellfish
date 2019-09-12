@@ -1,4 +1,16 @@
+mod ed25519;
+
+pub use self::ed25519::*;
+
 use std::convert::TryFrom;
+
+pub trait SignatureAlgorithm {
+    type PublicKey;
+    type PrivateKey;
+    type Signature;
+
+    const NAME: &'static str;
+}
 
 #[derive(Debug,Clone,PartialEq)]
 pub enum HostKeyAlgorithm {

@@ -10,14 +10,16 @@ use self::msg_identities_answer::*;
 use self::msg_identities_request::*;
 use self::msg_sign_request::*;
 use self::msg_sign_response::*;
+use crate::algorithm::*;
 use crate::buffer::Buffer;
 use crate::codec::*;
-use crate::keys::{PublicKey,Signature};
+use crate::keys::{PublicKey};
 
 use async_std::os::unix::net::UnixStream;
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
+#[derive(Debug, Clone)]
 pub struct Agent {
     path: PathBuf,
 }
@@ -41,7 +43,7 @@ impl Agent {
     }
 
     /// Request a list of identities from the agent.
-    pub async fn identities(&mut self) -> Result<Vec<(PublicKey, String)>, AgentError> {
+    pub async fn identities(&self) -> Result<Vec<(PublicKey, String)>, AgentError> {
 
         let mut s = Buffer::new(UnixStream::connect(&self.path).await?);
         // Send request
@@ -59,30 +61,38 @@ impl Agent {
     }
 
     /// Sign a digest with the corresponding private key known to be owned the agent.
-    pub async fn sign(
+    pub async fn sign<'a,'b, S: SignatureAlgorithm>(
         &self,
-        key: PublicKey,
+        key: S::PublicKey,
         data: &[u8],
         flags: u32,
-    ) -> Result<Option<Signature>, AgentError> {
-
+    ) -> Result<Option<S::Signature>, AgentError>
+        where
+            S::PublicKey: Codec<'a>,
+            S::Signature: Codec<'a>,
+    {
         let mut s = Buffer::new(UnixStream::connect(&self.path).await?);
         // Send request
-        let req = MsgSignRequest { key, data, flags };
-        let len = Codec::size(&req);
+        let req: MsgSignRequest<S> = MsgSignRequest { key, data, flags };
+        let len = req.size();
         let mut enc = BEncoder::from(s.alloc(4 + len).await?);
         enc.push_u32be(len as u32);
-        Codec::encode(&req, &mut enc);
+        req.encode(&mut enc);
         s.flush().await?;
         // Receive response
         let len = s.read_u32be().await?;
-        let mut dec = BDecoder(s.read_exact(len as usize).await?);
-        let res: E2<MsgSignResponse, MsgFailure> =
-            Codec::decode(&mut dec).ok_or(AgentError::CodecError)?;
-        Ok(match res {
-            E2::A(x) => Some(x.signature),
-            E2::B(_) => None,
-        })
+        let buf = s.read_exact(len as usize).await?;
+        let buf = Vec::from(buf);
+        let mut dec = BDecoder(&buf[..]);
+        println!("RECV {:?}",buf);
+        //let res: E2<MsgSignResponse<S>, MsgFailure> =
+        //    Codec::decode(&mut dec).ok_or(AgentError::CodecError)?;
+        //let x = Ok(match res {
+        //    E2::A(x) => Some(x.signature),
+        //    E2::B(_) => None,
+        //});
+        let _ = s;
+        Err(AgentError::CodecError)
     }
 }
 

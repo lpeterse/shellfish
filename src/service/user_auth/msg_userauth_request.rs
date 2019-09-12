@@ -2,17 +2,17 @@ use super::method::*;
 use crate::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct Request<'a, M: Method<'a>> {
+pub struct MsgUserAuthRequest<'a, M: Method<'a>> {
     pub user_name: &'a str,
     pub service_name: &'a str,
     pub method: M,
 }
 
-impl<'a, M: Method<'a>> Request<'a, M> {
+impl<'a, M: Method<'a>> MsgUserAuthRequest<'a, M> {
     const MSG_NUMBER: u8 = 50;
 }
 
-impl<'a, M: Method<'a>> Codec<'a> for Request<'a, M> {
+impl<'a, M: Method<'a>> Codec<'a> for MsgUserAuthRequest<'a, M> {
     fn size(&self) -> usize {
         1 + Codec::size(&self.user_name)
             + Codec::size(&self.service_name)
@@ -31,7 +31,7 @@ impl<'a, M: Method<'a>> Codec<'a> for Request<'a, M> {
         let user_name = Codec::decode(d)?;
         let service_name = Codec::decode(d)?;
         let _: &str = Codec::decode(d).filter(|x| *x == M::NAME)?;
-        Request {
+        MsgUserAuthRequest {
             user_name,
             service_name,
             method: Codec::decode(d)?,

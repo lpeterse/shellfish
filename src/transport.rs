@@ -117,12 +117,12 @@ where
         self.kex(None).await
     }
 
-    pub async fn request_service(&mut self, service_name: &str) -> Result<(), TransportError> {
+    pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
         let req = ServiceRequest(service_name);
         self.send_raw(&req).await?;
         self.flush().await?;
         let _: ServiceAccept<'_> = self.receive_raw().await?;
-        Ok(())
+        Ok(self)
     }
 
     async fn rekey_if_necessary(&mut self) -> TransportResult<()> {

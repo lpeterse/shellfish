@@ -37,8 +37,7 @@ pub struct Connection {
 impl Connection {
     pub const SERVICE_NAME: &'static str = "ssh-connection";
 
-    pub async fn new<T: TransportStream>(mut t: Transport<T>, user_name: &str, agent: &mut Agent) -> Result<Self, UserAuthError> {
-        UserAuth::authenticate(&mut t, Self::NAME, user_name, agent).await?;
+    pub fn new<T: TransportStream>(mut t: Transport<T>) -> Connection {
         let (s1,r1) = oneshot::channel();
         let (s2,r2) = mpsc::channel(1);
         async_std::task::spawn(async move {
@@ -49,7 +48,7 @@ impl Connection {
                 channels: LowestKeyMap::new(256),
             }.run().await
         });
-        Ok(Connection { command: s2, _canary: s1 })
+        Connection { command: s2, _canary: s1 }
     }
 
     pub async fn open_session(&mut self) -> Result<Channel<Session>,ChannelOpenError> {

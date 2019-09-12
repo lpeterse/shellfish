@@ -1,16 +1,18 @@
 mod failure;
 mod method;
-mod request;
+mod msg_userauth_request;
 mod success;
 
 pub use self::failure::*;
 pub use self::method::*;
-pub use self::request::*;
+pub use self::msg_userauth_request::*;
 pub use self::success::*;
 
 use super::Service;
+use crate::algorithm::*;
 use crate::agent::*;
 use crate::codec::*;
+use crate::keys::*;
 use crate::transport::*;
 
 pub struct UserAuth {}
@@ -21,34 +23,43 @@ impl Service for UserAuth {
 
 impl UserAuth {
     pub async fn authenticate<T: TransportStream>(
-        transport: &mut Transport<T>,
+        mut transport: Transport<T>,
         service_name: &str,
         user_name: &str,
-        agent: &mut Agent
-    ) -> Result<(), UserAuthError> {
+        agent: Option<Agent>
+    ) -> Result<Transport<T>, UserAuthError> {
 
-        transport.request_service(Self::NAME).await?;
-        let identities = agent.identities().await?;
-        for (public_key,_) in identities {
-            let req: Request<Pubkey> = Request {
-                user_name,
-                service_name,
-                method: Pubkey {
-                    algorithm: &"",
-                    public_key: public_key,
-                    signature: None
-                },
-            };
-            transport.send(&req).await?;
-            transport.flush().await?;
-            match transport.receive().await? {
-                E2::A(x) => {
-                    let _: Success = x;
-                    return Ok(())
-                },
-                E2::B(x) => {
-                    let _: Failure = x;
-                    if !x.methods.contains(&Pubkey::NAME) { break };
+        match agent {
+            None => (),
+            Some(a) => {
+                let identities = a.identities().await?;
+                for (key,_) in identities {
+                    match key {
+                        PublicKey::Ed25519PublicKey(key) => {
+                            let req: MsgUserAuthRequest<PublicKeyMethod<SshEd25519>> = MsgUserAuthRequest {
+                                user_name,
+                                service_name,
+                                method: PublicKeyMethod {
+                                    public_key: key,
+                                    signature: None
+                                },
+                            };
+                            transport.send(&req).await?;
+                            transport.flush().await?;
+                            match transport.receive().await? {
+                                E2::A(x) => {
+                                    let _: Success = x;
+                                    return Ok(transport)
+                                },
+                                E2::B(x) => {
+                                    let _: Failure = x;
+                                    let name = <PublicKeyMethod<SshEd25519> as Method>::NAME;
+                                    if !x.methods.contains(&name) { break };
+                                }
+                            }
+                        },
+                        key => log::error!("Ignoring unsupported key {:?}", key)
+                    }
                 }
             }
         }

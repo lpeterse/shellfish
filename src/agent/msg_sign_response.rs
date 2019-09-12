@@ -1,16 +1,30 @@
 use crate::codec::*;
-use crate::keys::*;
 
-#[derive(Clone, Debug)]
-pub struct MsgSignResponse {
-    pub signature: Signature,
+use crate::algorithm::*;
+
+#[derive(Debug)]
+pub struct MsgSignResponse<S: SignatureAlgorithm> {
+    pub signature: S::Signature,
 }
 
-impl MsgSignResponse {
+impl <S: SignatureAlgorithm> MsgSignResponse<S> {
     pub const MSG_NUMBER: u8 = 14;
+
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>
+    where
+        S::Signature: Codec<'a>
+    {
+        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+        Self {
+            signature: Codec::decode(d)?
+        }.into()
+    }
 }
 
-impl <'a> Codec<'a> for MsgSignResponse {
+impl <'a, S: SignatureAlgorithm> Codec<'a> for MsgSignResponse<S>
+where
+    S::Signature: Codec<'a>
+{
     fn size(&self) -> usize {
         1 + Codec::size(&self.signature)
     }

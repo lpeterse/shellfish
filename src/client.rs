@@ -1,27 +1,62 @@
-use crate::transport::*;
-use crate::service::user_auth::*;
-use crate::service::connection::*;
 use crate::agent::Agent;
+use crate::service::connection::*;
+use crate::service::user_auth::*;
+use crate::service::*;
+use crate::transport::*;
 
-use std::net::{ToSocketAddrs};
-use async_std::net::{TcpStream};
-
-pub struct Config {
-}
+use async_std::net::TcpStream;
+use std::net::ToSocketAddrs;
 
 pub struct Client {
-    agent: Agent
+    user_name: Option<String>,
+    password: Option<String>,
+    agent: Option<Agent>,
 }
 
 impl Client {
-    pub fn new(_: Config, agent: Agent) -> Self {
-        Client { agent }
-    }
-
-    pub async fn connect<A: ToSocketAddrs>(&mut self, addr: A) -> Result<Connection, ConnectError> {
+    pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<Connection, ConnectError> {
         let stream = TcpStream::connect(addr).await?;
         let transport: Transport<TcpStream> = Transport::new(stream, Role::Client).await?;
-        Ok(Connection::new(transport, &"username", &mut self.agent).await?)
+
+        Ok(Connection::new(match self.user_name {
+            None => {
+                transport
+                    .request_service(<Connection as Service>::NAME)
+                    .await?
+            }
+            Some(ref user) => {
+                let transport = transport
+                    .request_service(<UserAuth as Service>::NAME)
+                    .await?;
+                UserAuth::authenticate(
+                    transport,
+                    <Connection as Service>::NAME,
+                    user,
+                    self.agent.clone(),
+                )
+                .await?
+            }
+        }))
+    }
+
+    pub fn user_name(&mut self) -> &mut Option<String> {
+        &mut self.user_name
+    }
+
+    pub fn password(&mut self) -> &mut Option<String> {
+        &mut self.password
+    }
+}
+
+impl Default for Client {
+    fn default() -> Self {
+        Self {
+            user_name: std::env::var("LOGNAME")
+                .or_else(|_| std::env::var("USER"))
+                .ok(),
+            password: None,
+            agent: Agent::new_env(),
+        }
     }
 }
 

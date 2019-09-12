@@ -1,8 +1,8 @@
 mod password;
-mod pubkey;
+mod publickey;
 
 pub use password::*;
-pub use pubkey::*;
+pub use publickey::*;
 
 use crate::codec::*;
 
