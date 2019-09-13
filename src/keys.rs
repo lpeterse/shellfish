@@ -18,14 +18,13 @@ pub enum PublicKey {
 
 impl <'a> Codec<'a> for PublicKey {
     fn size(&self) -> usize {
-        4 + match self {
+        match self {
             PublicKey::Ed25519PublicKey(k) => k.size(),
             PublicKey::RsaPublicKey(k) => Codec::size(&"ssh-rsa") + k.size(),
             PublicKey::UnknownPublicKey(k) => Codec::size(&k.algo) + k.key.len(),
         }
     }
     fn encode<E: Encoder>(&self,c: &mut E) {
-        c.push_u32be((self.size() - 4) as u32);
         match self {
             PublicKey::Ed25519PublicKey(k) => {
                 Codec::encode(k, c);
@@ -55,16 +54,14 @@ pub enum Signature {
 
 impl <'a> Codec<'a> for Signature {
     fn size(&self) -> usize {
-        4 + match self {
-            Signature::Ed25519Signature(k) => Codec::size(&"ssh-ed25519") + k.size(),
+        match self {
+            Signature::Ed25519Signature(k) => k.size(),
             Signature::UnknownSignature(k) => Codec::size(&k.algo) + k.signature.len(),
         }
     }
     fn encode<E: Encoder>(&self,c: &mut E) {
-        c.push_u32be((self.size() - 4) as u32);
         match self {
             Signature::Ed25519Signature(k) => {
-                Codec::encode(&"ssh-ed25519", c);
                 Codec::encode(k, c);
             },
             Signature::UnknownSignature(k) => {
@@ -73,15 +70,8 @@ impl <'a> Codec<'a> for Signature {
             }
         }
     }
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let len = c.take_u32be()?;
-        let mut dec = BDecoder(c.take_bytes(len as usize)?);
-        Some(match Codec::decode(&mut dec)? {
-            "ssh-ed25519" => Signature::Ed25519Signature(Codec::decode(&mut dec)?),
-            algo => Signature::UnknownSignature(UnknownSignature {
-                algo: String::from(algo),
-                signature:  Vec::from(dec.take_all()?),
-            }),
-        })
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        // TODO
+        Some(Signature::Ed25519Signature(Codec::decode(d)?))
     }
 }

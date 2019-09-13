@@ -13,15 +13,15 @@ use self::msg_sign_response::*;
 use crate::algorithm::*;
 use crate::buffer::Buffer;
 use crate::codec::*;
-use crate::keys::{PublicKey};
+use crate::keys::PublicKey;
 
 use async_std::os::unix::net::UnixStream;
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
-#[derive(Debug, Clone)]
 pub struct Agent {
     path: PathBuf,
+    stream: Option<Buffer<UnixStream>>,
 }
 
 impl Agent {
@@ -29,7 +29,10 @@ impl Agent {
 
     /// Create a new agent instance by path.
     pub fn new(path: &Path) -> Self {
-        Self { path: path.into() }
+        Self {
+            path: path.into(),
+            stream: None,
+        }
     }
 
     /// Create a new agent instance with the value
@@ -38,13 +41,13 @@ impl Agent {
         let s = std::env::var_os(Self::SSH_AUTH_SOCK)?;
         Self {
             path: TryFrom::try_from(s).ok()?,
+            stream: None,
         }
         .into()
     }
 
     /// Request a list of identities from the agent.
     pub async fn identities(&self) -> Result<Vec<(PublicKey, String)>, AgentError> {
-
         let mut s = Buffer::new(UnixStream::connect(&self.path).await?);
         // Send request
         let req = MsgIdentitiesRequest {};
@@ -61,38 +64,52 @@ impl Agent {
     }
 
     /// Sign a digest with the corresponding private key known to be owned the agent.
-    pub async fn sign<'a,'b, S: SignatureAlgorithm>(
-        &self,
+    pub async fn sign<'a, S: SignatureAlgorithm>(
+        &'a mut self,
         key: S::PublicKey,
         data: &[u8],
         flags: u32,
     ) -> Result<Option<S::Signature>, AgentError>
-        where
-            S::PublicKey: Codec<'a>,
-            S::Signature: Codec<'a>,
+    where
+        S::PublicKey: Codec<'a>,
+        S::Signature: Codec<'a>,
     {
-        let mut s = Buffer::new(UnixStream::connect(&self.path).await?);
-        // Send request
-        let req: MsgSignRequest<S> = MsgSignRequest { key, data, flags };
-        let len = req.size();
-        let mut enc = BEncoder::from(s.alloc(4 + len).await?);
-        enc.push_u32be(len as u32);
-        req.encode(&mut enc);
-        s.flush().await?;
-        // Receive response
-        let len = s.read_u32be().await?;
-        let buf = s.read_exact(len as usize).await?;
-        let buf = Vec::from(buf);
-        let mut dec = BDecoder(&buf[..]);
-        println!("RECV {:?}",buf);
-        //let res: E2<MsgSignResponse<S>, MsgFailure> =
-        //    Codec::decode(&mut dec).ok_or(AgentError::CodecError)?;
-        //let x = Ok(match res {
-        //    E2::A(x) => Some(x.signature),
-        //    E2::B(_) => None,
-        //});
-        let _ = s;
-        Err(AgentError::CodecError)
+        self.connect().await?;
+        match self.stream.as_mut() {
+            None => Ok(None),
+            Some(s) => {
+                // Send request
+                let req: MsgSignRequest<S> = MsgSignRequest { key, data, flags };
+                let len = req.size();
+                let mut enc = BEncoder::from(s.alloc(4 + len).await?);
+                enc.push_u32be(len as u32);
+                req.encode(&mut enc);
+                s.flush().await?;
+                // Receive response
+                let len = s.read_u32be().await?;
+                let buf = s.read_exact(len as usize).await?;
+                let mut dec = BDecoder(&buf[..]);
+                let res: E2<MsgSignResponse<S>,MsgFailure> = Codec::decode(&mut dec).ok_or(AgentError::CodecError)?;
+                match res {
+                    E2::A(x) => Ok(Some(x.signature)),
+                    E2::B(_) => Ok(None),
+                }
+            }
+        }
+    }
+
+    pub async fn connect(&mut self) -> Result<(),std::io::Error> {
+        self.stream = Some(Buffer::new(UnixStream::connect(&self.path).await?));
+        Ok(())
+    }
+}
+
+impl Clone for Agent {
+    fn clone(&self) -> Self {
+        Self {
+            path: self.path.clone(),
+            stream: None
+        }
     }
 }
 

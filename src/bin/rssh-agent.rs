@@ -7,7 +7,7 @@ fn main() {
     env_logger::init();
 
     futures::executor::block_on(async move {
-        let agent = Agent::new_env().expect("");
+        let mut agent = Agent::new_env().expect("");
         let digest: [u8;3] = [0,1,2];
         
         for (key,_) in agent.identities().await.expect("identities") {

@@ -10,7 +10,7 @@ fn main() {
 
     futures::executor::block_on(async move {
         let mut client = Client::default();
-        *client.user_name() = None;
+        //*client.user_name() = None;
         let conn = client
             .connect("localhost:22")
             .await;

@@ -20,4 +20,4 @@ poly1305 = "0.3.0"
 
 [profile.release]
 lto = true
-#panic = "abort"
+panic = "abort"
