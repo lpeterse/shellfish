@@ -9,7 +9,7 @@ impl Curve25519PublicKey {
     }
 }
 
-impl <'a> Codec<'a> for Curve25519PublicKey {
+impl Encode for Curve25519PublicKey {
     fn size(&self) -> usize {
         4 + 32
     }
@@ -17,6 +17,9 @@ impl <'a> Codec<'a> for Curve25519PublicKey {
         c.push_u32be(32);
         c.push_bytes(&self.0);
     }
+}
+
+impl <'a> Decode<'a> for Curve25519PublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let mut k = [0;32];
         c.take_u32be().filter(|x| x == &32)?;

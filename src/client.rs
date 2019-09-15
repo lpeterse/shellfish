@@ -5,7 +5,7 @@ use crate::service::*;
 use crate::transport::*;
 
 use async_std::net::TcpStream;
-use std::net::ToSocketAddrs;
+use async_std::net::ToSocketAddrs;
 
 pub struct Client {
     user_name: Option<String>,
@@ -32,6 +32,7 @@ impl Client {
                     transport,
                     <Connection as Service>::NAME,
                     user,
+                    self.password.clone(),
                     self.agent.clone(),
                 )
                 .await?

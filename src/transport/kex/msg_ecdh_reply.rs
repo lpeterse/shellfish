@@ -8,7 +8,7 @@ pub struct KexEcdhReply {
     pub signature: Signature,
 }
 
-impl <'a> Codec<'a> for KexEcdhReply {
+impl Encode for KexEcdhReply {
     fn size(&self) -> usize {
         1
         + self.host_key.size()
@@ -17,15 +17,18 @@ impl <'a> Codec<'a> for KexEcdhReply {
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u8(31);
-        Codec::encode(&self.host_key, c);
-        Codec::encode(&self.dh_public, c);
-        Codec::encode(&self.signature, c);
+        Encode::encode(&self.host_key, c);
+        Encode::encode(&self.dh_public, c);
+        Encode::encode(&self.signature, c);
     }
+}
+
+impl <'a> Decode<'a> for KexEcdhReply {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u8().filter(|x| x == &31)?;
-        let hk = Codec::decode(c)?;
-        let ek = Codec::decode(c)?;
-        let sig = Codec::decode(c)?;
+        let hk = Decode::decode(c)?;
+        let ek = Decode::decode(c)?;
+        let sig = Decode::decode(c)?;
         Some(Self {
             host_key: hk,
             dh_public: ek,

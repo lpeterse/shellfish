@@ -18,14 +18,17 @@ impl TryFrom<&[u8]> for Language {
     }
 }
 
-impl<'a> Codec<'a> for Language {
+impl Encode for Language {
     fn size(&self) -> usize {
-        Codec::size(&self.0)
+        Encode::size(&self.0)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        Codec::encode(&self.0, e)
+        Encode::encode(&self.0, e)
     }
+}
+
+impl<'a> Decode<'a> for Language {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        Codec::decode(d).map(Self)
+        Decode::decode(d).map(Self)
     }
 }

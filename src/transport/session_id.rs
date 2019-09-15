@@ -1,3 +1,5 @@
+use crate::codec::*;
+
 pub enum SessionId {
     None,
     SessionId32([u8;32])
@@ -42,6 +44,37 @@ impl std::fmt::Debug for SessionId {
                     id[20], id[21], id[22], id[23],
                     id[24], id[25], id[26], id[27],
                     id[28], id[29], id[30], id[31])
+        }
+    }
+}
+
+impl Encode for SessionId {
+    fn size(&self) -> usize {
+        4 + match self {
+            Self::None => 0,
+            Self::SessionId32(_) => 32,
+        }
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        match self {
+            Self::None => {},
+            Self::SessionId32(id) => {
+                e.push_u32be(32);
+                e.push_bytes(id);
+            }
+        }
+    }
+}
+
+impl<'a> Decode<'a> for SessionId {
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        match d.take_u32be()? {
+            32 => {
+                let mut x = [0;32];
+                d.take_into(&mut x);
+                Some(Self::SessionId32(x))
+            }
+            _ => None,
         }
     }
 }

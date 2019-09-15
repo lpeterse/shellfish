@@ -10,7 +10,7 @@ impl <'a> Failure<'a> {
     const MSG_NUMBER: u8 = 51;
 }
 
-impl<'a> Codec<'a> for Failure<'a> {
+impl <'a> Encode for Failure<'a> {
     fn size(&self) -> usize {
         1 + NameList::size(&self.methods) + 1
     }
@@ -19,6 +19,9 @@ impl<'a> Codec<'a> for Failure<'a> {
         NameList::encode(&self.methods, e);
         e.push_u8(self.partial_success as u8);
     }
+}
+
+impl<'a> Decode<'a> for Failure<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {

@@ -35,9 +35,7 @@ pub struct Connection {
 }
 
 impl Connection {
-    pub const SERVICE_NAME: &'static str = "ssh-connection";
-
-    pub fn new<T: TransportStream>(mut t: Transport<T>) -> Connection {
+    pub fn new<T: TransportStream>(t: Transport<T>) -> Connection {
         let (s1,r1) = oneshot::channel();
         let (s2,r2) = mpsc::channel(1);
         async_std::task::spawn(async move {

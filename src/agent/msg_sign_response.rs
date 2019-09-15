@@ -12,30 +12,36 @@ impl <S: SignatureAlgorithm> MsgSignResponse<S> {
 
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>
     where
-        S::Signature: Codec<'a>
+        S::Signature: Decode<'a>
     {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {
-            signature: Codec::decode(d)?
+            signature: Decode::decode(d)?
         }.into()
     }
 }
 
-impl <'a, S: SignatureAlgorithm> Codec<'a> for MsgSignResponse<S>
+impl <S: SignatureAlgorithm> Encode for MsgSignResponse<S>
 where
-    S::Signature: Codec<'a>
+    S::Signature: Encode
 {
     fn size(&self) -> usize {
-        1 + Codec::size(&self.signature)
+        1 + Encode::size(&self.signature)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(Self::MSG_NUMBER as u8);
-        Codec::encode(&self.signature, e);
+        Encode::encode(&self.signature, e);
     }
+}
+
+impl <'a, S: SignatureAlgorithm> Decode<'a> for MsgSignResponse<S>
+where
+    S::Signature: Decode<'a>
+{
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {
-            signature: Codec::decode(d)?
+            signature: Decode::decode(d)?
         }.into()
     }
 }

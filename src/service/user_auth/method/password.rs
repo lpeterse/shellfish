@@ -3,18 +3,21 @@ use super::*;
 #[derive(Debug)]
 pub struct PasswordMethod(pub String);
 
-impl <'a> Method<'a> for PasswordMethod {
+impl <'a> Method for PasswordMethod {
     const NAME: &'static str = "password";
 }
 
-impl <'a> Codec<'a> for PasswordMethod {
+impl Encode for PasswordMethod {
     fn size(&self) -> usize {
-        Codec::size(&self.0)
+        Encode::size(&self.0)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        Codec::encode(&self.0, e);
+        Encode::encode(&self.0, e);
     }
+}
+
+impl <'a> Decode<'a> for PasswordMethod {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        Codec::decode(d).map(PasswordMethod)
+        Decode::decode(d).map(PasswordMethod)
     }
 }

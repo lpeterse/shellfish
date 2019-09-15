@@ -51,36 +51,40 @@ impl Agent {
         let mut s = Buffer::new(UnixStream::connect(&self.path).await?);
         // Send request
         let req = MsgIdentitiesRequest {};
-        let len = Codec::size(&req);
+        let len = Encode::size(&req);
         let mut enc = BEncoder::from(s.alloc(4 + len).await?);
         enc.push_u32be(len as u32);
-        Codec::encode(&req, &mut enc);
+        Encode::encode(&req, &mut enc);
         s.flush().await?;
         // Receive response
         let len = s.read_u32be().await?;
-        let mut dec = BDecoder(s.read_exact(len as usize).await?);
-        let res: MsgIdentitiesAnswer = Codec::decode(&mut dec).ok_or(AgentError::CodecError)?;
+        let buf = s.read_exact(len as usize).await?;
+        log::error!("FOOBAR {:?}", buf);
+        let mut dec = BDecoder(buf);
+        let res: MsgIdentitiesAnswer = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
         Ok(res.identities)
     }
 
     /// Sign a digest with the corresponding private key known to be owned the agent.
-    pub async fn sign<'a, S: SignatureAlgorithm>(
+    pub async fn sign<'a, S, D>(
         &'a mut self,
-        key: S::PublicKey,
-        data: &[u8],
+        key: &'a S::PublicKey,
+        data: &'a D,
         flags: u32,
     ) -> Result<Option<S::Signature>, AgentError>
     where
-        S::PublicKey: Codec<'a>,
-        S::Signature: Codec<'a>,
+        S: SignatureAlgorithm,
+        S::PublicKey: Encode,
+        S::Signature: Decode<'a>,
+        D: Encode,
     {
         self.connect().await?;
         match self.stream.as_mut() {
             None => Ok(None),
             Some(s) => {
                 // Send request
-                let req: MsgSignRequest<S> = MsgSignRequest { key, data, flags };
-                let len = req.size();
+                let req: MsgSignRequest<S,D> = MsgSignRequest { key, data, flags };
+                let len = Encode::size(&req);
                 let mut enc = BEncoder::from(s.alloc(4 + len).await?);
                 enc.push_u32be(len as u32);
                 req.encode(&mut enc);
@@ -89,7 +93,7 @@ impl Agent {
                 let len = s.read_u32be().await?;
                 let buf = s.read_exact(len as usize).await?;
                 let mut dec = BDecoder(&buf[..]);
-                let res: E2<MsgSignResponse<S>,MsgFailure> = Codec::decode(&mut dec).ok_or(AgentError::CodecError)?;
+                let res: E2<MsgSignResponse<S>,MsgFailure> = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
                 match res {
                     E2::A(x) => Ok(Some(x.signature)),
                     E2::B(_) => Ok(None),

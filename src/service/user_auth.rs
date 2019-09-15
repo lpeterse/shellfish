@@ -1,12 +1,14 @@
-mod failure;
 mod method;
+mod msg_failure;
+mod msg_success;
 mod msg_userauth_request;
-mod success;
+mod signature;
 
-pub use self::failure::*;
 pub use self::method::*;
+pub use self::msg_failure::*;
+pub use self::msg_success::*;
 pub use self::msg_userauth_request::*;
-pub use self::success::*;
+pub use self::signature::*;
 
 use super::Service;
 use crate::algorithm::*;
@@ -26,22 +28,35 @@ impl UserAuth {
         mut transport: Transport<T>,
         service_name: &str,
         user_name: &str,
+        password: Option<String>,
         agent: Option<Agent>
     ) -> Result<Transport<T>, UserAuthError> {
 
         match agent {
             None => (),
-            Some(a) => {
+            Some(mut a) => {
                 let identities = a.identities().await?;
-                for (key,_) in identities {
+                for (key,i) in identities {
+                    log::error!("using identity {:?}, {:?}", key, i);
                     match key {
-                        PublicKey::Ed25519PublicKey(key) => {
+                        PublicKey::Ed25519PublicKey(public_key) => {
+                            let data: SignatureData<SshEd25519> = SignatureData {
+                                session_id: transport.session_id().as_ref(),
+                                user_name,
+                                service_name,
+                                public_key: public_key.clone(),
+                            };
+                            let signature: Ed25519Signature = match a.sign::<SshEd25519, SignatureData<SshEd25519>>(&public_key, &data, 0).await? {
+                                None => continue,
+                                Some(s) => s,
+                            };
+                            log::error!("SIGNATURE {:?}", signature);
                             let req: MsgUserAuthRequest<PublicKeyMethod<SshEd25519>> = MsgUserAuthRequest {
                                 user_name,
                                 service_name,
                                 method: PublicKeyMethod {
-                                    public_key: key,
-                                    signature: None
+                                    public_key,
+                                    signature: Some(signature),
                                 },
                             };
                             transport.send(&req).await?;

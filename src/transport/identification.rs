@@ -26,7 +26,7 @@ impl Default for Identification {
     }
 }
 
-impl <'a> Codec<'a> for Identification {
+impl Encode for Identification {
     fn size(&self) -> usize {
         b"SSH-2.0-".len()
         + self.version.len()
@@ -37,6 +37,9 @@ impl <'a> Codec<'a> for Identification {
         e.push_bytes(&self.version.as_bytes());
         match self.comment { None => (), Some(ref x) => { e.push_u8(' ' as u8); e.push_bytes(&x.as_bytes()); }};
     }
+}
+
+impl <'a> Decode<'a> for Identification {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_match(b"SSH-2.0-")?;
         if d.remaining() > Self::MAX_LEN { return None };

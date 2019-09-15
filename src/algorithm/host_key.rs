@@ -1,6 +1,8 @@
-mod ed25519;
+mod ssh_ed25519;
+mod ssh_rsa;
 
-pub use self::ed25519::*;
+pub use self::ssh_ed25519::*;
+pub use self::ssh_rsa::*;
 
 use std::convert::TryFrom;
 

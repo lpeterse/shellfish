@@ -1,5 +1,5 @@
-mod debug;
-mod disconnect;
+mod msg_debug;
+mod msg_disconnect;
 mod encryption;
 mod error;
 mod identification;
@@ -7,13 +7,13 @@ mod kex;
 mod key_streams;
 mod packet_layout;
 mod session_id;
-mod ignore;
-mod unimplemented;
-mod service_request;
-mod service_accept;
+mod msg_ignore;
+mod msg_unimplemented;
+mod msg_service_request;
+mod msg_service_accept;
 
-pub use self::debug::*;
-pub use self::disconnect::*;
+pub use self::msg_debug::*;
+pub use self::msg_disconnect::*;
 pub use self::encryption::*;
 pub use self::error::*;
 pub use self::identification::*;
@@ -21,10 +21,10 @@ pub use self::kex::*;
 pub use self::key_streams::*;
 pub use self::packet_layout::*;
 pub use self::session_id::*;
-pub use self::ignore::*;
-pub use self::unimplemented::*;
-pub use self::service_request::*;
-pub use self::service_accept::*;
+pub use self::msg_ignore::*;
+pub use self::msg_unimplemented::*;
+pub use self::msg_service_request::*;
+pub use self::msg_service_accept::*;
 
 use crate::buffer::*;
 use crate::codec::*;
@@ -99,12 +99,16 @@ where
         Ok(t)
     }
 
-    pub async fn send<'a, M: Codec<'a>>(&mut self, msg: &M) -> TransportResult<()> {
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    pub async fn send<M: Encode>(&mut self, msg: &M) -> TransportResult<()> {
         self.rekey_if_necessary().await?;
         self.send_raw(msg).await
     }
 
-    pub async fn receive<'a, M: Codec<'a>>(&'a mut self) -> TransportResult<M> {
+    pub async fn receive<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
         self.rekey_if_necessary().await?;
         self.receive_raw().await
     }
@@ -118,10 +122,10 @@ where
     }
 
     pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
-        let req = ServiceRequest(service_name);
+        let req = MsgServiceRequest(service_name);
         self.send_raw(&req).await?;
         self.flush().await?;
-        let _: ServiceAccept<'_> = self.receive_raw().await?;
+        let _: MsgServiceAccept<'_> = self.receive_raw().await?;
         Ok(self)
     }
 
@@ -195,8 +199,8 @@ where
         stream: &mut Buffer<T>,
         id: Identification,
     ) -> TransportResult<Identification> {
-        let mut enc = BEncoder::from(stream.alloc(Codec::size(&id) + 2).await?);
-        Codec::encode(&id, &mut enc);
+        let mut enc = BEncoder::from(stream.alloc(Encode::size(&id) + 2).await?);
+        Encode::encode(&id, &mut enc);
         enc.push_u8('\r' as u8);
         enc.push_u8('\n' as u8);
         stream.flush().await?;
@@ -207,24 +211,24 @@ where
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
             let line = stream.read_line(Identification::MAX_LEN).await?;
-            match Codec::decode(&mut BDecoder(line)) {
+            match Decode::decode(&mut BDecoder(line)) {
                 Some(id) => break Ok(id),
                 None => (),
             }
         }
     }
 
-    async fn send_raw<'a, M: Codec<'a>>(&mut self, msg: &M) -> TransportResult<()> {
+    async fn send_raw<'a, M: Encode>(&mut self, msg: &M) -> TransportResult<()> {
         let pc = self.packets_sent;
         self.packets_sent += 1;
-        let layout = self.encryption_ctx.buffer_layout(Codec::size(msg));
+        let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
         let buffer = self.stream.alloc(layout.buffer_len()).await?;
         let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
-        Codec::encode(msg, &mut encoder);
+        Encode::encode(msg, &mut encoder);
         Ok(self.encryption_ctx.encrypt_packet(pc, layout, buffer))
     }
 
-    async fn receive_raw<'a, M: Codec<'a>>(&'a mut self) -> TransportResult<M> {
+    async fn receive_raw<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
         let pc = self.packets_received;
         self.packets_received += 1;
         self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
@@ -242,7 +246,9 @@ where
             .decrypt_packet(pc, buffer)
             .ok_or(TransportError::MessageIntegrity)?;
 
-        Codec::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
+        log::error!("PACKET {:?}", packet);
+
+        Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }
 }
 

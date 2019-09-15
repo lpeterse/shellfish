@@ -20,7 +20,7 @@ pub enum Reason {
     Other(u32),
 }
 
-impl<'a> Codec<'a> for Reason {
+impl Encode for Reason {
     fn size(&self) -> usize {
         4
     }
@@ -44,6 +44,9 @@ impl<'a> Codec<'a> for Reason {
             Self::Other(reason) => *reason,
         })
     }
+}
+
+impl<'a> Decode<'a> for Reason {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u32be().map(|x| match x {
             1 => Self::HostNotAllowedToConnect,

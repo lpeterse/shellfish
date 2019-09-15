@@ -40,7 +40,7 @@ impl KexInit {
     }
 }
 
-impl <'a> Codec<'a> for KexInit {
+impl Encode for KexInit {
     fn size(&self) -> usize {
         1 + 16 + 1 + 4
         + NameList::size(&self.kex_algorithms)
@@ -70,6 +70,9 @@ impl <'a> Codec<'a> for KexInit {
         e.push_u8(self.first_packet_follows as u8);
         e.push_u32be(0);
     }
+}
+
+impl <'a> Decode<'a> for KexInit {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().and_then(|x| if x == Self::MSG_NUMBER { Some(()) } else { None })?;
         let r = Self {

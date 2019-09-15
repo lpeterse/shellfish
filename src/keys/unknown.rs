@@ -1,4 +1,4 @@
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UnknownPublicKey {
     pub algo: String,
     pub key: Vec<u8>,

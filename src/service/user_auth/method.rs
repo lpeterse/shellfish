@@ -6,6 +6,6 @@ pub use publickey::*;
 
 use crate::codec::*;
 
-pub trait Method<'a>: Codec<'a> {
+pub trait Method {
     const NAME: &'static str;
 }

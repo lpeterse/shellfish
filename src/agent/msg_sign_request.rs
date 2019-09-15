@@ -2,44 +2,32 @@ use crate::codec::*;
 use crate::algorithm::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgSignRequest<'a, S: SignatureAlgorithm> {
-    pub key: S::PublicKey,
-    pub data: &'a [u8],
+pub struct MsgSignRequest<'a, S: SignatureAlgorithm, D: Encode> {
+    pub key: &'a S::PublicKey,
+    pub data: &'a D,
     pub flags: u32,
 }
 
-impl <'a, S: SignatureAlgorithm> MsgSignRequest<'a,S> {
+impl <'a, S: SignatureAlgorithm,D: Encode> MsgSignRequest<'a,S,D> {
     pub const MSG_NUMBER: u8 = 13;
 }
 
-impl <'a, S: SignatureAlgorithm> MsgSignRequest<'a,S>
+impl <'a, S: SignatureAlgorithm, D: Encode> Encode for MsgSignRequest<'a,S,D>
+where
+    S::PublicKey: Encode,
+    S::Signature: Encode,
 {
-    pub fn size<'b>(&self) -> usize
-    where
-        S::PublicKey: Codec<'b>,
-    {
-        1 + Codec::size(&self.key)
-        + Codec::size(&self.data)
+    fn size(&self) -> usize {
+        1 + Encode::size(self.key)
+        + 4
+        + Encode::size(self.data)
         + 4
     }
-    pub fn encode<'b, E: Encoder>(&self, e: &mut E)
-    where
-        S::PublicKey: Codec<'b>,
-    {
+    fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(Self::MSG_NUMBER as u8);
-        Codec::encode(&self.key, e);
-        Codec::encode(&self.data, e);
+        Encode::encode(self.key, e);
+        e.push_u32be(Encode::size(self.data) as u32);
+        Encode::encode(self.data, e);
         e.push_u32be(self.flags);
-    }
-    pub fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self>
-    where
-        S::PublicKey: Codec<'a>,
-    {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
-        Self {
-            key: Codec::decode(d)?,
-            data: Codec::decode(d)?,
-            flags: d.take_u32be()?,
-        }.into()
     }
 }

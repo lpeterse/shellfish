@@ -1,16 +1,16 @@
 mod cookie;
-mod ecdh_init;
-mod ecdh_reply;
 mod ecdh_hash;
-mod init;
-mod new_keys;
+mod msg_ecdh_init;
+mod msg_ecdh_reply;
+mod msg_kex_init;
+mod msg_new_keys;
 
 pub use self::cookie::*;
 pub use self::ecdh_hash::*;
-pub use self::ecdh_init::*;
-pub use self::ecdh_reply::*;
-pub use self::init::*;
-pub use self::new_keys::*;
+pub use self::msg_ecdh_init::*;
+pub use self::msg_ecdh_reply::*;
+pub use self::msg_kex_init::*;
+pub use self::msg_new_keys::*;
 
 use super::*;
 use crate::algorithm::*;
