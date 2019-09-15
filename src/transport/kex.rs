@@ -104,7 +104,7 @@ impl <A: EcdhAlgorithm> Ecdh<A> {
             server_host_key: &ecdh_reply.host_key,
             dh_client_key: &self.client_dh_public,
             dh_server_key: &ecdh_reply.dh_public,
-            dh_secret: &k,
+            dh_secret: A::secret_as_ref(&k),
         }.sha256();
 
         let key_streams = if session_id.is_uninitialized() {

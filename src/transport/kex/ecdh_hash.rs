@@ -14,7 +14,7 @@ pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
     pub server_host_key: &'a PublicKey,
     pub dh_client_key: &'a A::PublicKey,
     pub dh_server_key: &'a A::PublicKey,
-    pub dh_secret: &'a A::SharedSecret,
+    pub dh_secret: &'a [u8],
 }
 
 impl <'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
@@ -39,7 +39,7 @@ impl <'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
         e.push_u32be(A::public_as_ref(self.dh_server_key).len() as u32);
         e.push_bytes(&A::public_as_ref(self.dh_server_key));
 
-        Encode::encode(&MPInt(A::secret_as_ref(self.dh_secret)), e);
+        Encode::encode(&MPInt(self.dh_secret), e);
     }
 
     pub fn sha256(&self) -> [u8;32] {
