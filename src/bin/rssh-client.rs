@@ -16,7 +16,15 @@ fn main() {
             .await;
         match conn {
             Err(e) => println!("{:?}", e),
-            Ok(conn) => println!("connected"),
+            Ok(mut conn) => {
+                async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+                println!("CONNECTED");
+                conn.foobar().await.expect("");
+                async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+                println!("CONNECTED");
+                conn.foobar().await.expect("");
+                async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+            },
         }
     })
 }

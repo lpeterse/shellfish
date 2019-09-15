@@ -37,7 +37,6 @@ impl UserAuth {
             Some(mut a) => {
                 let identities = a.identities().await?;
                 for (key,i) in identities {
-                    log::error!("using identity {:?}, {:?}", key, i);
                     match key {
                         PublicKey::Ed25519PublicKey(public_key) => {
                             let data: SignatureData<SshEd25519> = SignatureData {
@@ -50,7 +49,6 @@ impl UserAuth {
                                 None => continue,
                                 Some(s) => s,
                             };
-                            log::error!("SIGNATURE {:?}", signature);
                             let req: MsgUserAuthRequest<PublicKeyMethod<SshEd25519>> = MsgUserAuthRequest {
                                 user_name,
                                 service_name,

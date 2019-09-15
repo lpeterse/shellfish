@@ -1,8 +1,12 @@
 use super::*;
 use crate::transport::*;
+use super::msg_global_request::*;
 
 use futures::channel::oneshot;
 use futures::channel::mpsc;
+use futures::stream::StreamExt;
+use futures::FutureExt;
+use futures::select;
 
 pub struct ConnectionState<T> {
     pub canary: oneshot::Receiver<()>,
@@ -13,17 +17,46 @@ pub struct ConnectionState<T> {
 
 impl<T: TransportStream> ConnectionState<T> {
 
-    pub async fn run(self) {
+    pub async fn run(mut self) -> Result<(),ConnectionError> {
+        enum Event<T> {
+            Command(Command),
+            Message(T),
+        }
 
+        loop {
+            let event = {
+                let t1 = self.commands.next();
+                let t2 = self.transport.receive().fuse();
+                futures::pin_mut!( t1, t2 );
+                futures::select! {
+                    x = t1 => {
+                        Event::Command(x.ok_or(ConnectionError::CommandStreamTerminated)?)
+                    },
+                    x = t2 =>  {
+                        Event::Message(x?)
+                    },
+                    complete => break
+                }
+            };
+            match event {
+                Event::Command(cmd) => self.dispatch_command(cmd).await?,
+                Event::Message(_) => println!("MESSAGE"),
+            }
+        }
+        Ok(())
     }
 
-    //pub async fn authenticate(mut transport: Transport<T>) -> Result<Self, UserAuthError> {
-    //    authenticate(&mut transport).await?;
-    //    Ok(ConnectionState {
-    //        transport,
-    //        channels: LowestKeyMap::new(256),
-    //    })
-    //}
+    pub async fn dispatch_command(&mut self, cmd: Command) -> Result<(), ConnectionError> {
+        match cmd {
+            Command::ChannelOpenSession(x) => println!("ASHDA"),
+            Command::Foobar => println!("FOOBAR"),
+        }
+        Ok(())
+    }
+
+    pub async fn dispatch_message<'a>(&'a mut self, msg: Message<'a>) -> Result<(), ConnectionError> {
+        Ok(())
+    }
 
     /*
     pub async fn channel(&mut self) -> Result<Channel, ChannelOpenError> {
@@ -42,4 +75,29 @@ impl<T: TransportStream> ConnectionState<T> {
 
         Ok(Channel {})
     }*/
+}
+
+#[derive(Debug)]
+pub enum Message<'a> {
+    GlobalRequest(MsgGlobalRequest<'a>)
+}
+
+#[derive(Debug)]
+pub enum ConnectionError {
+    ConnectionLost,
+    CommandStreamTerminated,
+    TransportError(TransportError),
+    ChannelOpenFailure(ChannelOpenFailure),
+}
+
+impl From<TransportError> for ConnectionError {
+    fn from(e: TransportError) -> Self {
+        Self::TransportError(e)
+    }
+}
+
+impl From<ChannelOpenFailure> for ConnectionError {
+    fn from(e: ChannelOpenFailure) -> Self {
+        Self::ChannelOpenFailure(e)
+    }
 }

@@ -246,7 +246,7 @@ where
             .decrypt_packet(pc, buffer)
             .ok_or(TransportError::MessageIntegrity)?;
 
-        log::error!("PACKET {:?}", packet);
+        //log::error!("PACKET {:?}", packet);
 
         Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }

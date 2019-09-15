@@ -59,7 +59,6 @@ impl Agent {
         // Receive response
         let len = s.read_u32be().await?;
         let buf = s.read_exact(len as usize).await?;
-        log::error!("FOOBAR {:?}", buf);
         let mut dec = BDecoder(buf);
         let res: MsgIdentitiesAnswer = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
         Ok(res.identities)

@@ -4,7 +4,8 @@ use super::*;
 use futures::channel::oneshot;
 
 pub enum Command {
-    ChannelOpenSession(ChannelOpen<Session>)
+    ChannelOpenSession(ChannelOpen<Session>),
+    Foobar
 }
 
 pub struct ChannelOpen<T: ChannelType> {
@@ -22,3 +23,4 @@ pub struct ChannelOpenFailure {
     pub description: String,
     pub language: Language,
 }
+

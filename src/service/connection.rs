@@ -49,6 +49,10 @@ impl Connection {
         Connection { command: s2, _canary: s1 }
     }
 
+    pub async fn foobar(&mut self) -> Result<(), ChannelOpenError> {
+        self.command.send(Command::Foobar).map_err(|_| ChannelOpenError::ConnectionLost).await
+    }
+
     pub async fn open_session(&mut self) -> Result<Channel<Session>,ChannelOpenError> {
         let (s,r) = oneshot::channel();
         let request = Command::ChannelOpenSession(ChannelOpen {
