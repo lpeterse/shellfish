@@ -1,38 +1,46 @@
 use crate::codec::*;
 use crate::keys::*;
+use super::ecdh_algorithm::*;
 
 #[derive(Clone, Debug)]
-pub struct KexEcdhReply {
+pub struct KexEcdhReply<A: EcdhAlgorithm> {
     pub host_key: PublicKey,
-    pub dh_public: Vec<u8>,
+    pub dh_public: A::PublicKey,
     pub signature: Signature,
 }
 
-impl Encode for KexEcdhReply {
+impl <A: EcdhAlgorithm> KexEcdhReply<A> {
+    pub const MSG_NUMBER: u8 = 31;
+}
+
+impl <A: EcdhAlgorithm> Encode for KexEcdhReply<A>
+where
+    A::PublicKey: Encode,
+{
     fn size(&self) -> usize {
-        1
+        std::mem::size_of::<u8>()
         + self.host_key.size()
         + self.dh_public.size()
         + self.signature.size()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(31);
-        Encode::encode(&self.host_key, c);
-        Encode::encode(&self.dh_public, c);
-        Encode::encode(&self.signature, c);
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u8(Self::MSG_NUMBER);
+        Encode::encode(&self.host_key, e);
+        Encode::encode(&self.dh_public, e);
+        Encode::encode(&self.signature, e);
     }
 }
 
-impl <'a> Decode<'a> for KexEcdhReply {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        c.take_u8().filter(|x| x == &31)?;
-        let hk = Decode::decode(c)?;
-        let ek = Decode::decode(c)?;
-        let sig = Decode::decode(c)?;
-        Some(Self {
-            host_key: hk,
-            dh_public: ek,
-            signature: sig,
-        })
+impl <'a, A: EcdhAlgorithm> Decode<'a> for KexEcdhReply<A>
+where
+    A::PublicKey: Decode<'a>,
+{
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.expect_u8(Self::MSG_NUMBER)?;
+        Self {
+            host_key: Decode::decode(d)?,
+            dh_public: Decode::decode(d)?,
+            signature: Decode::decode(d)?,
+        }.into()
     }
 }

@@ -1,6 +1,6 @@
 use crate::codec::*;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MsgFailure {}
 
 impl MsgFailure {
@@ -9,7 +9,7 @@ impl MsgFailure {
 
 impl Encode for MsgFailure {
     fn size(&self) -> usize {
-        1
+        std::mem::size_of::<u8>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(Self::MSG_NUMBER as u8);
@@ -18,7 +18,41 @@ impl Encode for MsgFailure {
 
 impl <'a> Decode<'a> for MsgFailure {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+        d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_size_01() {
+        assert_eq!(1, Encode::size(& MsgFailure {}));
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let mut buf = [0;1];
+        let mut enc = BEncoder::from(buf.as_mut());
+        Encode::encode(& MsgFailure {}, &mut enc);
+        assert_eq!([5], buf);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf = [5];
+        let mut dec = BDecoder::from(buf.as_ref());
+        let res = Some(MsgFailure {});
+        assert_eq!(res, Decode::decode(&mut dec));
+    }
+
+    #[test]
+    fn test_decode_02() {
+        let buf = [0];
+        let mut dec = BDecoder::from(buf.as_ref());
+        let res: Option<MsgFailure> = None;
+        assert_eq!(res, Decode::decode(&mut dec));
     }
 }

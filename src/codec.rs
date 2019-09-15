@@ -24,6 +24,24 @@ impl Encode for () {
     }
 }
 
+impl Encode for u8 {
+    fn size(&self) -> usize {
+        std::mem::size_of::<u8>()
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u8(*self)
+    }
+}
+
+impl Encode for u32 {
+    fn size(&self) -> usize {
+        std::mem::size_of::<u32>()
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u32be(*self)
+    }
+}
+
 impl <'a> Decode<'a> for () {
     fn decode<D: Decoder<'a>>(_: &mut D) -> Option<Self> {
         Some(())
@@ -100,23 +118,6 @@ impl <'a,T,Q> Decode<'a> for (T,Q)
         let t = Decode::decode(c)?;
         let q = Decode::decode(c)?;
         Some((t,q))
-    }
-}
-
-impl Encode for Vec<u8> {
-    fn size(&self) -> usize {
-        4 + self.len()
-    }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u32be(self.len() as u32);
-        c.push_bytes(self);
-    }
-}
-
-impl <'a> Decode<'a> for Vec<u8> {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let len = c.take_u32be()?;
-        Some(Vec::from(c.take_bytes(len as usize)?))
     }
 }
 

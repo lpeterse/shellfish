@@ -1,7 +1,7 @@
 use crate::codec::*;
 use crate::keys::*;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct MsgIdentitiesAnswer {
     pub identities: Vec<(PublicKey, String)>,
 }
@@ -12,7 +12,7 @@ impl MsgIdentitiesAnswer {
 
 impl Encode for MsgIdentitiesAnswer {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.identities)
+        std::mem::size_of::<u8>() + Encode::size(&self.identities)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(Self::MSG_NUMBER as u8);
@@ -22,7 +22,7 @@ impl Encode for MsgIdentitiesAnswer {
 
 impl<'a> Decode<'a> for MsgIdentitiesAnswer {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+        d.expect_u8(Self::MSG_NUMBER)?;
         Self {
             identities: Decode::decode(d)?,
         }

@@ -4,6 +4,9 @@ pub trait Decoder<'a>: Clone {
     fn take_eoi(&self) -> Option<()>;
     fn take_u8(&mut self) -> Option<u8>;
     fn take_u32be(&mut self) -> Option<u32>;
+    fn take_bool(&mut self) -> Option<bool> {
+        self.take_u8().map(|x| x != 0)
+    }
     fn take_bytes(&mut self, len: usize) -> Option<&'a [u8]>;
     fn take_all(&mut self) -> Option<&'a [u8]>;
     fn take_into(&mut self, buf: &mut [u8]) -> Option<()>;
@@ -12,6 +15,19 @@ pub trait Decoder<'a>: Clone {
     fn take_while<F>(&mut self, pred: F) -> Option<&'a [u8]>
         where F: FnMut(u8) -> bool + Sized;
     fn take_match<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
+    // Convenience with default implementation
+    fn expect_u8(&mut self, x: u8) -> Option<()> {
+        self.take_u8().filter(|y| *y == x).map(drop)
+    }
+    fn expect_u32be(&mut self, x: u32) -> Option<()> {
+        self.take_u32be().filter(|y| *y == x).map(drop)
+    }
+    fn expect_true(&mut self) -> Option<()> {
+        self.take_u8().filter(|x| *x != 0).map(drop)
+    }
+    fn expect_false(&mut self) -> Option<()> {
+        self.take_u8().filter(|x| *x == 0).map(drop)
+    }
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -1,33 +1,42 @@
+use super::*;
 use crate::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct KexEcdhInit {
-    dh_public: Vec<u8>
+pub struct KexEcdhInit<A: EcdhAlgorithm> {
+    dh_public: A::PublicKey,
 }
 
-impl KexEcdhInit {
-    pub fn new(dh_public: &[u8]) -> Self {
-        Self {
-            dh_public: Vec::from(dh_public)
-        }
+impl <A: EcdhAlgorithm> KexEcdhInit<A> {
+    pub const MSG_NUMBER: u8 = 30;
+}
+
+impl<A: EcdhAlgorithm> KexEcdhInit<A> {
+    pub fn new(dh_public: A::PublicKey) -> Self {
+        Self { dh_public }
     }
 }
 
-impl Encode for KexEcdhInit {
+impl<A: EcdhAlgorithm> Encode for KexEcdhInit<A>
+where
+    A::PublicKey: Encode
+{
     fn size(&self) -> usize {
-        1 + Encode::size(&self.dh_public)
+        std::mem::size_of::<u8>() + Encode::size(&self.dh_public)
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(30);
+        c.push_u8(Self::MSG_NUMBER);
         Encode::encode(&self.dh_public, c);
     }
 }
 
-impl <'a> Decode<'a> for KexEcdhInit {
+impl<'a, A: EcdhAlgorithm> Decode<'a> for KexEcdhInit<A>
+where
+    A::PublicKey: Decode<'a>
+{
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        c.take_u8().filter(|x| x == &30)?;
-        Some(Self {
-            dh_public: Decode::decode(c)?
-        })
+        c.expect_u8(Self::MSG_NUMBER)?;
+        Self {
+            dh_public: Decode::decode(c)?,
+        }.into()
     }
 }

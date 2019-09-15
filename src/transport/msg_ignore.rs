@@ -1,15 +1,15 @@
 use crate::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgIgnore {
-    data: Vec<u8>
+pub struct MsgIgnore<'a> {
+    data: &'a [u8]
 }
 
-impl MsgIgnore {
+impl <'a> MsgIgnore<'a> {
     const MSG_NUMBER: u8 = 2;
 }
 
-impl Encode for MsgIgnore {
+impl <'a> Encode for MsgIgnore<'a> {
     fn size(&self) -> usize {
         1 + Encode::size(&self.data)
     }
@@ -19,7 +19,7 @@ impl Encode for MsgIgnore {
     }
 }
 
-impl<'a> Decode<'a> for MsgIgnore {
+impl<'a> Decode<'a> for MsgIgnore<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {

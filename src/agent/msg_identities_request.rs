@@ -1,6 +1,6 @@
 use crate::codec::*;
 
-#[derive(Clone, Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MsgIdentitiesRequest {}
 
 impl MsgIdentitiesRequest {
@@ -9,7 +9,7 @@ impl MsgIdentitiesRequest {
 
 impl Encode for MsgIdentitiesRequest {
     fn size(&self) -> usize {
-        1
+        std::mem::size_of::<u8>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(Self::MSG_NUMBER as u8);
@@ -18,10 +18,41 @@ impl Encode for MsgIdentitiesRequest {
 
 impl <'a> Decode<'a> for MsgIdentitiesRequest {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+        d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
     }
 }
 
+#[cfg(test)]
+mod test {
+    use super::*;
 
+    #[test]
+    fn test_size_01() {
+        assert_eq!(1, Encode::size(& MsgIdentitiesRequest {}));
+    }
 
+    #[test]
+    fn test_encode_01() {
+        let mut buf = [0];
+        let mut enc = BEncoder::from(buf.as_mut());
+        Encode::encode(& MsgIdentitiesRequest {}, &mut enc);
+        assert_eq!([11], buf);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf = [11];
+        let mut dec = BDecoder::from(buf.as_ref());
+        let res = Some(MsgIdentitiesRequest {});
+        assert_eq!(res, Decode::decode(&mut dec));
+    }
+
+    #[test]
+    fn test_decode_02() {
+        let buf = [0];
+        let mut dec = BDecoder::from(buf.as_ref());
+        let res: Option<MsgIdentitiesRequest> = None;
+        assert_eq!(res, Decode::decode(&mut dec));
+    }
+}

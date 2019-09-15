@@ -1,6 +1,7 @@
 use sha2::Digest;
 
 pub trait Encoder {
+    fn push_bool(&mut self, x: bool);
     fn push_u8(&mut self, x: u8);
     fn push_u32be(&mut self, x: u32);
     fn push_u32le(&mut self, x: u32);
@@ -8,6 +9,9 @@ pub trait Encoder {
 }
 
 impl <D: Digest> Encoder for D {
+    fn push_bool(&mut self, x: bool) {
+        self.input([if x { 1 } else { 0 }])
+    }
     fn push_u8(&mut self, x: u8) {
         self.input([x])
     }
@@ -29,6 +33,10 @@ pub struct BEncoder<'a> {
 }
 
 impl <'a> Encoder for BEncoder<'a> {
+    fn push_bool(&mut self, x: bool) {
+        self.push_u8(if x { 1 } else { 0 })
+    }
+
     fn push_u8(self: &mut Self, x: u8) {
         self.buf[self.pos] = x;
         self.pos += 1;

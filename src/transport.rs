@@ -154,7 +154,7 @@ where
 
         let sid = match self.role {
             Role::Client => {
-                let ecdh = Ecdh::new(local_init, remote_init)?;
+                let ecdh: Ecdh<X25519> = Ecdh::new(local_init, remote_init)?;
 
                 self.send_raw(ecdh.init()).await?;
                 self.flush().await?;

@@ -1,9 +1,7 @@
-use super::*;
 use super::method::*;
 use super::msg_userauth_request::*;
 use crate::algorithm::*;
 use crate::codec::*;
-use crate::transport::*;
 
 pub struct SignatureData<'a, S: SignatureAlgorithm> {
     pub session_id: &'a [u8],
