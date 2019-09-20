@@ -1,3 +1,5 @@
+#![feature(pin_into_inner)]
+
 pub mod agent;
 pub mod algorithm;
 pub mod buffer;

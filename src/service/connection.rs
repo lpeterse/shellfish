@@ -39,12 +39,13 @@ impl Connection {
         let (s1,r1) = oneshot::channel();
         let (s2,r2) = mpsc::channel(1);
         async_std::task::spawn(async move {
-            ConnectionState {
+            let x = ConnectionState {
                 canary: r1,
                 commands: r2,
                 transport: t,
                 channels: LowestKeyMap::new(256),
-            }.run().await
+            }.run().await;
+            log::error!("{:?}", x);
         });
         Connection { command: s2, _canary: s1 }
     }
@@ -53,19 +54,15 @@ impl Connection {
         self.command.send(Command::Foobar).map_err(|_| ChannelOpenError::ConnectionLost).await
     }
 
-    pub async fn open_session(&mut self) -> Result<Channel<Session>,ChannelOpenError> {
+    pub async fn open_session(&mut self) -> Result<Session,ChannelOpenError> {
         let (s,r) = oneshot::channel();
-        let request = Command::ChannelOpenSession(ChannelOpen {
-                result: s
-            });
+        let request = Command::ChannelOpenSession(s);
         self.command.send(request).map_err(|_| ChannelOpenError::ConnectionLost).await?;
-        let response = r.map_err(|_| ChannelOpenError::ConnectionLost).await??;
-        let channel: Channel<Session> = Channel {
-            id: response.id,
-            request: (),
-            confirmation: (),
-        };
-        Ok(channel)
+        let response = r.map_err(|e| {
+            log::error!("AHAJSDHAKSH {:?}", e);
+            ChannelOpenError::ConnectionLost
+        }).await?;
+         Ok(Session {})
     }
 }
 

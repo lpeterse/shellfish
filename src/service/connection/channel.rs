@@ -1,6 +1,8 @@
 mod type_;
 
 pub use self::type_::*;
+use super::msg_channel_open_failure::ChannelOpenFailureReason;
+use crate::language::*;
 
 use futures::channel::oneshot;
 use futures::channel::mpsc;
@@ -13,16 +15,12 @@ pub struct Channel<T: ChannelType> {
 }
 
 pub enum ChannelState {
-    Opening(OpeningChannel),
-    Open(OpenChannel),
-    Closing(ClosingChannel),
+    Opening(oneshot::Sender<Result<Channel<Session>,OpenFailure>>),
+    Open(Open),
+    Closing(Closing),
 }
 
-pub struct OpeningChannel {
-    pub notify: oneshot::Sender<()>,
-}
-
-pub struct OpenChannel {
+pub struct Open {
     pub local_channel: u32,
     pub local_initial_window_size: u32,
     pub local_max_packet_size: u32,
@@ -33,6 +31,28 @@ pub struct OpenChannel {
     pub notify: mpsc::Sender<()>,
 }
 
-pub struct ClosingChannel {
+pub struct Closing {
     pub notify: oneshot::Sender<()>,
 }
+
+pub struct OpenFailure {
+    pub reason: ChannelOpenFailureReason,
+    pub description: String,
+}
+
+pub struct OpenFailureReason {
+
+}
+
+pub struct ChannelOpenConfirmation<T: ChannelType> {
+    pub id: u32,
+    pub specific: T::Confirmation
+}
+
+#[derive(Debug)]
+pub struct ChannelOpenFailure {
+    pub reason_code: u32,
+    pub description: String,
+    pub language: Language,
+}
+

@@ -18,11 +18,14 @@ fn main() {
             Err(e) => println!("{:?}", e),
             Ok(mut conn) => {
                 async_std::task::sleep(std::time::Duration::from_secs(5)).await;
-                println!("CONNECTED");
+                println!("CONNECTED 1");
                 conn.foobar().await.expect("");
                 async_std::task::sleep(std::time::Duration::from_secs(5)).await;
-                println!("CONNECTED");
+                println!("CONNECTED 2");
                 conn.foobar().await.expect("");
+                async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+                println!("CONNECTED 3");
+                conn.open_session().await.expect("");
                 async_std::task::sleep(std::time::Duration::from_secs(5)).await;
             },
         }

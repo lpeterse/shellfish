@@ -8,8 +8,17 @@ pub struct MsgChannelOpenFailure {
     pub language: Language,
 }
 
+pub struct ChannelOpenFailureReason (u32);
+
+impl ChannelOpenFailureReason {
+    pub const ADMINISTRATIVELY_PROHIBITED: Self = Self(1);
+    pub const OPEN_CONNECT_FAILED : Self = Self(2);
+    pub const UNKNOWN_CHANNEL_TYPE: Self = Self(3);
+    pub const RESOURCE_SHORTAGE: Self = Self(4);
+}
+
 impl<'a> MsgChannelOpenFailure {
-    const MSG_NUMBER: u8 = 91;
+    const MSG_NUMBER: u8 = 92;
 }
 
 impl Encode for MsgChannelOpenFailure {

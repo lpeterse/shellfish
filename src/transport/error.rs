@@ -5,8 +5,10 @@ pub type TransportResult<T> = Result<T,TransportError>;
 #[derive(Debug)]
 pub enum TransportError {
     IoError(std::io::Error),
+    DisconnectError,
     DecoderError,
     KexError(KexError),
+    BadPacketLength,
     MessageIntegrity,
     UnexpectedMessageType(u8),
 }

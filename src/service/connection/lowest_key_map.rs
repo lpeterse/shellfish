@@ -35,22 +35,19 @@ impl <T> LowestKeyMap<T> {
         }
     }
 
-    pub fn insert<F>(&mut self, f: F) -> Option<&mut T>
-        where
-            F: FnOnce(usize) -> T
-    {
+    pub fn insert(&mut self, t: T) -> Result<usize, T> {
         for i in 0 .. self.elements.len() {
             if self.elements[i].is_none() {
-                self.elements[i] = Some(f(i));
-                return self.get_mut(i);
+                self.elements[i] = Some(t);
+                return Ok(i)
             }
         }
         if self.elements.len() < self.capacity {
             let i = self.elements.len();
-            self.elements.push(Some(f(i)));
-            return self.get_mut(i);
+            self.elements.push(Some(t));
+            return Ok(i)
         }
-        None
+        Err(t)
     }
 
     pub fn remove(&mut self, i: usize) {

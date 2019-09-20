@@ -31,10 +31,18 @@ use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use futures::io::{AsyncRead, AsyncWrite};
+use futures::stream::{Stream,StreamExt};
+use futures::lock::Mutex;
+use futures::future::Future;
+use std::sync::Arc;
 use std::convert::{From};
 use std::time::{Duration, Instant};
 use async_std::net::{TcpStream};
 use log;
+use std::pin::Pin;
+use futures::task::Poll;
+use futures::task::Context;
+use std::marker::Unpin;
 
 pub enum Role {
     Client,
@@ -111,6 +119,15 @@ where
     pub async fn receive<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
         self.rekey_if_necessary().await?;
         self.receive_raw().await
+    }
+
+    pub async fn try_receive<'a, M: Decode<'a>>(&'a mut self) -> Result<Option<M>, TransportError> {
+        let x: E3<MsgDisconnect, MsgIgnore<'a>, M> = self.receive().await?;
+        match x {
+            E3::A(_) => Err(TransportError::DisconnectError),
+            E3::B(_) => Ok(None),
+            E3::C(x) => Ok(Some(x)),
+        }
     }
 
     pub async fn flush(&mut self) -> TransportResult<()> {
@@ -230,6 +247,7 @@ where
 
     async fn receive_raw<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
         let pc = self.packets_received;
+        log::error!("RECEIVE RAW {}", pc);
         self.packets_received += 1;
         self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
 
@@ -238,7 +256,7 @@ where
             .decryption_ctx
             .decrypt_buffer_size(pc, len)
             .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
-            .ok_or(TransportError::MessageIntegrity)?;
+            .ok_or(TransportError::BadPacketLength)?;
 
         let buffer = self.stream.read_exact(buffer_size).await?;
         let packet = self
@@ -246,9 +264,67 @@ where
             .decrypt_packet(pc, buffer)
             .ok_or(TransportError::MessageIntegrity)?;
 
-        //log::error!("PACKET {:?}", packet);
+        log::warn!("RECEIVE RAW {}", pc);
 
         Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
+    }
+
+
+}
+
+
+fn fold<E, F>(transport: Transport<TcpStream>, events: E, handler: F) -> TransportFold<E,F>
+where
+    E: Unpin + Stream + StreamExt,
+    F: Unpin + FnMut(&mut Transport<TcpStream>, E2<Token, E::Item>) -> Option<()>,
+{
+    TransportFold {
+        transport,
+        events,
+        handler,
+    }
+}
+
+pub struct TransportFold<E,F>
+where
+    E: Stream,
+    F: FnMut(&mut Transport<TcpStream>, E2<Token, E::Item>) -> Option<()>
+{
+    transport: Transport<TcpStream>,
+    events: E,
+    handler: F,
+}
+
+pub struct Token {}
+
+impl Stream for Transport<TcpStream> {
+    type Item = Token;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        Poll::Pending
+    }
+}
+
+impl <E,F> Future for TransportFold<E,F>
+where
+    E: Unpin + Stream + StreamExt,
+    F: Unpin + FnMut(&mut Transport<TcpStream>, E2<Token, E::Item>) -> Option<()>
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let s = Pin::into_inner(self);
+        if let Poll::Ready(Some(event)) = Pin::new(&mut s.events).poll_next(cx) {
+            if let Some(o) = (&mut s.handler)(&mut s.transport, E2::B(event)) {
+                return Poll::Ready(o)
+            }
+        }
+        if let Poll::Ready(Some(token)) = Pin::new(&mut s.transport).poll_next(cx) {
+            if let Some(o) = (&mut s.handler)(&mut s.transport, E2::A(token)) {
+                return Poll::Ready(o)
+            }
+        }
+        Poll::Pending
     }
 }
 
