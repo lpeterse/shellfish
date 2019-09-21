@@ -12,6 +12,8 @@ mod msg_service_request;
 mod msg_unimplemented;
 mod packet_layout;
 mod session_id;
+mod buffered_receiver;
+mod buffered_sender;
 
 pub use self::encryption::*;
 pub use self::error::*;
@@ -27,15 +29,16 @@ pub use self::msg_service_request::*;
 pub use self::msg_unimplemented::*;
 pub use self::packet_layout::*;
 pub use self::session_id::*;
+pub use self::buffered_receiver::*;
+pub use self::buffered_sender::*;
 
-use crate::buffer::*;
 use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use futures::future::Either;
 use futures::future::{Future, FutureExt};
-use futures::io::{AsyncRead, AsyncWrite};
+use futures::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf, AsyncReadExt};
 use futures::stream::{Stream, StreamExt};
 use futures::task::Context;
 use futures::task::Poll;
@@ -57,7 +60,7 @@ pub struct Token {
 }
 
 pub trait TransportStream:
-    Read + AsyncRead + Unpin + Write + AsyncWrite + Unpin + Send + 'static
+    Read + AsyncRead + AsyncReadExt + Write + AsyncWrite + Unpin + Send + 'static
 {
 }
 
@@ -65,7 +68,8 @@ impl TransportStream for TcpStream {}
 
 pub struct Transport<T> {
     role: Role,
-    stream: Buffer<T>,
+    sender: BufferedSender<WriteHalf<T>>,
+    receiver: BufferedReceiver<ReadHalf<T>>,
     local_id: Identification,
     remote_id: Identification,
     session_id: SessionId,
@@ -84,7 +88,7 @@ pub struct Transport<T> {
 
 impl<T> Transport<T>
 where
-    T: Read + AsyncRead + Unpin,
+    T: Read + AsyncRead + AsyncReadExt + Unpin,
     T: Write + AsyncWrite + Unpin,
 {
     const REKEY_BYTES: u64 = 1000_000_000;
@@ -93,14 +97,17 @@ where
     const MAX_BUFFER_SIZE: usize = 35_000;
 
     pub async fn new(stream: T, role: Role) -> TransportResult<Self> {
-        let mut buffer = Buffer::new(stream);
+        let (rh, wh) = stream.split();
+        let mut sender = BufferedSender::new(wh);
+        let mut receiver = BufferedReceiver::new(rh);
 
-        let local_id = Self::send_id(&mut buffer, Identification::default()).await?;
-        let remote_id = Self::receive_id(&mut buffer).await?;
+        let local_id = Self::send_id(&mut sender, Identification::default()).await?;
+        let remote_id = Self::receive_id(&mut receiver).await?;
 
         let mut t = Transport {
             role: role,
-            stream: buffer,
+            sender,
+            receiver,
             local_id: local_id,
             remote_id: remote_id,
             session_id: SessionId::None,
@@ -145,7 +152,7 @@ where
     }
 
     pub async fn flush(&mut self) -> TransportResult<()> {
-        Ok(self.stream.flush().await?)
+        Ok(self.sender.flush().await?)
     }
 
     pub async fn rekey(&mut self) -> TransportResult<()> {
@@ -227,7 +234,7 @@ where
     }
 
     async fn send_id(
-        stream: &mut Buffer<T>,
+        stream: &mut BufferedSender<WriteHalf<T>>,
         id: Identification,
     ) -> TransportResult<Identification> {
         let mut enc = BEncoder::from(stream.alloc(Encode::size(&id) + 2).await?);
@@ -238,7 +245,7 @@ where
         Ok(id)
     }
 
-    async fn receive_id(stream: &mut Buffer<T>) -> TransportResult<Identification> {
+    async fn receive_id(stream: &mut BufferedReceiver<ReadHalf<T>>) -> TransportResult<Identification> {
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
             let line = stream.read_line(Identification::MAX_LEN).await?;
@@ -253,7 +260,7 @@ where
         let pc = self.packets_sent;
         self.packets_sent += 1;
         let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
-        let buffer = self.stream.alloc(layout.buffer_len()).await?;
+        let buffer = self.sender.alloc(layout.buffer_len()).await?;
         let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
         Encode::encode(msg, &mut encoder);
         Ok(self.encryption_ctx.encrypt_packet(pc, layout, buffer))
@@ -263,16 +270,16 @@ where
         let pc = self.packets_received;
         log::error!("RECEIVE RAW {}", pc);
         self.packets_received += 1;
-        self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
+        self.receiver.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
 
-        let len: &[u8] = self.stream.peek_exact(4).await?;
+        let len: &[u8] = self.receiver.peek_exact(4).await?;
         let buffer_size = self
             .decryption_ctx
             .decrypt_buffer_size(pc, len)
             .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
             .ok_or(TransportError::BadPacketLength)?;
 
-        let buffer = self.stream.read_exact(buffer_size).await?;
+        let buffer = self.receiver.read_exact(buffer_size).await?;
         let packet = self
             .decryption_ctx
             .decrypt_packet(pc, buffer)
@@ -289,16 +296,16 @@ where
         let pc = self.packets_received;
         log::error!("RECEIVE TOKEN {}", pc);
         //self.packets_received += 1;
-        self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
+        self.receiver.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
 
-        let len: &[u8] = self.stream.peek_exact(4).await?;
+        let len: &[u8] = self.receiver.peek_exact(4).await?;
         let buffer_size = self
             .decryption_ctx
             .decrypt_buffer_size(pc, len)
             .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
             .ok_or(TransportError::BadPacketLength)?;
 
-        let buffer = self.stream.peek_exact(buffer_size).await?;
+        let buffer = self.receiver.peek_exact(buffer_size).await?;
         let packet = self
             .decryption_ctx
             .decrypt_packet(pc, buffer)
@@ -320,7 +327,7 @@ where
         assert!(self.unresolved_token);
         assert!(self.packets_received == token.packet_counter);
 
-        let buffer = self.stream.read_exact(token.buffer_size).await?;
+        let buffer = self.receiver.read_exact(token.buffer_size).await?;
         let payload = &buffer[PacketLayout::PACKET_LEN_SIZE + PacketLayout::PADDING_LEN_SIZE..]; // TODO: trim right
 
         self.packets_received +=1 ;

@@ -11,17 +11,18 @@ use self::msg_identities_request::*;
 use self::msg_sign_request::*;
 use self::msg_sign_response::*;
 use crate::algorithm::*;
-use crate::buffer::Buffer;
+use crate::transport::{BufferedSender, BufferedReceiver};
 use crate::codec::*;
 use crate::keys::PublicKey;
 
 use async_std::os::unix::net::UnixStream;
+use futures::io::{ReadHalf, WriteHalf, AsyncReadExt};
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
 pub struct Agent {
     path: PathBuf,
-    stream: Option<Buffer<UnixStream>>,
+    stream: Option<(BufferedSender<WriteHalf<UnixStream>>, BufferedReceiver<ReadHalf<UnixStream>>)>,
 }
 
 impl Agent {
@@ -48,7 +49,9 @@ impl Agent {
 
     /// Request a list of identities from the agent.
     pub async fn identities(&self) -> Result<Vec<(PublicKey, String)>, AgentError> {
-        let mut s = Buffer::new(UnixStream::connect(&self.path).await?);
+        let (rh,wh) = UnixStream::connect(&self.path).await?.split();
+        let mut s = BufferedSender::new(wh);
+        let mut r = BufferedReceiver::new(rh);
         // Send request
         let req = MsgIdentitiesRequest {};
         let len = Encode::size(&req);
@@ -57,8 +60,8 @@ impl Agent {
         Encode::encode(&req, &mut enc);
         s.flush().await?;
         // Receive response
-        let len = s.read_u32be().await?;
-        let buf = s.read_exact(len as usize).await?;
+        let len = r.read_u32be().await?;
+        let buf = r.read_exact(len as usize).await?;
         let mut dec = BDecoder(buf);
         let res: MsgIdentitiesAnswer = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
         Ok(res.identities)
@@ -80,7 +83,7 @@ impl Agent {
         self.connect().await?;
         match self.stream.as_mut() {
             None => Ok(None),
-            Some(s) => {
+            Some((s,r)) => {
                 // Send request
                 let req: MsgSignRequest<S,D> = MsgSignRequest { key, data, flags };
                 let len = Encode::size(&req);
@@ -89,8 +92,8 @@ impl Agent {
                 req.encode(&mut enc);
                 s.flush().await?;
                 // Receive response
-                let len = s.read_u32be().await?;
-                let buf = s.read_exact(len as usize).await?;
+                let len = r.read_u32be().await?;
+                let buf = r.read_exact(len as usize).await?;
                 let mut dec = BDecoder(&buf[..]);
                 let res: E2<MsgSignResponse<S>,MsgFailure> = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
                 match res {
@@ -102,7 +105,10 @@ impl Agent {
     }
 
     pub async fn connect(&mut self) -> Result<(),std::io::Error> {
-        self.stream = Some(Buffer::new(UnixStream::connect(&self.path).await?));
+        let (rh,wh) = UnixStream::connect(&self.path).await?.split();
+        let mut s = BufferedSender::new(wh);
+        let mut r = BufferedReceiver::new(rh);
+        self.stream = Some((s,r));
         Ok(())
     }
 }
