@@ -34,7 +34,7 @@ use crate::codec::*;
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
 use futures::future::Either;
-use futures::future::Future;
+use futures::future::{Future, FutureExt};
 use futures::io::{AsyncRead, AsyncWrite};
 use futures::stream::{Stream, StreamExt};
 use futures::task::Context;
@@ -79,6 +79,7 @@ pub struct Transport<T> {
     encryption_ctx: EncryptionContext,
     decryption_ctx: EncryptionContext,
     unresolved_token: bool,
+    receive_state: ReceiveState,
 }
 
 impl<T> Transport<T>
@@ -113,6 +114,7 @@ where
             encryption_ctx: EncryptionContext::new(),
             decryption_ctx: EncryptionContext::new(),
             unresolved_token: false,
+            receive_state: ReceiveState::Idle,
         };
 
         t.kex(None).await?;
@@ -307,21 +309,27 @@ where
         Ok(Token { packet_counter: pc, buffer_size })
     }
 
-    async fn redeem_token<'a, M: Decode<'a>>(&'a mut self, token: Token) -> Result<Option<M>, TransportError> {
+    pub fn poll_next(&mut self) -> Poll<Result<Token, TransportError>> {
+        Poll::Pending
+    }
+
+    pub async fn redeem_token<'a, M, F, O>(&'a mut self, token: Token) -> Result<Option<M>, TransportError>
+    where
+        M: Decode<'a>,
+    {
         assert!(self.unresolved_token);
         assert!(self.packets_received == token.packet_counter);
 
         let buffer = self.stream.read_exact(token.buffer_size).await?;
         let payload = &buffer[PacketLayout::PACKET_LEN_SIZE + PacketLayout::PADDING_LEN_SIZE..]; // TODO: trim right
 
-        self.packets_received +=1;
+        self.packets_received +=1 ;
         self.unresolved_token = false;
 
         match Decode::decode(&mut BDecoder(payload)) {
-            Some(msg) => return Ok(Some(msg)),
+            Some(msg) => Ok(Some(msg)),
             None => {
-                let response = MsgUnimplemented { packet_number: self.packets_received as u32 };
-                self.send_raw(&response).await?;
+                log::warn!("TODO: SEND MSG UNIMPLEMENTED: {:?}", &payload);
                 return Ok(None)
             }
         }
@@ -344,9 +352,21 @@ where
 impl Stream for Transport<TcpStream> {
     type Item = Token;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Option<Self::Item>> {
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>>
+    where
+        Self: Unpin
+    {
+        assert!(!self.unresolved_token);
+
         Poll::Pending
     }
+}
+
+pub enum ReceiveState {
+    Idle,
+    Fetch(Box<dyn Future<Output = Result<(), std::io::Error>> + Send>),
+    PeekLen(usize),
+    PeekBuf(usize),
 }
 
 #[cfg(test)]

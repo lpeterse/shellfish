@@ -2,7 +2,7 @@ use crate::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgUnimplemented {
-    packet_number: u32
+    pub packet_number: u32
 }
 
 impl MsgUnimplemented {

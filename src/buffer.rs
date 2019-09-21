@@ -1,6 +1,8 @@
 use async_std::io::{Read, Write};
 use futures::io::{AsyncRead,AsyncWrite};
 use std::ops::Range;
+use futures::task::Context;
+use futures::task::Poll;
 
 const MIN_BUFFER_SIZE: usize = 1100;
 const MAX_BUFFER_SIZE: usize = 35000;
@@ -176,6 +178,8 @@ impl <S: Read + AsyncRead + Write + AsyncWrite + Unpin> Buffer<S> {
         Ok(())
     }
 }
+
+pub struct Fill {}
 
 #[cfg(test)]
 mod test {
