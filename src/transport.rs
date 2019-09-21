@@ -1,55 +1,62 @@
-mod msg_debug;
-mod msg_disconnect;
 mod encryption;
 mod error;
+mod for_each;
 mod identification;
 mod kex;
 mod key_streams;
+mod msg_debug;
+mod msg_disconnect;
+mod msg_ignore;
+mod msg_service_accept;
+mod msg_service_request;
+mod msg_unimplemented;
 mod packet_layout;
 mod session_id;
-mod msg_ignore;
-mod msg_unimplemented;
-mod msg_service_request;
-mod msg_service_accept;
+mod token;
 
-pub use self::msg_debug::*;
-pub use self::msg_disconnect::*;
 pub use self::encryption::*;
 pub use self::error::*;
+pub use self::for_each::*;
 pub use self::identification::*;
 pub use self::kex::*;
 pub use self::key_streams::*;
+pub use self::msg_debug::*;
+pub use self::msg_disconnect::*;
+pub use self::msg_ignore::*;
+pub use self::msg_service_accept::*;
+pub use self::msg_service_request::*;
+pub use self::msg_unimplemented::*;
 pub use self::packet_layout::*;
 pub use self::session_id::*;
-pub use self::msg_ignore::*;
-pub use self::msg_unimplemented::*;
-pub use self::msg_service_request::*;
-pub use self::msg_service_accept::*;
+pub use self::token::*;
 
 use crate::buffer::*;
 use crate::codec::*;
 
 use async_std::io::{Read, Write};
-use futures::io::{AsyncRead, AsyncWrite};
-use futures::stream::{Stream,StreamExt};
-use futures::lock::Mutex;
+use async_std::net::TcpStream;
+use futures::future::Either;
 use futures::future::Future;
-use std::sync::Arc;
-use std::convert::{From};
-use std::time::{Duration, Instant};
-use async_std::net::{TcpStream};
-use log;
-use std::pin::Pin;
-use futures::task::Poll;
+use futures::io::{AsyncRead, AsyncWrite};
+use futures::stream::{Stream, StreamExt};
 use futures::task::Context;
+use futures::task::Poll;
+use log;
+use std::convert::From;
 use std::marker::Unpin;
+use std::option::Option;
+use std::pin::Pin;
+use std::time::{Duration, Instant};
 
 pub enum Role {
     Client,
     Server,
 }
 
-pub trait TransportStream: Read + AsyncRead + Unpin + Write + AsyncWrite + Unpin + Send + 'static {}
+pub trait TransportStream:
+    Read + AsyncRead + Unpin + Write + AsyncWrite + Unpin + Send + 'static
+{
+}
 
 impl TransportStream for TcpStream {}
 
@@ -269,61 +276,54 @@ where
         Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }
 
+    async fn receive_token(&mut self) -> Result<Token, TransportError> {
+        let pc = self.packets_received;
+        log::error!("RECEIVE TOKEN {}", pc);
+        // Don't decode size before 8 bytes have arrived
+        self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?;
 
-}
+        let len: &[u8] = self.stream.peek_exact(4).await?;
+        let buffer_size = self
+            .decryption_ctx
+            .decrypt_buffer_size(pc, len)
+            .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
+            .ok_or(TransportError::BadPacketLength)?;
 
+        let buffer = self.stream.peek_exact(buffer_size).await?;
+        let packet = self
+            .decryption_ctx
+            .decrypt_packet(pc, buffer)
+            .ok_or(TransportError::MessageIntegrity)?;
 
-fn fold<E, F>(transport: Transport<TcpStream>, events: E, handler: F) -> TransportFold<E,F>
-where
-    E: Unpin + Stream + StreamExt,
-    F: Unpin + FnMut(&mut Transport<TcpStream>, E2<Token, E::Item>) -> Option<()>,
-{
-    TransportFold {
-        transport,
-        events,
-        handler,
+        log::warn!("RECEIVE TOKEN {}", pc);
+        Ok(Token::new(pc, std::ops::Range { start: 5, end: 0 }))
+    }
+
+    async fn redeem_token<'a, M: Decode<'a>>(
+        &'a mut self,
+        token: Token,
+    ) -> Result<Option<M>, TransportError> {
+        Ok(None)
+    }
+
+    pub fn for_each<E, H, F, O>(
+        transport: Transport<TcpStream>,
+        events: E,
+        handler: H,
+    ) -> ForEach<E, H, F, O>
+    where
+        E: Unpin + Stream + StreamExt,
+        H: Unpin + FnMut(&mut Transport<TcpStream>, Either<Token, E::Item>) -> F,
+        F: Unpin + Future<Output = Option<O>>,
+    {
+        ForEach::new(transport, events, handler)
     }
 }
-
-pub struct TransportFold<E,F>
-where
-    E: Stream,
-    F: FnMut(&mut Transport<TcpStream>, E2<Token, E::Item>) -> Option<()>
-{
-    transport: Transport<TcpStream>,
-    events: E,
-    handler: F,
-}
-
-pub struct Token {}
 
 impl Stream for Transport<TcpStream> {
     type Item = Token;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        Poll::Pending
-    }
-}
-
-impl <E,F> Future for TransportFold<E,F>
-where
-    E: Unpin + Stream + StreamExt,
-    F: Unpin + FnMut(&mut Transport<TcpStream>, E2<Token, E::Item>) -> Option<()>
-{
-    type Output = ();
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let s = Pin::into_inner(self);
-        if let Poll::Ready(Some(event)) = Pin::new(&mut s.events).poll_next(cx) {
-            if let Some(o) = (&mut s.handler)(&mut s.transport, E2::B(event)) {
-                return Poll::Ready(o)
-            }
-        }
-        if let Poll::Ready(Some(token)) = Pin::new(&mut s.transport).poll_next(cx) {
-            if let Some(o) = (&mut s.handler)(&mut s.transport, E2::A(token)) {
-                return Poll::Ready(o)
-            }
-        }
+    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Option<Self::Item>> {
         Poll::Pending
     }
 }
