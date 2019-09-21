@@ -86,11 +86,11 @@ pub struct Transport<T> {
     receive_state: ReceiveState,
 }
 
-impl<T> Transport<T>
-where
-    T: Read + AsyncRead + AsyncReadExt + Unpin,
-    T: Write + AsyncWrite + Unpin,
-{
+pub struct Receiver {
+    
+}
+
+impl<T: TransportStream> Transport<T> {
     const REKEY_BYTES: u64 = 1000_000_000;
     const REKEY_INTERVAL: Duration = Duration::from_secs(3600);
 
@@ -336,6 +336,8 @@ where
         match Decode::decode(&mut BDecoder(payload)) {
             Some(msg) => Ok(Some(msg)),
             None => {
+                let response = MsgUnimplemented { packet_number: 0 }; // FIXME
+                //self.sender.send(&response).await?;
                 log::warn!("TODO: SEND MSG UNIMPLEMENTED: {:?}", &payload);
                 return Ok(None)
             }
