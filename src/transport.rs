@@ -12,7 +12,6 @@ mod msg_service_request;
 mod msg_unimplemented;
 mod packet_layout;
 mod session_id;
-mod token;
 
 pub use self::encryption::*;
 pub use self::error::*;
@@ -28,7 +27,6 @@ pub use self::msg_service_request::*;
 pub use self::msg_unimplemented::*;
 pub use self::packet_layout::*;
 pub use self::session_id::*;
-pub use self::token::*;
 
 use crate::buffer::*;
 use crate::codec::*;
@@ -53,6 +51,11 @@ pub enum Role {
     Server,
 }
 
+pub struct Token {
+    packet_counter: u64,
+    buffer_size: usize,
+}
+
 pub trait TransportStream:
     Read + AsyncRead + Unpin + Write + AsyncWrite + Unpin + Send + 'static
 {
@@ -75,6 +78,7 @@ pub struct Transport<T> {
     kex_last_bytes_sent: u64,
     encryption_ctx: EncryptionContext,
     decryption_ctx: EncryptionContext,
+    unresolved_token: bool,
 }
 
 impl<T> Transport<T>
@@ -108,6 +112,7 @@ where
             kex_last_bytes_received: 0,
             encryption_ctx: EncryptionContext::new(),
             decryption_ctx: EncryptionContext::new(),
+            unresolved_token: false,
         };
 
         t.kex(None).await?;
@@ -277,10 +282,12 @@ where
     }
 
     async fn receive_token(&mut self) -> Result<Token, TransportError> {
+        assert!(!self.unresolved_token);
+
         let pc = self.packets_received;
         log::error!("RECEIVE TOKEN {}", pc);
-        // Don't decode size before 8 bytes have arrived
-        self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?;
+        //self.packets_received += 1;
+        self.stream.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
 
         let len: &[u8] = self.stream.peek_exact(4).await?;
         let buffer_size = self
@@ -296,14 +303,28 @@ where
             .ok_or(TransportError::MessageIntegrity)?;
 
         log::warn!("RECEIVE TOKEN {}", pc);
-        Ok(Token::new(pc, std::ops::Range { start: 5, end: 0 }))
+
+        Ok(Token { packet_counter: pc, buffer_size })
     }
 
-    async fn redeem_token<'a, M: Decode<'a>>(
-        &'a mut self,
-        token: Token,
-    ) -> Result<Option<M>, TransportError> {
-        Ok(None)
+    async fn redeem_token<'a, M: Decode<'a>>(&'a mut self, token: Token) -> Result<Option<M>, TransportError> {
+        assert!(self.unresolved_token);
+        assert!(self.packets_received == token.packet_counter);
+
+        let buffer = self.stream.read_exact(token.buffer_size).await?;
+        let payload = &buffer[PacketLayout::PACKET_LEN_SIZE + PacketLayout::PADDING_LEN_SIZE..]; // TODO: trim right
+
+        self.packets_received +=1;
+        self.unresolved_token = false;
+
+        match Decode::decode(&mut BDecoder(payload)) {
+            Some(msg) => return Ok(Some(msg)),
+            None => {
+                let response = MsgUnimplemented { packet_number: self.packets_received as u32 };
+                self.send_raw(&response).await?;
+                return Ok(None)
+            }
+        }
     }
 
     pub fn for_each<E, H, F, O>(
