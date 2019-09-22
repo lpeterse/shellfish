@@ -214,6 +214,23 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
             },
         )
     }
+
+    pub fn poll_fetch<'a>(
+        mut self: Pin<&'a mut Self>,
+        cx: &mut Context,
+        len: usize,
+    ) -> Poll<Result<(), std::io::Error>> {
+        loop {
+            if self.window.len() >= len {
+                return Poll::Ready(Ok(()));
+            } else {
+                match ready!(self.as_mut().poll_fill(cx)) {
+                    Ok(_) => continue,
+                    Err(e) => return Poll::Ready(Err(e)),
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
