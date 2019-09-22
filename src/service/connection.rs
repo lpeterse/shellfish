@@ -41,10 +41,10 @@ impl Connection {
         async_std::task::spawn(async move {
             let x = ConnectionState {
                 canary: r1,
-                commands: r2,
-                transport: t,
+                //commands: r2,
+                //transport: t,
                 channels: LowestKeyMap::new(256),
-            }.run().await;
+            }.run(t, r2).await;
             log::error!("{:?}", x);
         });
         Connection { command: s2, _canary: s1 }

@@ -8,6 +8,7 @@ pub struct PacketLayout {
 }
 
 impl PacketLayout {
+    pub const MAX_PACKET_LEN: usize = 35000;
     pub const PACKET_LEN_SIZE: usize = 4;
     pub const PACKET_MIN_SIZE: usize = 16;
     pub const PADDING_LEN_SIZE: usize = 1;

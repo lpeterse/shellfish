@@ -31,6 +31,14 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         }
     }
 
+    pub fn window(&self) -> &[u8] {
+        &self.buffer[self.window.start .. self.window.end]
+    }
+
+    pub fn window_mut(&mut self) -> &mut [u8] {
+        &mut self.buffer[self.window.start .. self.window.end]
+    }
+
     pub async fn fetch(&mut self, len: usize) -> async_std::io::Result<()> {
         while self.window.len() < len {
             if self.fill().await? == 0 {
@@ -179,8 +187,8 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         )
     }
 
-    pub fn poll_fetch<'a>(
-        mut self: Pin<&'a mut Self>,
+    pub fn poll_fetch(
+        mut self: Pin<&mut Self>,
         cx: &mut Context,
         len: usize,
     ) -> Poll<Result<(), std::io::Error>> {

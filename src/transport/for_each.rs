@@ -10,26 +10,26 @@ use std::marker::Unpin;
 use std::option::Option;
 use std::pin::Pin;
 
-pub struct ForEach<E, H, F, O>
+pub struct ForEach<T, E, H, F, O>
 where
     E: Unpin + Stream,
-    H: Unpin + FnMut(&mut Transport<TcpStream>, Either<Token, E::Item>) -> F,
-    F: Unpin + Future<Output = Option<O>>,
+    H: Unpin + FnMut(&mut Transport<T>, Either<Token, E::Item>) -> F,
+    F: Unpin + Future<Output = Result<Option<O>, TransportError>>,
 {
-    transport: Transport<TcpStream>,
+    transport: Transport<T>,
     events: E,
     handler: H,
     future: Option<F>,
     order: bool,
 }
 
-impl <E,H,F,O> ForEach<E,H,F,O>
+impl <T,E,H,F,O> ForEach<T,E,H,F,O>
 where
     E: Unpin + Stream,
-    H: Unpin + FnMut(&mut Transport<TcpStream>, Either<Token, E::Item>) -> F,
-    F: Unpin + Future<Output = Option<O>>,
+    H: Unpin + FnMut(&mut Transport<T>, Either<Token, E::Item>) -> F,
+    F: Unpin + Future<Output = Result<Option<O>, TransportError>>,
 {
-    pub fn new(transport: Transport<TcpStream>, events: E, handler: H) -> Self {
+    pub fn new(transport: Transport<T>, events: E, handler: H) -> Self {
         Self {
             transport,
             events,
@@ -40,17 +40,20 @@ where
     }
 }
 
+#[derive(Debug)]
 pub enum ForEachResult<O> {
     Quit(O),
     EventStreamExhausted,
     TransportStreamExhausted,
+    TransportError(TransportError),
 }
 
-impl<E, H, F, O> Future for ForEach<E, H, F, O>
+impl<T, E, H, F, O> Future for ForEach<T, E, H, F, O>
 where
+    T: Unpin + TransportStream,
     E: Unpin + Stream + StreamExt,
-    H: Unpin + FnMut(&mut Transport<TcpStream>, Either<Token, E::Item>) -> F,
-    F: Unpin + Future<Output = Option<O>>,
+    H: Unpin + FnMut(&mut Transport<T>, Either<Token, E::Item>) -> F,
+    F: Unpin + Future<Output = Result<Option<O>, TransportError>>,
 {
     type Output = ForEachResult<O>;
 
@@ -65,11 +68,12 @@ where
                 Some(x) => match Pin::new(x).poll(cx) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(r) => match r {
-                        None => {
+                        Ok(None) => {
                             s.future = None;
                             s.order = !s.order; // Reverse order
                         }
-                        Some(r) => return Poll::Ready(ForEachResult::Quit(r)),
+                        Ok(Some(r)) => return Poll::Ready(ForEachResult::Quit(r)),
+                        Err(e) => return Poll::Ready(ForEachResult::TransportError(e)),
                     },
                 },
             }
@@ -80,7 +84,8 @@ where
                 if let Poll::Ready(r) = Pin::new(&mut s.transport).poll_next(cx) {
                     s.future = match r {
                         None => return Poll::Ready(ForEachResult::TransportStreamExhausted),
-                        Some(token) => (&mut s.handler)(&mut s.transport, Either::Left(token)),
+                        Some(Err(e)) => return Poll::Ready(ForEachResult::TransportError(e)),
+                        Some(Ok(token)) => (&mut s.handler)(&mut s.transport, Either::Left(token)),
                     }
                     .into();
                     continue;
@@ -106,7 +111,8 @@ where
                 if let Poll::Ready(r) = Pin::new(&mut s.transport).poll_next(cx) {
                     s.future = match r {
                         None => return Poll::Ready(ForEachResult::TransportStreamExhausted),
-                        Some(token) => (&mut s.handler)(&mut s.transport, Either::Left(token)),
+                        Some(Err(e)) => return Poll::Ready(ForEachResult::TransportError(e)),
+                        Some(Ok(token)) => (&mut s.handler)(&mut s.transport, Either::Left(token)),
                     }
                     .into();
                     continue;

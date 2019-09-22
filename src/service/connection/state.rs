@@ -11,21 +11,49 @@ use futures::channel::oneshot;
 use futures::select;
 use futures::stream::StreamExt;
 use futures::FutureExt;
+use futures::future::Either;
 
-pub struct ConnectionState<T> {
+pub struct ConnectionState {
     pub canary: oneshot::Receiver<()>,
-    pub commands: mpsc::Receiver<Command>,
-    pub transport: Transport<T>,
+    //pub commands: mpsc::Receiver<Command>,
+    //pub transport: Transport<T>,
     pub channels: LowestKeyMap<ChannelState>,
 }
 
-impl<T: TransportStream> ConnectionState<T> {
-    pub async fn run(mut self) -> Result<(), ConnectionError> {
+impl ConnectionState {
+    pub async fn run<T: TransportStream>(mut self, transport: Transport<T>, commands: mpsc::Receiver<Command>) -> Result<(), ConnectionError> {
         enum Event<T> {
             Command(Command),
             Message(T),
         }
+        let r = transport.for_each(commands, |transport, input| Box::pin( async {
+            match input {
+                Either::Left(token) => {
+                    log::error!("TOKEN {:?}", token);
+                    match transport.redeem_token(token).await? {
+                        None => {
+                            log::error!("REDEEM FAILED");
+                            ()
+                        },
+                        Some(msg) => {
+                            let _: MsgGlobalRequest = msg;
+                            log::error!("Ignoring {:?}", msg);
+                            ()
+                        }
+                    }
+                    /*
+                    */
+                    Ok(Some(()))
+                },
+                Either::Right(event) => {
+                    log::error!("EVENT");
+                    Ok(Some(()))
+                }
+            }
+        })).await;
 
+        log::error!("RRRRR {:?}", r);
+        /*
         loop {
             log::error!("LOOP");
             let event = {
@@ -95,7 +123,7 @@ impl<T: TransportStream> ConnectionState<T> {
                     }
                 },
             }
-        }
+        }*/
         Ok(())
     }
 }

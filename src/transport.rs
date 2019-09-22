@@ -36,8 +36,9 @@ use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
+use futures::ready;
 use futures::future::Either;
-use futures::future::{Future, FutureExt};
+use futures::future::{Future};
 use futures::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf, AsyncReadExt};
 use futures::stream::{Stream, StreamExt};
 use futures::task::Context;
@@ -54,6 +55,7 @@ pub enum Role {
     Server,
 }
 
+#[derive(Debug)]
 pub struct Token {
     packet_counter: u64,
     buffer_size: usize,
@@ -87,7 +89,7 @@ pub struct Transport<T> {
 }
 
 pub struct Receiver {
-    
+
 }
 
 impl<T: TransportStream> Transport<T> {
@@ -290,37 +292,7 @@ impl<T: TransportStream> Transport<T> {
         Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }
 
-    async fn receive_token(&mut self) -> Result<Token, TransportError> {
-        assert!(!self.unresolved_token);
-
-        let pc = self.packets_received;
-        log::error!("RECEIVE TOKEN {}", pc);
-        //self.packets_received += 1;
-        self.receiver.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
-
-        let len: &[u8] = self.receiver.peek_exact(4).await?;
-        let buffer_size = self
-            .decryption_ctx
-            .decrypt_buffer_size(pc, len)
-            .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
-            .ok_or(TransportError::BadPacketLength)?;
-
-        let buffer = self.receiver.peek_exact(buffer_size).await?;
-        let packet = self
-            .decryption_ctx
-            .decrypt_packet(pc, buffer)
-            .ok_or(TransportError::MessageIntegrity)?;
-
-        log::warn!("RECEIVE TOKEN {}", pc);
-
-        Ok(Token { packet_counter: pc, buffer_size })
-    }
-
-    pub fn poll_next(&mut self) -> Poll<Result<Token, TransportError>> {
-        Poll::Pending
-    }
-
-    pub async fn redeem_token<'a, M, F, O>(&'a mut self, token: Token) -> Result<Option<M>, TransportError>
+    pub async fn redeem_token<'a, M>(&'a mut self, token: Token) -> Result<Option<M>, TransportError>
     where
         M: Decode<'a>,
     {
@@ -345,29 +317,62 @@ impl<T: TransportStream> Transport<T> {
     }
 
     pub fn for_each<E, H, F, O>(
-        transport: Transport<TcpStream>,
+        self,
         events: E,
         handler: H,
-    ) -> ForEach<E, H, F, O>
+    ) -> ForEach<T, E, H, F, O>
     where
         E: Unpin + Stream + StreamExt,
-        H: Unpin + FnMut(&mut Transport<TcpStream>, Either<Token, E::Item>) -> F,
-        F: Unpin + Future<Output = Option<O>>,
+        H: Unpin + FnMut(&mut Self, Either<Token, E::Item>) -> F,
+        F: Unpin + Future<Output = Result<Option<O>, TransportError>>,
     {
-        ForEach::new(transport, events, handler)
+        ForEach::new(self, events, handler)
     }
 }
 
-impl Stream for Transport<TcpStream> {
-    type Item = Token;
+impl <T: TransportStream> Stream for Transport<T> {
+    type Item = Result<Token, TransportError>;
 
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>>
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>>
     where
         Self: Unpin
     {
         assert!(!self.unresolved_token);
-
-        Poll::Pending
+        let s = Pin::into_inner(self);
+        let pc = s.packets_received;
+        let mut r = Pin::new(&mut s.receiver);
+        // Receive at least 8 bytes instead of the required 4
+        // in order to impede traffic analysis (as recommended by RFC).
+        match ready!(r.as_mut().poll_fetch(cx, 2 * PacketLayout::PACKET_LEN_SIZE)) {
+            Ok(()) => (),
+            Err(e) => return Poll::Ready(Some(Err(e.into())))
+        }
+        // Decrypt the buffer len. Leave the original packet len field encrypted
+        // in order to keep this function reentrant.
+        assert!(r.window().len() >= PacketLayout::PACKET_LEN_SIZE);
+        let mut len = [0;4];
+        len.copy_from_slice(&r.window()[..PacketLayout::PACKET_LEN_SIZE]);
+        let len = s.decryption_ctx.decrypt_len(pc, len);
+        if len > PacketLayout::MAX_PACKET_LEN {
+            return Poll::Ready(Some(Err(TransportError::BadPacketLength)))
+        }
+        // Wait for the whole packet to arrive (including MAC etc)
+        match ready!(r.as_mut().poll_fetch(cx, len)) {
+            Err(e) => return Poll::Ready(Some(Err(e.into()))),
+            Ok(()) => ()
+        }
+        // Try to decrypt the packet.
+        assert!(r.window().len() >= len);
+        match s.decryption_ctx.decrypt_packet(pc, &mut r.window_mut()[..len]) {
+            None => Poll::Ready(Some(Err(TransportError::MessageIntegrity))),
+            Some(_) => {
+                // Return a token containing the current packet counter
+                // (for token uniqueness) and the number of bytes to be consumed
+                // from the buffer when redeeming the token.
+                s.unresolved_token = true;
+                Poll::Ready(Some(Ok(Token { packet_counter: pc, buffer_size: len })))
+            }
+        }
     }
 }
 
