@@ -32,11 +32,11 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
     }
 
     pub fn window(&self) -> &[u8] {
-        &self.buffer[self.window.start .. self.window.end]
+        &self.buffer[self.window.start..self.window.end]
     }
 
     pub fn window_mut(&mut self) -> &mut [u8] {
-        &mut self.buffer[self.window.start .. self.window.end]
+        &mut self.buffer[self.window.start..self.window.end]
     }
 
     pub fn consume<'a>(&'a mut self, len: usize) -> &'a [u8] {
@@ -47,7 +47,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
             self.window.start = 0;
             self.window.end = 0;
         }
-        &self.buffer[start .. start + len]
+        &self.buffer[start..start + len]
     }
 
     pub async fn fetch(&mut self, len: usize) -> async_std::io::Result<()> {
@@ -154,6 +154,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Result<usize, std::io::Error>> {
+        log::error!("FILL");
         let mut s = Pin::into_inner(self);
         // Case 1: remaining capacity right >  0
         if s.window.end < s.buffer.len() {
@@ -190,6 +191,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         Poll::Ready(
             match ready!(Pin::new(&mut s.stream).poll_read(cx, &mut s.buffer[s.window.end..])) {
                 Ok(read) => {
+                    log::error!("READ {}", read);
                     s.window.end += read;
                     Ok(read)
                 }
@@ -204,11 +206,20 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         len: usize,
     ) -> Poll<Result<(), std::io::Error>> {
         loop {
+            log::error!("ASADSD {}", self.window.len());
             if self.window.len() >= len {
                 return Poll::Ready(Ok(()));
             } else {
                 match ready!(self.as_mut().poll_fill(cx)) {
-                    Ok(_) => continue,
+                    Ok(read) => {
+                        if read == 0 {
+                            return Poll::Ready(Err(std::io::Error::new(
+                                std::io::ErrorKind::UnexpectedEof,
+                                "",
+                            )));
+                        }
+                        continue;
+                    }
                     Err(e) => return Poll::Ready(Err(e)),
                 }
             }

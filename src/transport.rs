@@ -1,6 +1,8 @@
 mod encryption;
 mod error;
 //mod for_each;
+mod buffered_receiver;
+mod buffered_sender;
 mod identification;
 mod kex;
 mod key_streams;
@@ -12,12 +14,12 @@ mod msg_service_request;
 mod msg_unimplemented;
 mod packet_layout;
 mod session_id;
-mod buffered_receiver;
-mod buffered_sender;
 
 pub use self::encryption::*;
 pub use self::error::*;
 //pub use self::for_each::*;
+pub use self::buffered_receiver::*;
+pub use self::buffered_sender::*;
 pub use self::identification::*;
 pub use self::kex::*;
 pub use self::key_streams::*;
@@ -29,17 +31,15 @@ pub use self::msg_service_request::*;
 pub use self::msg_unimplemented::*;
 pub use self::packet_layout::*;
 pub use self::session_id::*;
-pub use self::buffered_receiver::*;
-pub use self::buffered_sender::*;
 
 use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
-use futures::ready;
 use futures::future::Either;
-use futures::future::{Future};
-use futures::io::{AsyncRead, AsyncWrite, ReadHalf, WriteHalf, AsyncReadExt};
+use futures::future::Future;
+use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, WriteHalf};
+use futures::ready;
 use futures::stream::{Stream, StreamExt};
 use futures::task::Context;
 use futures::task::Poll;
@@ -87,9 +87,7 @@ pub struct Transport<T> {
     unresolved_token: bool,
 }
 
-pub struct Receiver {
-
-}
+pub struct Receiver {}
 
 impl<T: TransportStream> Transport<T> {
     const REKEY_BYTES: u64 = 1000_000_000;
@@ -245,7 +243,9 @@ impl<T: TransportStream> Transport<T> {
         Ok(id)
     }
 
-    async fn receive_id(stream: &mut BufferedReceiver<ReadHalf<T>>) -> TransportResult<Identification> {
+    async fn receive_id(
+        stream: &mut BufferedReceiver<ReadHalf<T>>,
+    ) -> TransportResult<Identification> {
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
             let line = stream.read_line(Identification::MAX_LEN).await?;
@@ -266,11 +266,18 @@ impl<T: TransportStream> Transport<T> {
         Ok(self.encryption_ctx.encrypt_packet(pc, layout, buffer))
     }
 
-    fn send2<M: Encode>(&mut self, msg: &M) -> Option<usize> {
-        panic!("")
+    pub fn send2<M: Encode>(&mut self, msg: &M) -> Option<()> {
+        let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
+        let buffer = self.sender.reserve(layout.buffer_len())?;
+        let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
+        Encode::encode(msg, &mut encoder);
+        let pc = self.packets_sent;
+        self.packets_sent += 1;
+        self.encryption_ctx.encrypt_packet(pc, layout, buffer);
+        Some(())
     }
 
-    fn flush2(self) -> TransportFuture<T> {
+    pub fn flush2(self) -> TransportFuture<T> {
         TransportFuture::flush(self)
     }
 
@@ -278,7 +285,9 @@ impl<T: TransportStream> Transport<T> {
         let pc = self.packets_received;
         log::error!("RECEIVE RAW {}", pc);
         self.packets_received += 1;
-        self.receiver.fetch(2 * PacketLayout::PACKET_LEN_SIZE).await?; // Don't decode size before 8 bytes have arrived
+        self.receiver
+            .fetch(2 * PacketLayout::PACKET_LEN_SIZE)
+            .await?; // Don't decode size before 8 bytes have arrived
 
         let len: &[u8] = self.receiver.peek_exact(4).await?;
         let buffer_size = self
@@ -305,7 +314,7 @@ impl<T: TransportStream> Transport<T> {
         assert!(self.unresolved_token);
         assert!(self.packets_received == token.packet_counter);
 
-        self.packets_received +=1 ;
+        self.packets_received += 1;
         self.unresolved_token = false;
 
         let buf = self.receiver.consume(token.buffer_size);
@@ -315,20 +324,20 @@ impl<T: TransportStream> Transport<T> {
     pub fn future(self) -> TransportFuture<T> {
         TransportFuture::ready(self)
     }
-/*
-    pub fn for_each<E, H, F, O>(
-        self,
-        events: E,
-        handler: H,
-    ) -> ForEach<T, E, H, F, O>
-    where
-        E: Unpin + Stream + StreamExt,
-        H: Unpin + FnMut(Self, Either<Token, E::Item>) -> F,
-        F: Unpin + Future<Output = Result<Either<Transport<T>, O>, TransportError>>,
-    {
-        ForEach::new(self, events, handler)
-    }
-*/
+    /*
+        pub fn for_each<E, H, F, O>(
+            self,
+            events: E,
+            handler: H,
+        ) -> ForEach<T, E, H, F, O>
+        where
+            E: Unpin + Stream + StreamExt,
+            H: Unpin + FnMut(Self, Either<Token, E::Item>) -> F,
+            F: Unpin + Future<Output = Result<Either<Transport<T>, O>, TransportError>>,
+        {
+            ForEach::new(self, events, handler)
+        }
+    */
 }
 
 pub enum TransportFuture<T> {
@@ -337,7 +346,7 @@ pub enum TransportFuture<T> {
     Flush(Transport<T>),
 }
 
-impl <T> TransportFuture<T> {
+impl<T> TransportFuture<T> {
     pub fn ready(t: Transport<T>) -> Self {
         Self::Ready(t)
     }
@@ -346,28 +355,36 @@ impl <T> TransportFuture<T> {
     }
 }
 
-impl <T> Future for TransportFuture<T> {
-    type Output = Transport<T>;
+impl<T> Future for TransportFuture<T>
+where
+    T: AsyncRead + AsyncWrite,
+{
+    type Output = Result<Transport<T>, TransportError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let s = Pin::into_inner(self);
         let x = std::mem::replace(s, TransportFuture::Pending);
         match x {
             Self::Pending => Poll::Pending,
-            Self::Ready(t) => Poll::Ready(t),
-            Self::Flush(t) => {
-                Poll::Pending
-            }
+            Self::Ready(t) => Poll::Ready(Ok(t)),
+            Self::Flush(mut t) => match Pin::new(&mut t.sender).poll_flush(cx) {
+                Poll::Pending => {
+                    std::mem::replace(s, Self::Flush(t));
+                    return Poll::Pending;
+                }
+                Poll::Ready(Ok(())) => return Poll::Ready(Ok(t)),
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+            },
         }
     }
 }
 
-impl <T: TransportStream> Stream for Transport<T> {
+impl<T: TransportStream> Stream for Transport<T> {
     type Item = Result<Token, TransportError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>>
     where
-        Self: Unpin
+        Self: Unpin,
     {
         assert!(!self.unresolved_token);
         let s = Pin::into_inner(self);
@@ -377,32 +394,38 @@ impl <T: TransportStream> Stream for Transport<T> {
         // in order to impede traffic analysis (as recommended by RFC).
         match ready!(r.as_mut().poll_fetch(cx, 2 * PacketLayout::PACKET_LEN_SIZE)) {
             Ok(()) => (),
-            Err(e) => return Poll::Ready(Some(Err(e.into())))
+            Err(e) => return Poll::Ready(Some(Err(e.into()))),
         }
         // Decrypt the buffer len. Leave the original packet len field encrypted
         // in order to keep this function reentrant.
         assert!(r.window().len() >= PacketLayout::PACKET_LEN_SIZE);
-        let mut len = [0;4];
+        let mut len = [0; 4];
         len.copy_from_slice(&r.window()[..PacketLayout::PACKET_LEN_SIZE]);
         let len = s.decryption_ctx.decrypt_len(pc, len);
         if len > PacketLayout::MAX_PACKET_LEN {
-            return Poll::Ready(Some(Err(TransportError::BadPacketLength)))
+            return Poll::Ready(Some(Err(TransportError::BadPacketLength)));
         }
         // Wait for the whole packet to arrive (including MAC etc)
         match ready!(r.as_mut().poll_fetch(cx, len)) {
             Err(e) => return Poll::Ready(Some(Err(e.into()))),
-            Ok(()) => ()
+            Ok(()) => (),
         }
         // Try to decrypt the packet.
         assert!(r.window().len() >= len);
-        match s.decryption_ctx.decrypt_packet(pc, &mut r.window_mut()[..len]) {
+        match s
+            .decryption_ctx
+            .decrypt_packet(pc, &mut r.window_mut()[..len])
+        {
             None => Poll::Ready(Some(Err(TransportError::MessageIntegrity))),
             Some(_) => {
                 // Return a token containing the current packet counter
                 // (for token uniqueness) and the number of bytes to be consumed
                 // from the buffer when redeeming the token.
                 s.unresolved_token = true;
-                Poll::Ready(Some(Ok(Token { packet_counter: pc, buffer_size: len })))
+                Poll::Ready(Some(Ok(Token {
+                    packet_counter: pc,
+                    buffer_size: len,
+                })))
             }
         }
     }

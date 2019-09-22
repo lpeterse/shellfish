@@ -42,8 +42,12 @@ impl Connection {
         Connection { command: s2, _canary: s1 }
     }
 
-    pub async fn foobar(&mut self) -> Result<(), ChannelOpenError> {
+    pub async fn disconnect(&mut self) -> Result<(), ChannelOpenError> {
         self.command.send(Command::Disconnect).map_err(|_| ChannelOpenError::ConnectionLost).await
+    }
+
+    pub async fn debug(&mut self, msg: String) -> Result<(), ChannelOpenError> {
+        self.command.send(Command::Debug(msg)).map_err(|_| ChannelOpenError::ConnectionLost).await
     }
 
     pub async fn open_session(&mut self) -> Result<Session,ChannelOpenError> {

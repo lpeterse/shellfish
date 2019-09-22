@@ -10,6 +10,14 @@ pub struct MsgDebug {
 
 impl MsgDebug {
     const MSG_NUMBER: u8 = 4;
+
+    pub fn new(message: String) -> Self {
+        Self {
+            always_display: true,
+            message,
+            language: Language::empty()
+        }
+    }
 }
 
 impl Encode for MsgDebug {

@@ -4,6 +4,12 @@ use crate::codec::*;
 #[derive(Debug,Clone)]
 pub struct Language (String);
 
+impl Language {
+    pub fn empty() -> Self {
+        Self ("".into())
+    }
+}
+
 impl AsRef<[u8]> for Language {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()

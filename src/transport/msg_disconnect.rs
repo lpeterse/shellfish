@@ -14,6 +14,10 @@ pub struct MsgDisconnect {
 
 impl MsgDisconnect {
     const MSG_NUMBER: u8 = 1;
+
+    pub fn by_application(description: String) -> Self {
+        Self { reason: Reason::ByApplication, description, language: Language::empty() }
+    }
 }
 
 impl Encode for MsgDisconnect {

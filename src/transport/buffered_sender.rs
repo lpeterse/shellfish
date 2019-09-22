@@ -28,6 +28,22 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
         }
     }
 
+    pub fn available(&self) -> usize {
+        self.buffer.len() - self.window.end
+    }
+
+    pub fn reserve(&mut self, len: usize) -> Option<&mut [u8]> {
+        assert!(len <= MAX_BUFFER_SIZE);
+        if self.available() < len {
+            None
+        } else {
+            let start = self.window.end;
+            self.window.end += len;
+            let end = self.window.end;
+            Some(&mut self.buffer[start .. end])
+        }
+    }
+
     pub async fn alloc(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
         let available = self.buffer.len() - self.window.end;
         if available < len {
@@ -80,6 +96,7 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
                     s.window.start += written;
                     if s.window.len() == 0 {
                         s.window = Range { start: 0, end: 0 };
+                        return Poll::Ready(Ok(()))
                     }
                     continue;
                 }

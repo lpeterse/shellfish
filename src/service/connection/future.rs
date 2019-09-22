@@ -20,6 +20,7 @@ use std::pin::*;
 pub struct ConnectionFuture<T> {
     pub canary: oneshot::Receiver<()>,
     pub commands: mpsc::Receiver<Command>,
+    pub command_pending: Option<Command>,
     pub transport: TransportFuture<T>,
     pub channels: LowestKeyMap<ChannelState>,
 }
@@ -33,6 +34,7 @@ impl<T> ConnectionFuture<T> {
         Self {
             canary,
             commands,
+            command_pending: None,
             transport: TransportFuture::Ready(transport),
             channels: LowestKeyMap::new(256),
         }
@@ -57,8 +59,15 @@ where
                     return Poll::Ready(());
                 }
             }
+
             log::debug!("Poll transport future");
-            let mut transport = ready!(Pin::new(&mut self_.transport).poll(cx));
+            let mut transport = match ready!(Pin::new(&mut self_.transport).poll(cx)) {
+                Ok(t) => t,
+                Err(e) => {
+                    log::warn!("Transport error: {:?}", e);
+                    return Poll::Ready(());
+                }
+            };
 
             log::debug!("Poll transport stream");
             match Pin::new(&mut transport).poll_next(cx) {
@@ -86,54 +95,88 @@ where
                 },
             }
 
-            log::debug!("Poll command stream");
-            match Pin::new(&mut self_.commands).poll_next(cx) {
-                Poll::Pending => (), // fall through
-                Poll::Ready(None) => {
-                    log::debug!("Command stream exhausted");
-                    return Poll::Ready(())
-                }
-                Poll::Ready(Some(cmd)) => match cmd {
-                    Command::Disconnect => {
-                        log::debug!("Command::Disconnect");
-                        self_.transport = transport.future();
-                        continue;
+            if self_.command_pending.is_none() {
+                log::debug!("Poll command stream");
+                match Pin::new(&mut self_.commands).poll_next(cx) {
+                    Poll::Pending => (), // fall through
+                    Poll::Ready(None) => {
+                        log::debug!("Command stream exhausted");
+                        return Poll::Ready(());
                     }
-                    Command::ChannelOpenSession(x) => {
-                        log::debug!("Command::ChannelOpenSession");
-                        self_.transport = transport.future();
-                        continue;
-                        /*
-                        match self.channels.insert(ChannelState::Opening(x)) {
-                            Ok(id) => {
-                                let req: MsgChannelOpen<Session> = MsgChannelOpen {
-                                    sender_channel: id as u32,
-                                    initial_window_size: 23,
-                                    maximum_packet_size: 23,
-                                    channel_type: (),
-                                };
-                                self.transport.send(&req).await?;
-                                self.transport.flush().await?;
-                                log::error!("BBBBBBB {}", id);
-                            }
-                            Err(ChannelState::Opening(x)) => {
-                                // In case of local channel shortage, reject the request.
-                                // It is safe to do nothing if the reply channel was dropped
-                                // in the meantime as no resources have been allocated.
-                                x.send(Err(OpenFailure {
-                                    reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
-                                    description: "".into()
-                                })).unwrap_or(())
-                            }
-                            _ => panic!("ABC")
-                            */
+                    Poll::Ready(cmd) => {
+                        self_.command_pending = cmd
                     }
                 }
             }
 
+            match &self_.command_pending {
+                None => (), // fall through
+                Some(Command::Debug(msg)) => {
+                    log::debug!("Command::Debug");
+                    let msg = MsgDebug::new(msg.clone());
+                    match transport.send2(&msg) {
+                        Some(()) => {
+                            self_.command_pending = None;
+                            self_.transport = transport.flush2();
+                            continue;
+                        }
+                        None => {
+                            log::debug!("Need to flush first");
+                            self_.transport = transport.flush2();
+                            continue;
+                        }
+                    }
+                }
+                Some(Command::Disconnect) => {
+                    log::debug!("Command::Disconnect");
+                    let msg = MsgDisconnect::by_application("FOOOBAR".into());
+                    match transport.send2(&msg) {
+                        Some(()) => {
+                            self_.command_pending = None;
+                            self_.transport = transport.flush2();
+                            continue;
+                        }
+                        None => {
+                            log::debug!("Need to flush first");
+                            self_.transport = transport.flush2();
+                            continue;
+                        }
+                    }
+                }
+                Some(Command::ChannelOpenSession(x)) => {
+                    log::debug!("Command::ChannelOpenSession");
+                    self_.transport = transport.future();
+                    continue;
+                    /*
+                    match self.channels.insert(ChannelState::Opening(x)) {
+                        Ok(id) => {
+                            let req: MsgChannelOpen<Session> = MsgChannelOpen {
+                                sender_channel: id as u32,
+                                initial_window_size: 23,
+                                maximum_packet_size: 23,
+                                channel_type: (),
+                            };
+                            self.transport.send(&req).await?;
+                            self.transport.flush().await?;
+                            log::error!("BBBBBBB {}", id);
+                        }
+                        Err(ChannelState::Opening(x)) => {
+                            // In case of local channel shortage, reject the request.
+                            // It is safe to do nothing if the reply channel was dropped
+                            // in the meantime as no resources have been allocated.
+                            x.send(Err(OpenFailure {
+                                reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
+                                description: "".into()
+                            })).unwrap_or(())
+                        }
+                        _ => panic!("ABC")
+                        */
+                },
+            }
+
             log::debug!("Store idle transport");
             self_.transport = transport.future();
-            return Poll::Pending
+            return Poll::Pending;
         }
     }
 }
