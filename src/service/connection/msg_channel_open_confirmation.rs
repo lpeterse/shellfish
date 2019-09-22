@@ -16,12 +16,10 @@ impl<'a, T: ChannelType> MsgChannelOpenConfirmation<T> {
 impl <T: ChannelType> Encode for MsgChannelOpenConfirmation<T> {
     fn size(&self) -> usize {
         1 + 4 + 4 + 4 + 4
-        + Encode::size(&T::name())
         + T::size_confirmation(&self.channel_type)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(Self::MSG_NUMBER as u8);
-        Encode::encode(&T::name(), e);
         e.push_u32be(self.recipient_channel);
         e.push_u32be(self.sender_channel);
         e.push_u32be(self.initial_window_size);
@@ -33,7 +31,6 @@ impl <T: ChannelType> Encode for MsgChannelOpenConfirmation<T> {
 impl<'a, T: ChannelType> Decode<'a> for MsgChannelOpenConfirmation<T> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
-        let _: &str = Decode::decode(d).filter(|x| x == &T::name())?;
         Self {
             recipient_channel: d.take_u32be()?,
             sender_channel: d.take_u32be()?,

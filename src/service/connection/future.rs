@@ -19,8 +19,8 @@ use std::pin::*;
 
 pub struct ConnectionFuture<T> {
     pub canary: oneshot::Receiver<()>,
+    pub command: Option<Command>,
     pub commands: mpsc::Receiver<Command>,
-    pub command_pending: Option<Command>,
     pub transport: TransportFuture<T>,
     pub channels: LowestKeyMap<ChannelState>,
 }
@@ -33,8 +33,8 @@ impl<T> ConnectionFuture<T> {
     ) -> Self {
         Self {
             canary,
+            command: None,
             commands,
-            command_pending: None,
             transport: TransportFuture::Ready(transport),
             channels: LowestKeyMap::new(256),
         }
@@ -55,7 +55,7 @@ where
             match self_.canary.try_recv() {
                 Ok(None) => (), // fall through
                 _ => {
-                    log::debug!("Canary dropped or fired");
+                    log::debug!("Ready: Canary dropped or fired");
                     return Poll::Ready(());
                 }
             }
@@ -64,7 +64,7 @@ where
             let mut transport = match ready!(Pin::new(&mut self_.transport).poll(cx)) {
                 Ok(t) => t,
                 Err(e) => {
-                    log::warn!("Transport error: {:?}", e);
+                    log::warn!("Ready: {:?}", e);
                     return Poll::Ready(());
                 }
             };
@@ -73,19 +73,67 @@ where
             match Pin::new(&mut transport).poll_next(cx) {
                 Poll::Pending => (),
                 Poll::Ready(None) => {
-                    log::debug!("Transport stream exhausted");
+                    log::debug!("Ready: Transport stream exhausted");
                     return Poll::Ready(());
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    log::debug!("Transport error: {:?}", e);
+                    log::debug!("Ready: {:?}", e);
                     return Poll::Ready(());
                 }
                 Poll::Ready(Some(Ok(token))) => match transport.redeem_token(token) {
-                    Some(msg) => {
+                    Some(E3::A(msg)) => {
                         log::info!("Ignoring {:?}", msg);
                         let _: MsgGlobalRequest = msg;
                         self_.transport = transport.future();
                         continue;
+                    }
+                    Some(E3::B(msg)) => {
+                        let _: MsgChannelOpenConfirmation<Session> = msg;
+                        match self_.channels.get_mut(msg.recipient_channel as usize) {
+                            None => {
+                                log::error!("Invalid channel id {}", msg.recipient_channel);
+                                return Poll::Ready(());
+                            }
+                            Some(state) => {
+                                let (s,r) = mpsc::channel(1);
+                                let open = Open {
+                                    local_channel: msg.recipient_channel,
+                                    local_initial_window_size: 128, // TODO
+                                    local_max_packet_size: 128, // TODO
+                                    remote_channel: msg.sender_channel,
+                                    remote_initial_window_size: msg.initial_window_size,
+                                    remote_max_packet_size: msg.maximum_packet_size,
+                                    receive_buffer: std::collections::VecDeque::new(), // TODO
+                                    notify: s,
+                                };
+                                match std::mem::replace(state, ChannelState::Open(open)) {
+                                    ChannelState::Opening(reply) => {
+                                        reply
+                                            .send(Ok(Channel {
+                                                id: msg.recipient_channel,
+                                                request: (),
+                                                confirmation: (),
+                                            }))
+                                            .unwrap_or(()); // TODO: close channel properly
+                                        self_.transport = transport.future();
+                                        continue;
+                                    },
+                                    _ => {
+                                        log::error!("Invalid channel state for id {}", msg.recipient_channel);
+                                        return Poll::Ready(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Some(E3::C(msg)) => {
+                        log::error!("FAILURE");
+                        let _: MsgChannelOpenFailure = msg;
+                        /*match self.channels.get(msg.recipient_channel as usize) {
+                            None => return Err(ConnectionError::InvalidChannelId),
+                            Some(c) => panic!("")
+                        }
+                        println!("MESSAGE");*/
                     }
                     None => {
                         log::error!("FIXME: unimplemented");
@@ -95,28 +143,34 @@ where
                 },
             }
 
-            if self_.command_pending.is_none() {
-                log::debug!("Poll command stream");
-                match Pin::new(&mut self_.commands).poll_next(cx) {
-                    Poll::Pending => (), // fall through
-                    Poll::Ready(None) => {
-                        log::debug!("Command stream exhausted");
-                        return Poll::Ready(());
-                    }
-                    Poll::Ready(cmd) => {
-                        self_.command_pending = cmd
+            let cmd = match std::mem::replace(&mut self_.command, None) {
+                Some(cmd) => {
+                    log::debug!("Retry pending command");
+                    cmd
+                }
+                None => {
+                    log::debug!("Poll command stream");
+                    match Pin::new(&mut self_.commands).poll_next(cx) {
+                        Poll::Pending => {
+                            log::debug!("Pending: No command");
+                            self_.transport = transport.future();
+                            return Poll::Pending;
+                        }
+                        Poll::Ready(None) => {
+                            log::debug!("Ready: Command stream exhausted");
+                            return Poll::Ready(());
+                        }
+                        Poll::Ready(Some(cmd)) => cmd,
                     }
                 }
-            }
+            };
 
-            match &self_.command_pending {
-                None => (), // fall through
-                Some(Command::Debug(msg)) => {
+            match cmd {
+                Command::Debug(msg) => {
                     log::debug!("Command::Debug");
                     let msg = MsgDebug::new(msg.clone());
                     match transport.send2(&msg) {
                         Some(()) => {
-                            self_.command_pending = None;
                             self_.transport = transport.flush2();
                             continue;
                         }
@@ -127,12 +181,11 @@ where
                         }
                     }
                 }
-                Some(Command::Disconnect) => {
+                Command::Disconnect => {
                     log::debug!("Command::Disconnect");
                     let msg = MsgDisconnect::by_application("FOOOBAR".into());
                     match transport.send2(&msg) {
                         Some(()) => {
-                            self_.command_pending = None;
                             self_.transport = transport.flush2();
                             continue;
                         }
@@ -143,40 +196,46 @@ where
                         }
                     }
                 }
-                Some(Command::ChannelOpenSession(x)) => {
+                Command::ChannelOpenSession(reply) => {
                     log::debug!("Command::ChannelOpenSession");
-                    self_.transport = transport.future();
-                    continue;
-                    /*
-                    match self.channels.insert(ChannelState::Opening(x)) {
-                        Ok(id) => {
-                            let req: MsgChannelOpen<Session> = MsgChannelOpen {
-                                sender_channel: id as u32,
+                    match self_.channels.free_key() {
+                        None => {
+                            // In case of local channel shortage, reject the request.
+                            // It is safe to do nothing if the reply channel was dropped
+                            // in the meantime as no resources have been allocated.
+                            reply
+                                .send(Err(OpenFailure {
+                                    reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
+                                    description: "".into(),
+                                }))
+                                .unwrap_or(());
+                            self_.transport = transport.future();
+                            continue;
+                        }
+                        Some(key) => {
+                            let msg: MsgChannelOpen<Session> = MsgChannelOpen {
+                                sender_channel: key as u32,
                                 initial_window_size: 23,
                                 maximum_packet_size: 23,
                                 channel_type: (),
                             };
-                            self.transport.send(&req).await?;
-                            self.transport.flush().await?;
-                            log::error!("BBBBBBB {}", id);
+                            match transport.send2(&msg) {
+                                None => {
+                                    log::debug!("Need to flush first");
+                                    self_.command = Some(Command::ChannelOpenSession(reply));
+                                    self_.transport = transport.flush2();
+                                    continue;
+                                }
+                                Some(()) => {
+                                    self_.channels.insert2(key, ChannelState::Opening(reply));
+                                    self_.transport = transport.flush2();
+                                    continue;
+                                }
+                            }
                         }
-                        Err(ChannelState::Opening(x)) => {
-                            // In case of local channel shortage, reject the request.
-                            // It is safe to do nothing if the reply channel was dropped
-                            // in the meantime as no resources have been allocated.
-                            x.send(Err(OpenFailure {
-                                reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
-                                description: "".into()
-                            })).unwrap_or(())
-                        }
-                        _ => panic!("ABC")
-                        */
-                },
+                    }
+                }
             }
-
-            log::debug!("Store idle transport");
-            self_.transport = transport.future();
-            return Poll::Pending;
         }
     }
 }

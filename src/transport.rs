@@ -1,6 +1,5 @@
 mod encryption;
 mod error;
-//mod for_each;
 mod buffered_receiver;
 mod buffered_sender;
 mod identification;
@@ -17,7 +16,6 @@ mod session_id;
 
 pub use self::encryption::*;
 pub use self::error::*;
-//pub use self::for_each::*;
 pub use self::buffered_receiver::*;
 pub use self::buffered_sender::*;
 pub use self::identification::*;
@@ -36,11 +34,10 @@ use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
-use futures::future::Either;
 use futures::future::Future;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, WriteHalf};
 use futures::ready;
-use futures::stream::{Stream, StreamExt};
+use futures::stream::{Stream};
 use futures::task::Context;
 use futures::task::Poll;
 use log;
@@ -318,6 +315,7 @@ impl<T: TransportStream> Transport<T> {
         self.unresolved_token = false;
 
         let buf = self.receiver.consume(token.buffer_size);
+        log::error!("MESSAGE {:?}", &buf[5..]);
         Decode::decode(&mut BDecoder(&buf[5..]))
     }
 

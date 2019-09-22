@@ -17,18 +17,20 @@ fn main() {
         match conn {
             Err(e) => println!("{:?}", e),
             Ok(mut conn) => {
-                async_std::task::sleep(std::time::Duration::from_secs(1)).await;
                 loop {
-                    conn.debug("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ".into()).await.expect("");
-                    println!("DEBUG");
                     async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+                    log::error!("DEBUG");
+                    conn.debug("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ".into()).await.expect("");
+                    async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+                    log::error!("OPEN SESSION");
+                    conn.open_session().await.expect("");
+                    log::info!("SESSION OPEN");
                 }
                 conn.disconnect().await.expect("");
                 println!("DISCONNE");
                 //conn.foobar().await.expect("");
                 //async_std::task::sleep(std::time::Duration::from_secs(1)).await;
                 //println!("CONNECTED 3");
-                //conn.open_session().await.expect("");
                 async_std::task::sleep(std::time::Duration::from_secs(10)).await;
             },
         }

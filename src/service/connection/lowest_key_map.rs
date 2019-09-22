@@ -50,6 +50,14 @@ impl <T> LowestKeyMap<T> {
         Err(t)
     }
 
+    pub fn free_key(&self) -> Option<usize> {
+        Some(0) // FIXME
+    }
+
+    pub fn insert2(&mut self, key: usize, t: T) {
+        self.elements.push(Some(t));
+    }
+
     pub fn remove(&mut self, i: usize) {
         // TODO: shrink vector
         if i < self.elements.len() {
