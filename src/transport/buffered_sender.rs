@@ -1,5 +1,9 @@
 use async_std::io::Write;
 use futures::io::AsyncWrite;
+use std::pin::*;
+use futures::ready;
+use futures::task::{Poll,Context};
+use std::ops::Range;
 
 const MIN_BUFFER_SIZE: usize = 1100;
 const MAX_BUFFER_SIZE: usize = 35000;
@@ -7,7 +11,7 @@ const MAX_BUFFER_SIZE: usize = 35000;
 pub struct BufferedSender<S> {
     stream: S,
     buffer: Box<[u8]>,
-    write_end: usize,
+    window: Range<usize>,
 }
 
 impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
@@ -20,12 +24,12 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
         Self {
             stream,
             buffer: vec(),
-            write_end: 0,
+            window: Range { start: 0, end: 0 },
         }
     }
 
     pub async fn alloc(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
-        let available = self.buffer.len() - self.write_end;
+        let available = self.buffer.len() - self.window.end;
         if available < len {
             self.flush().await?;
         }
@@ -48,17 +52,39 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
             vec.resize(new_size, 0);
             self.buffer = vec.into_boxed_slice();
         }
-        let start = self.write_end;
-        self.write_end += len;
-        Ok(&mut self.buffer[start..self.write_end])
+        let start = self.window.end;
+        self.window.end += len;
+        Ok(&mut self.buffer[start..self.window.end])
     }
 
     pub async fn flush(&mut self) -> async_std::io::Result<()> {
         self.stream
-            .write_all(&self.buffer[..self.write_end])
+            .write_all(&self.buffer[..self.window.end])
             .await?;
-        self.write_end = 0;
+        self.window.end = 0;
         Ok(())
+    }
+
+    pub fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), std::io::Error>> {
+        let s = Pin::into_inner(self);
+        loop {
+            if s.window.len() == 0 {
+                return Poll::Ready(Ok(()))
+            }
+            let buf = &s.buffer[s.window.start .. s.window.end];
+            match ready!(Pin::new(&mut s.stream).poll_write(cx, buf)) {
+                Err(e) => {
+                    return Poll::Ready(Err(e));
+                }
+                Ok(written) => {
+                    s.window.start += written;
+                    if s.window.len() == 0 {
+                        s.window = Range { start: 0, end: 0 };
+                    }
+                    continue;
+                }
+            }
+        }
     }
 }
 

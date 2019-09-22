@@ -85,7 +85,6 @@ pub struct Transport<T> {
     encryption_ctx: EncryptionContext,
     decryption_ctx: EncryptionContext,
     unresolved_token: bool,
-    receive_state: ReceiveState,
 }
 
 pub struct Receiver {
@@ -123,7 +122,6 @@ impl<T: TransportStream> Transport<T> {
             encryption_ctx: EncryptionContext::new(),
             decryption_ctx: EncryptionContext::new(),
             unresolved_token: false,
-            receive_state: ReceiveState::Idle,
         };
 
         t.kex(None).await?;
@@ -258,7 +256,7 @@ impl<T: TransportStream> Transport<T> {
         }
     }
 
-    async fn send_raw<'a, M: Encode>(&mut self, msg: &M) -> TransportResult<()> {
+    async fn send_raw<M: Encode>(&mut self, msg: &M) -> TransportResult<()> {
         let pc = self.packets_sent;
         self.packets_sent += 1;
         let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
@@ -266,6 +264,14 @@ impl<T: TransportStream> Transport<T> {
         let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
         Encode::encode(msg, &mut encoder);
         Ok(self.encryption_ctx.encrypt_packet(pc, layout, buffer))
+    }
+
+    fn send2<M: Encode>(&mut self, msg: &M) -> Option<usize> {
+        panic!("")
+    }
+
+    fn flush2(self) -> TransportFuture<T> {
+        TransportFuture::flush(self)
     }
 
     async fn receive_raw<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
@@ -303,8 +309,7 @@ impl<T: TransportStream> Transport<T> {
         self.unresolved_token = false;
 
         let buf = self.receiver.consume(token.buffer_size);
-        log::error!("{:?}", &buf[..8]);
-        Decode::decode(&mut BDecoder(buf))
+        Decode::decode(&mut BDecoder(&buf[5..]))
     }
 
     pub fn future(self) -> TransportFuture<T> {
@@ -328,12 +333,16 @@ impl<T: TransportStream> Transport<T> {
 
 pub enum TransportFuture<T> {
     Pending,
-    Ready(Transport<T>)    
+    Ready(Transport<T>),
+    Flush(Transport<T>),
 }
 
 impl <T> TransportFuture<T> {
     pub fn ready(t: Transport<T>) -> Self {
         Self::Ready(t)
+    }
+    pub fn flush(t: Transport<T>) -> Self {
+        Self::Flush(t)
     }
 }
 
@@ -346,6 +355,9 @@ impl <T> Future for TransportFuture<T> {
         match x {
             Self::Pending => Poll::Pending,
             Self::Ready(t) => Poll::Ready(t),
+            Self::Flush(t) => {
+                Poll::Pending
+            }
         }
     }
 }
@@ -394,13 +406,6 @@ impl <T: TransportStream> Stream for Transport<T> {
             }
         }
     }
-}
-
-pub enum ReceiveState {
-    Idle,
-    Fetch(Box<dyn Future<Output = Result<(), std::io::Error>> + Send>),
-    PeekLen(usize),
-    PeekBuf(usize),
 }
 
 #[cfg(test)]

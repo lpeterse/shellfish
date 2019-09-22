@@ -43,7 +43,7 @@ impl Connection {
     }
 
     pub async fn foobar(&mut self) -> Result<(), ChannelOpenError> {
-        self.command.send(Command::Foobar).map_err(|_| ChannelOpenError::ConnectionLost).await
+        self.command.send(Command::Disconnect).map_err(|_| ChannelOpenError::ConnectionLost).await
     }
 
     pub async fn open_session(&mut self) -> Result<Session,ChannelOpenError> {

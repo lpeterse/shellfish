@@ -93,9 +93,41 @@ where
                     log::debug!("Command stream exhausted");
                     return Poll::Ready(())
                 }
-                Poll::Ready(_) => {
-                    log::debug!("IGNORING COMMAND");
-                    continue;
+                Poll::Ready(Some(cmd)) => match cmd {
+                    Command::Disconnect => {
+                        log::debug!("Command::Disconnect");
+                        self_.transport = transport.future();
+                        continue;
+                    }
+                    Command::ChannelOpenSession(x) => {
+                        log::debug!("Command::ChannelOpenSession");
+                        self_.transport = transport.future();
+                        continue;
+                        /*
+                        match self.channels.insert(ChannelState::Opening(x)) {
+                            Ok(id) => {
+                                let req: MsgChannelOpen<Session> = MsgChannelOpen {
+                                    sender_channel: id as u32,
+                                    initial_window_size: 23,
+                                    maximum_packet_size: 23,
+                                    channel_type: (),
+                                };
+                                self.transport.send(&req).await?;
+                                self.transport.flush().await?;
+                                log::error!("BBBBBBB {}", id);
+                            }
+                            Err(ChannelState::Opening(x)) => {
+                                // In case of local channel shortage, reject the request.
+                                // It is safe to do nothing if the reply channel was dropped
+                                // in the meantime as no resources have been allocated.
+                                x.send(Err(OpenFailure {
+                                    reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
+                                    description: "".into()
+                                })).unwrap_or(())
+                            }
+                            _ => panic!("ABC")
+                            */
+                    }
                 }
             }
 
