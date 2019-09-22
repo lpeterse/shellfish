@@ -39,6 +39,17 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         &mut self.buffer[self.window.start .. self.window.end]
     }
 
+    pub fn consume<'a>(&'a mut self, len: usize) -> &'a [u8] {
+        assert!(self.window.len() >= len);
+        let start = self.window.start;
+        self.window.start += len;
+        if self.window.len() == 0 {
+            self.window.start = 0;
+            self.window.end = 0;
+        }
+        &self.buffer[start .. start + len]
+    }
+
     pub async fn fetch(&mut self, len: usize) -> async_std::io::Result<()> {
         while self.window.len() < len {
             if self.fill().await? == 0 {

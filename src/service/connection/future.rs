@@ -1,24 +1,112 @@
+use super::channel::*;
+use super::msg_channel_open::*;
 use super::msg_channel_open_confirmation::*;
 use super::msg_channel_open_failure::*;
-use super::msg_channel_open::*;
 use super::msg_global_request::*;
-use super::channel::*;
 use super::*;
 use crate::transport::*;
 
 use futures::channel::mpsc;
 use futures::channel::oneshot;
-use futures::select;
-use futures::stream::StreamExt;
-use futures::FutureExt;
 use futures::future::Either;
+use futures::future::Future;
+use futures::ready;
+use futures::select;
+use futures::stream::{Stream, StreamExt};
+use futures::task::{Context, Poll};
+use futures::FutureExt;
+use std::pin::*;
 
-pub struct ConnectionState {
+pub struct ConnectionFuture<T> {
     pub canary: oneshot::Receiver<()>,
-    //pub commands: mpsc::Receiver<Command>,
-    //pub transport: Transport<T>,
+    pub commands: mpsc::Receiver<Command>,
+    pub transport: TransportFuture<T>,
     pub channels: LowestKeyMap<ChannelState>,
 }
+
+impl<T> ConnectionFuture<T> {
+    pub fn new(
+        canary: oneshot::Receiver<()>,
+        commands: mpsc::Receiver<Command>,
+        transport: Transport<T>,
+    ) -> Self {
+        Self {
+            canary,
+            commands,
+            transport: TransportFuture::Ready(transport),
+            channels: LowestKeyMap::new(256),
+        }
+    }
+}
+
+impl<T> Future for ConnectionFuture<T>
+where
+    T: Unpin + TransportStream,
+{
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        log::debug!("ConnectionFuture.poll()");
+        let mut self_ = Pin::into_inner(self);
+        loop {
+            log::debug!("Check canary");
+            match self_.canary.try_recv() {
+                Ok(None) => (), // fall through
+                _ => {
+                    log::debug!("Canary dropped or fired");
+                    return Poll::Ready(());
+                }
+            }
+            log::debug!("Poll transport future");
+            let mut transport = ready!(Pin::new(&mut self_.transport).poll(cx));
+
+            log::debug!("Poll transport stream");
+            match Pin::new(&mut transport).poll_next(cx) {
+                Poll::Pending => (),
+                Poll::Ready(None) => {
+                    log::debug!("Transport stream exhausted");
+                    return Poll::Ready(());
+                }
+                Poll::Ready(Some(Err(e))) => {
+                    log::debug!("Transport error: {:?}", e);
+                    return Poll::Ready(());
+                }
+                Poll::Ready(Some(Ok(token))) => match transport.redeem_token(token) {
+                    Some(msg) => {
+                        log::info!("Ignoring {:?}", msg);
+                        let _: MsgGlobalRequest = msg;
+                        self_.transport = transport.future();
+                        continue;
+                    }
+                    None => {
+                        log::error!("FIXME: unimplemented");
+                        self_.transport = transport.future();
+                        continue;
+                    }
+                },
+            }
+
+            log::debug!("Poll command stream");
+            match Pin::new(&mut self_.commands).poll_next(cx) {
+                Poll::Pending => (), // fall through
+                Poll::Ready(None) => {
+                    log::debug!("Command stream exhausted");
+                    return Poll::Ready(())
+                }
+                Poll::Ready(_) => {
+                    log::debug!("IGNORING COMMAND");
+                    continue;
+                }
+            }
+
+            log::debug!("Store idle transport");
+            self_.transport = transport.future();
+            return Poll::Pending
+        }
+    }
+}
+
+/*
 
 impl ConnectionState {
     pub async fn run<T: TransportStream>(mut self, transport: Transport<T>, commands: mpsc::Receiver<Command>) -> Result<(), ConnectionError> {
@@ -26,7 +114,19 @@ impl ConnectionState {
             Command(Command),
             Message(T),
         }
+
+        loop {
+            let t1 = transport.next();
+
+        }
+        /*
         let r = transport.for_each(commands, |transport, input| Box::pin( async {
+            if true {
+                Ok(Either::Left(transport))
+            } else {
+                Ok(Either::Right(()))
+            }
+            /*
             match input {
                 Either::Left(token) => {
                     log::error!("TOKEN {:?}", token);
@@ -49,15 +149,16 @@ impl ConnectionState {
                     log::error!("EVENT");
                     Ok(Some(()))
                 }
-            }
+            }*/
         })).await;
 
         log::error!("RRRRR {:?}", r);
+        */
         /*
         loop {
             log::error!("LOOP");
             let event = {
-                let t1 = self.commands.next();
+                let t1 = self.commandself_.next();
                 let t2 = self.transport.try_receive().fuse();
                 futures::pin_mut!(t1, t2);
                 futures::select! {
@@ -109,7 +210,6 @@ impl ConnectionState {
                     }
                     E3::B(msg) => {
                         let _: MsgChannelOpenConfirmation<Session> = msg;
-                        
                         println!("OPPPPPPPEEEEENNNNN");
                     }
                     E3::C(msg) => {
@@ -126,7 +226,7 @@ impl ConnectionState {
         }*/
         Ok(())
     }
-}
+}*/
 
 #[derive(Debug)]
 pub enum Message<'a> {

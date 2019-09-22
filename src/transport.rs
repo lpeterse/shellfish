@@ -1,6 +1,6 @@
 mod encryption;
 mod error;
-mod for_each;
+//mod for_each;
 mod identification;
 mod kex;
 mod key_streams;
@@ -17,7 +17,7 @@ mod buffered_sender;
 
 pub use self::encryption::*;
 pub use self::error::*;
-pub use self::for_each::*;
+//pub use self::for_each::*;
 pub use self::identification::*;
 pub use self::kex::*;
 pub use self::key_streams::*;
@@ -292,30 +292,24 @@ impl<T: TransportStream> Transport<T> {
         Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }
 
-    pub async fn redeem_token<'a, M>(&'a mut self, token: Token) -> Result<Option<M>, TransportError>
+    pub fn redeem_token<'a, M>(&'a mut self, token: Token) -> Option<M>
     where
         M: Decode<'a>,
     {
         assert!(self.unresolved_token);
         assert!(self.packets_received == token.packet_counter);
 
-        let buffer = self.receiver.read_exact(token.buffer_size).await?;
-        let payload = &buffer[PacketLayout::PACKET_LEN_SIZE + PacketLayout::PADDING_LEN_SIZE..]; // TODO: trim right
-
         self.packets_received +=1 ;
         self.unresolved_token = false;
 
-        match Decode::decode(&mut BDecoder(payload)) {
-            Some(msg) => Ok(Some(msg)),
-            None => {
-                let response = MsgUnimplemented { packet_number: 0 }; // FIXME
-                //self.sender.send(&response).await?;
-                log::warn!("TODO: SEND MSG UNIMPLEMENTED: {:?}", &payload);
-                return Ok(None)
-            }
-        }
+        let buf = self.receiver.consume(token.buffer_size);
+        Decode::decode(&mut BDecoder(buf))
     }
 
+    pub fn future(self) -> TransportFuture<T> {
+        TransportFuture::ready(self)
+    }
+/*
     pub fn for_each<E, H, F, O>(
         self,
         events: E,
@@ -323,10 +317,35 @@ impl<T: TransportStream> Transport<T> {
     ) -> ForEach<T, E, H, F, O>
     where
         E: Unpin + Stream + StreamExt,
-        H: Unpin + FnMut(&mut Self, Either<Token, E::Item>) -> F,
-        F: Unpin + Future<Output = Result<Option<O>, TransportError>>,
+        H: Unpin + FnMut(Self, Either<Token, E::Item>) -> F,
+        F: Unpin + Future<Output = Result<Either<Transport<T>, O>, TransportError>>,
     {
         ForEach::new(self, events, handler)
+    }
+*/
+}
+
+pub enum TransportFuture<T> {
+    Pending,
+    Ready(Transport<T>)    
+}
+
+impl <T> TransportFuture<T> {
+    pub fn ready(t: Transport<T>) -> Self {
+        Self::Ready(t)
+    }
+}
+
+impl <T> Future for TransportFuture<T> {
+    type Output = Transport<T>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let s = Pin::into_inner(self);
+        let x = std::mem::replace(s, TransportFuture::Pending);
+        match x {
+            Self::Pending => Poll::Pending,
+            Self::Ready(t) => Poll::Ready(t),
+        }
     }
 }
 

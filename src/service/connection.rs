@@ -1,6 +1,6 @@
 mod channel;
 mod command;
-mod state;
+mod future;
 mod lowest_key_map;
 mod msg_channel_open;
 mod msg_channel_open_confirmation;
@@ -14,7 +14,7 @@ use self::lowest_key_map::*;
 //use self::msg_channel_open_failure::*;
 //use self::msg_global_request::*;
 use self::command::*;
-use self::state::*;
+use self::future::ConnectionFuture;
 use super::*;
 use super::user_auth::*;
 use crate::agent::*;
@@ -38,15 +38,7 @@ impl Connection {
     pub fn new<T: TransportStream>(t: Transport<T>) -> Connection {
         let (s1,r1) = oneshot::channel();
         let (s2,r2) = mpsc::channel(1);
-        async_std::task::spawn(async move {
-            let x = ConnectionState {
-                canary: r1,
-                //commands: r2,
-                //transport: t,
-                channels: LowestKeyMap::new(256),
-            }.run(t, r2).await;
-            log::error!("{:?}", x);
-        });
+        async_std::task::spawn(ConnectionFuture::new(r1, r2, t));
         Connection { command: s2, _canary: s1 }
     }
 
