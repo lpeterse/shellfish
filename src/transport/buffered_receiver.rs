@@ -1,5 +1,4 @@
 use async_std::io::Read;
-use futures::future::Future;
 use futures::io::AsyncRead;
 use futures::ready;
 use futures::task::{Context, Poll};
@@ -45,43 +44,8 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
     }
 
     async fn fill(&mut self) -> async_std::io::Result<usize> {
-        // Case 1: remaining capacity
-        if self.window.end < self.buffer.len() {
-            // nothing to do
-        }
-        // Case 2: no remaining capacity right -> memmove
-        else if self.window.end >= self.buffer.len() && self.window.start != 0 {
-            self.buffer
-                .copy_within(self.window.start..self.window.end, 0);
-            self.window.end -= self.window.start;
-            self.window.start = 0;
-        }
-        // Case 3: no remainig capacity at all, but smaller MAX_BUFFER_SIZE -> extend
-        else if self.buffer.len() < MAX_BUFFER_SIZE {
-            println!("RESIZE");
-            let len_old = self.buffer.len();
-            let len_new = std::cmp::min(len_old * 2, MAX_BUFFER_SIZE);
-            let mut vec = Vec::with_capacity(len_new);
-            vec.resize(len_new, 0);
-            vec[..len_old].copy_from_slice(&self.buffer[self.window.start..self.window.end]);
-            println!("RESIZE {} {}", len_new, len_old);
-            self.buffer = vec.into_boxed_slice();
-            self.window.start = 0;
-            self.window.end = len_old;
-        }
-        // Case 4: no remaining capacity at all, MAX_BUFFER_SIZE reached -> err
-        else {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "max buffer size exhausted",
-            ));
-        }
-        let read = self
-            .stream
-            .read(&mut self.buffer[self.window.end..])
-            .await?;
-        self.window.end += read;
-        Ok(read)
+        let mut p = Pin::new(self);
+        futures::future::poll_fn(|cx| p.as_mut().poll_fill(cx)).await
     }
 
     pub async fn read(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
