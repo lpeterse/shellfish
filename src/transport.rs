@@ -303,6 +303,7 @@ impl<T: TransportStream> Transport<T> {
         self.unresolved_token = false;
 
         let buf = self.receiver.consume(token.buffer_size);
+        log::error!("{:?}", &buf[..8]);
         Decode::decode(&mut BDecoder(buf))
     }
 
