@@ -16,7 +16,7 @@ use futures::task::{Context, Poll};
 use std::pin::*;
 
 pub struct ConnectionFuture<T> {
-    pub canary: oneshot::Receiver<()>,
+    pub error: Option<oneshot::Sender<ConnectionError>>,
     pub command: Option<Command>,
     pub commands: mpsc::Receiver<Command>,
     pub transport: TransportFuture<T>,
@@ -25,17 +25,22 @@ pub struct ConnectionFuture<T> {
 
 impl<T> ConnectionFuture<T> {
     pub fn new(
-        canary: oneshot::Receiver<()>,
+        error: oneshot::Sender<ConnectionError>,
         commands: mpsc::Receiver<Command>,
         transport: Transport<T>,
     ) -> Self {
         Self {
-            canary,
+            error: Some(error),
             command: None,
             commands,
             transport: TransportFuture::Ready(transport),
             channels: LowestKeyMap::new(256),
         }
+    }
+
+    pub fn send_error(&mut self, e: ConnectionError) {
+        let error = std::mem::replace(&mut self.error, None).unwrap();
+        error.send(e).unwrap_or(());
     }
 }
 
@@ -50,15 +55,22 @@ where
         let mut self_ = Pin::into_inner(self);
         loop {
             //===================================================================================//
-            // CHECK WHETHER ASSOCIATED CONNECTION OBJECT HAS BEEN DROPPED                       //
+            // CHECK FUTURE FOR READYNESS (ERROR OCCURED OR CONNECTION DROPPED)                  //
             //===================================================================================//
 
-            log::debug!("Check canary");
-            match self_.canary.try_recv() {
-                Ok(None) => (), // fall through
-                _ => {
-                    log::debug!("Ready: Canary dropped or fired");
+            match &mut self_.error {
+                None => {
+                    log::debug!("Ready: Error transmitted");
                     return Poll::Ready(());
+                }
+                Some(error) => {
+                    match Pin::new(error).poll_cancel(cx) {
+                        Poll::Pending => (), // fall through
+                        Poll::Ready(()) => {
+                            log::debug!("Ready: Connection dropped");
+                            return Poll::Ready(());
+                        }
+                    }
                 }
             }
 
@@ -70,8 +82,8 @@ where
             let mut transport = match ready!(Pin::new(&mut self_.transport).poll(cx)) {
                 Ok(t) => t,
                 Err(e) => {
-                    log::warn!("Ready: {:?}", e);
-                    return Poll::Ready(());
+                    self_.send_error(e.into());
+                    continue;
                 }
             };
 
@@ -83,12 +95,12 @@ where
             match Pin::new(&mut transport).poll_next(cx) {
                 Poll::Pending => (), // fall through
                 Poll::Ready(None) => {
-                    log::debug!("Ready: Transport stream exhausted");
-                    return Poll::Ready(());
+                    self_.send_error(ConnectionError::TransportStreamExhausted);
+                    continue;
                 }
                 Poll::Ready(Some(Err(e))) => {
-                    log::debug!("Ready: {:?}", e);
-                    return Poll::Ready(());
+                    self_.send_error(e.into());
+                    continue;
                 }
                 Poll::Ready(Some(Ok(token))) => match transport.redeem_token(token) {
                     Some(E3::A(msg)) => {
@@ -102,8 +114,8 @@ where
                         let _: MsgChannelOpenConfirmation<Session> = msg;
                         match self_.channels.get_mut(msg.recipient_channel as usize) {
                             None => {
-                                log::error!("Invalid channel id {}", msg.recipient_channel);
-                                return Poll::Ready(());
+                                self_.send_error(ConnectionError::InvalidChannelId);
+                                continue;
                             }
                             Some(state) => {
                                 let (s, r) = mpsc::channel(1);
@@ -135,11 +147,8 @@ where
                                         continue;
                                     }
                                     _ => {
-                                        log::error!(
-                                            "Invalid channel state for id {}",
-                                            msg.recipient_channel
-                                        );
-                                        return Poll::Ready(());
+                                        self_.send_error(ConnectionError::InvalidChannelState);
+                                        continue;
                                     }
                                 }
                             }
@@ -162,15 +171,12 @@ where
                                 continue;
                             }
                             Some(_) => {
-                                log::error!(
-                                    "Invalid channel state for id {}",
-                                    msg.recipient_channel
-                                );
-                                return Poll::Ready(());
+                                self_.send_error(ConnectionError::InvalidChannelState);
+                                continue;
                             }
                             None => {
-                                log::error!("Invalid channel id {}", msg.recipient_channel);
-                                return Poll::Ready(());
+                                self_.send_error(ConnectionError::InvalidChannelId);
+                                continue;
                             }
                         }
                     }
@@ -195,13 +201,12 @@ where
                     log::debug!("Poll command stream");
                     match Pin::new(&mut self_.commands).poll_next(cx) {
                         Poll::Pending => {
-                            log::debug!("Pending: No command");
-                            self_.transport = transport.future();
-                            return Poll::Pending;
+                            log::debug!("No command");
+                            None
                         }
                         Poll::Ready(None) => {
-                            log::debug!("Ready: Command stream exhausted");
-                            return Poll::Ready(());
+                            self_.send_error(ConnectionError::CommandStreamExhausted);
+                            continue;
                         }
                         Poll::Ready(Some(cmd)) => Some(cmd),
                     }
@@ -326,9 +331,15 @@ where
                                 }
                             }
                         }
-                        _ => panic!("invalid channel state"),
+                        _ => {
+                            self_.send_error(ConnectionError::InvalidChannelState);
+                            continue;
+                        }
                     },
-                    _ => panic!("invalid channel id"),
+                    _ => {
+                        self_.send_error(ConnectionError::InvalidChannelId);
+                        continue;
+                    }
                 },
             }
 
@@ -347,23 +358,4 @@ where
     }
 }
 
-#[derive(Debug)]
-pub enum ConnectionError {
-    ConnectionLost,
-    CommandStreamTerminated,
-    InvalidChannelId,
-    TransportError(TransportError),
-    ChannelOpenFailure(ChannelOpenFailure),
-}
 
-impl From<TransportError> for ConnectionError {
-    fn from(e: TransportError) -> Self {
-        Self::TransportError(e)
-    }
-}
-
-impl From<ChannelOpenFailure> for ConnectionError {
-    fn from(e: ChannelOpenFailure) -> Self {
-        Self::ChannelOpenFailure(e)
-    }
-}
