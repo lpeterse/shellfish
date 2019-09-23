@@ -5,6 +5,7 @@ mod lowest_key_map;
 mod msg_channel_open;
 mod msg_channel_open_confirmation;
 mod msg_channel_open_failure;
+mod msg_channel_close;
 mod msg_global_request;
 
 use self::channel::*;

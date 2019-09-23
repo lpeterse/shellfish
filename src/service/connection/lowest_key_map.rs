@@ -1,3 +1,6 @@
+use std::slice::IterMut;
+use std::iter::Enumerate;
+
 pub struct LowestKeyMap<T> {
     capacity: usize,
     elements: Vec<Option<T>>
@@ -58,10 +61,37 @@ impl <T> LowestKeyMap<T> {
         self.elements.push(Some(t));
     }
 
-    pub fn remove(&mut self, i: usize) {
+    pub fn remove(&mut self, i: usize) -> Option<T> {
         // TODO: shrink vector
         if i < self.elements.len() {
-            self.elements[i] = None;
+            std::mem::replace(&mut self.elements[i], None)
+        } else {
+            None
+        }
+    }
+}
+
+impl <'a, T> IntoIterator for &'a mut LowestKeyMap<T> {
+    type Item = &'a mut T;
+    type IntoIter = LowestKeyMapIterator<'a, T>;
+
+    fn into_iter(self) -> LowestKeyMapIterator<'a, T> {
+        LowestKeyMapIterator(self.elements.iter_mut())
+    }
+}
+
+pub struct LowestKeyMapIterator<'a, T> (IterMut<'a, Option<T>>);
+
+impl <'a, T> Iterator for LowestKeyMapIterator<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            match self.0.next() {
+                None => return None,
+                Some(None) => continue, // skip
+                Some(Some(t)) => return Some(t),
+            }
         }
     }
 }

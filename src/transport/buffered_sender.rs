@@ -81,6 +81,10 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
         Ok(())
     }
 
+    pub fn flushed(&self) -> bool {
+        self.window.len() == 0
+    }
+
     pub fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), std::io::Error>> {
         let s = Pin::into_inner(self);
         loop {

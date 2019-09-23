@@ -319,6 +319,10 @@ impl<T: TransportStream> Transport<T> {
         Decode::decode(&mut BDecoder(&buf[5..]))
     }
 
+    pub fn flushed(&self) -> bool {
+        self.sender.flushed()
+    }
+
     pub fn future(self) -> TransportFuture<T> {
         TransportFuture::ready(self)
     }

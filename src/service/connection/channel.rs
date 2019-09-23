@@ -12,12 +12,13 @@ pub struct Channel<T: ChannelType> {
     pub id: u32,
     pub request: <T as ChannelType>::Request,
     pub confirmation: <T as ChannelType>::Confirmation,
+    pub notification: mpsc::Receiver<()>,
 }
 
 pub enum ChannelState {
     Opening(oneshot::Sender<Result<Channel<Session>,OpenFailure>>),
     Open(Open),
-    Closing(Closing),
+    Closing,
 }
 
 pub struct Open {
@@ -31,17 +32,12 @@ pub struct Open {
     pub notify: mpsc::Sender<()>,
 }
 
-pub struct Closing {
-    pub notify: oneshot::Sender<()>,
-}
-
 pub struct OpenFailure {
     pub reason: ChannelOpenFailureReason,
     pub description: String,
 }
 
 pub struct OpenFailureReason {
-
 }
 
 pub struct ChannelOpenConfirmation<T: ChannelType> {
