@@ -32,13 +32,13 @@ impl Encode for MsgDisconnect {
     }
 }
 
-impl<'a> Decode<'a> for MsgDisconnect {
+impl<'a> DecodeRef<'a> for MsgDisconnect {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {
-            reason: Decode::decode(d)?,
-            description: Decode::decode(d)?,
-            language: Decode::decode(d)?,
+            reason: DecodeRef::decode(d)?,
+            description: DecodeRef::decode(d)?,
+            language: DecodeRef::decode(d)?,
         }.into()
     }
 }

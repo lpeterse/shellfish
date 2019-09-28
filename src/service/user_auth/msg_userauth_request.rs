@@ -28,16 +28,16 @@ impl <'a, M: Method + Encode> Encode for MsgUserAuthRequest<'a, M> {
     }
 }
 
-impl <'a, M: Method + Decode<'a>> Decode<'a> for MsgUserAuthRequest<'a, M> {
+impl <'a, M: Method + DecodeRef<'a>> DecodeRef<'a> for MsgUserAuthRequest<'a, M> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
-        let user_name = Decode::decode(d)?;
-        let service_name = Decode::decode(d)?;
-        let _: &str = Decode::decode(d).filter(|x| *x == M::NAME)?;
+        let user_name = DecodeRef::decode(d)?;
+        let service_name = DecodeRef::decode(d)?;
+        let _: &str = DecodeRef::decode(d).filter(|x| *x == M::NAME)?;
         MsgUserAuthRequest {
             user_name,
             service_name,
-            method: Decode::decode(d)?,
+            method: DecodeRef::decode(d)?,
         }
         .into()
     }

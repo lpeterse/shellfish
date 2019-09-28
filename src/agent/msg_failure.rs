@@ -16,7 +16,7 @@ impl Encode for MsgFailure {
     }
 }
 
-impl <'a> Decode<'a> for MsgFailure {
+impl <'a> DecodeRef<'a> for MsgFailure {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
@@ -45,7 +45,7 @@ mod test {
         let buf = [5];
         let mut dec = BDecoder::from(buf.as_ref());
         let res = Some(MsgFailure {});
-        assert_eq!(res, Decode::decode(&mut dec));
+        assert_eq!(res, DecodeRef::decode(&mut dec));
     }
 
     #[test]
@@ -53,6 +53,6 @@ mod test {
         let buf = [0];
         let mut dec = BDecoder::from(buf.as_ref());
         let res: Option<MsgFailure> = None;
-        assert_eq!(res, Decode::decode(&mut dec));
+        assert_eq!(res, DecodeRef::decode(&mut dec));
     }
 }

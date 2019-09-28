@@ -19,8 +19,8 @@ impl  Encode for MsgChannelClose {
     }
 }
 
-impl <'a> Decode<'a> for MsgChannelClose {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgChannelClose {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
         Self {
             recipient_channel: d.take_u32be()?,

@@ -132,15 +132,15 @@ impl<T: TransportStream> Transport<T> {
         self.send_raw(msg).await
     }
 
-    pub async fn receive<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
+    pub async fn receive<'a, M: DecodeRef<'a>>(&'a mut self) -> TransportResult<M> {
         self.rekey_if_necessary().await?;
         self.receive_raw().await
     }
 
-    pub async fn try_receive<'a, M: Decode<'a>>(&'a mut self) -> Result<Option<M>, TransportError> {
+    pub async fn try_receive<'a, M: DecodeRef<'a>>(&'a mut self) -> Result<Option<M>, TransportError> {
         let x: E3<MsgDisconnect, MsgIgnore<'a>, M> = self.receive().await?;
         match x {
-            E3::A(_) => Err(TransportError::DisconnectError),
+            E3::A(_) => Err(TransportError::DisconnectByPeer),
             E3::B(_) => Ok(None),
             E3::C(x) => Ok(Some(x)),
         }
@@ -246,7 +246,7 @@ impl<T: TransportStream> Transport<T> {
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
             let line = stream.read_line(Identification::MAX_LEN).await?;
-            match Decode::decode(&mut BDecoder(line)) {
+            match DecodeRef::decode(&mut BDecoder(line)) {
                 Some(id) => break Ok(id),
                 None => (),
             }
@@ -268,17 +268,14 @@ impl<T: TransportStream> Transport<T> {
         let buffer = self.sender.reserve(layout.buffer_len())?;
         let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
         Encode::encode(msg, &mut encoder);
+        log::debug!("SEND2 {:?}", buffer);
         let pc = self.packets_sent;
         self.packets_sent += 1;
         self.encryption_ctx.encrypt_packet(pc, layout, buffer);
         Some(())
     }
 
-    pub fn flush2(self) -> TransportFuture<T> {
-        TransportFuture::flush(self)
-    }
-
-    async fn receive_raw<'a, M: Decode<'a>>(&'a mut self) -> TransportResult<M> {
+    async fn receive_raw<'a, M: DecodeRef<'a>>(&'a mut self) -> TransportResult<M> {
         let pc = self.packets_received;
         log::error!("RECEIVE RAW {}", pc);
         self.packets_received += 1;
@@ -301,12 +298,12 @@ impl<T: TransportStream> Transport<T> {
 
         log::warn!("RECEIVE RAW {}", pc);
 
-        Decode::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
+        DecodeRef::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }
 
     pub fn redeem_token<'a, M>(&'a mut self, token: Token) -> Option<M>
     where
-        M: Decode<'a>,
+        M: DecodeRef<'a>,
     {
         assert!(self.unresolved_token);
         assert!(self.packets_received == token.packet_counter);
@@ -316,36 +313,31 @@ impl<T: TransportStream> Transport<T> {
 
         let buf = self.receiver.consume(token.buffer_size);
         log::error!("MESSAGE {:?}", &buf[5..]);
-        Decode::decode(&mut BDecoder(&buf[5..]))
+        DecodeRef::decode(&mut BDecoder(&buf[5..]))
     }
 
     pub fn flushed(&self) -> bool {
         self.sender.flushed()
     }
 
-    pub fn future(self) -> TransportFuture<T> {
+    pub fn ready(self) -> TransportFuture<T> {
         TransportFuture::ready(self)
     }
-    /*
-        pub fn for_each<E, H, F, O>(
-            self,
-            events: E,
-            handler: H,
-        ) -> ForEach<T, E, H, F, O>
-        where
-            E: Unpin + Stream + StreamExt,
-            H: Unpin + FnMut(Self, Either<Token, E::Item>) -> F,
-            F: Unpin + Future<Output = Result<Either<Transport<T>, O>, TransportError>>,
-        {
-            ForEach::new(self, events, handler)
-        }
-    */
+
+    pub fn flush2(self) -> TransportFuture<T> {
+        TransportFuture::flush(self)
+    }
+
+    pub fn disconnect(self) -> TransportFuture<T> {
+        TransportFuture::disconnect(self)
+    }
 }
 
 pub enum TransportFuture<T> {
     Pending,
     Ready(Transport<T>),
     Flush(Transport<T>),
+    Disconnect(Transport<T>),
 }
 
 impl<T> TransportFuture<T> {
@@ -354,6 +346,9 @@ impl<T> TransportFuture<T> {
     }
     pub fn flush(t: Transport<T>) -> Self {
         Self::Flush(t)
+    }
+    pub fn disconnect(t: Transport<T>) -> Self {
+        Self::Disconnect(t)
     }
 }
 
@@ -376,6 +371,13 @@ where
                 }
                 Poll::Ready(Ok(())) => return Poll::Ready(Ok(t)),
                 Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+            },
+            Self::Disconnect(mut t) => match Pin::new(&mut t.sender).poll_flush(cx) {
+                Poll::Pending => {
+                    std::mem::replace(s, Self::Disconnect(t));
+                    return Poll::Pending;
+                }
+                _ => return Poll::Ready(Err(TransportError::DisconnectByUs)),
             },
         }
     }

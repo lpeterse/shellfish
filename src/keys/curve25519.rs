@@ -19,7 +19,7 @@ impl Encode for Curve25519PublicKey {
     }
 }
 
-impl <'a> Decode<'a> for Curve25519PublicKey {
+impl <'a> DecodeRef<'a> for Curve25519PublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let mut k = [0;32];
         c.take_u32be().filter(|x| x == &32)?;

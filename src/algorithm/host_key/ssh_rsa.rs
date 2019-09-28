@@ -32,12 +32,12 @@ impl Encode for SshRsaPublicKey {
     }
 }
 
-impl<'a> Decode<'a> for SshRsaPublicKey {
+impl<'a> DecodeRef<'a> for SshRsaPublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?; // TODO: use
-        let _: &str = Decode::decode(c).filter(|x| *x == <SshRsa as SignatureAlgorithm>::NAME)?;
-        let e = Decode::decode(c)?;
-        let n = Decode::decode(c)?;
+        let _: &str = DecodeRef::decode(c).filter(|x| *x == <SshRsa as SignatureAlgorithm>::NAME)?;
+        let e = DecodeRef::decode(c)?;
+        let n = DecodeRef::decode(c)?;
         Some(SshRsaPublicKey {
             public_e: e,
             public_n: n,

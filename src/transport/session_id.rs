@@ -66,7 +66,7 @@ impl Encode for SessionId {
     }
 }
 
-impl<'a> Decode<'a> for SessionId {
+impl<'a> DecodeRef<'a> for SessionId {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         match d.take_u32be()? {
             32 => {

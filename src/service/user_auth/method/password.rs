@@ -16,8 +16,8 @@ impl Encode for PasswordMethod {
     }
 }
 
-impl <'a> Decode<'a> for PasswordMethod {
+impl <'a> DecodeRef<'a> for PasswordMethod {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        Decode::decode(d).map(PasswordMethod)
+        DecodeRef::decode(d).map(PasswordMethod)
     }
 }

@@ -39,17 +39,17 @@ impl Encode for PublicKey {
     }
 }
 
-impl <'a> Decode<'a> for PublicKey {
+impl <'a> DecodeRef<'a> for PublicKey {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         None.or_else(|| {
                 let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(PublicKey::Ed25519PublicKey);
+                let r = DecodeRef::decode(&mut d_).map(PublicKey::Ed25519PublicKey);
                 if r.is_some() { *d = d_ };
                 r
             })
             .or_else(|| {
                 let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(PublicKey::RsaPublicKey);
+                let r = DecodeRef::decode(&mut d_).map(PublicKey::RsaPublicKey);
                 if r.is_some() { *d = d_ };
                 r
             })
@@ -90,9 +90,9 @@ impl Encode for Signature {
     }
 }
 
-impl <'a> Decode<'a> for Signature {
+impl <'a> DecodeRef<'a> for Signature {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         // TODO
-        Some(Signature::Ed25519Signature(Decode::decode(d)?))
+        Some(Signature::Ed25519Signature(DecodeRef::decode(d)?))
     }
 }

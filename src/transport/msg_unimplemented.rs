@@ -19,7 +19,7 @@ impl Encode for MsgUnimplemented {
     }
 }
 
-impl<'a> Decode<'a> for MsgUnimplemented {
+impl<'a> DecodeRef<'a> for MsgUnimplemented {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {

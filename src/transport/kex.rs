@@ -138,7 +138,7 @@ pub struct KexOutput {
     pub mac_algorithm_server_to_client: Option<MacAlgorithm>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub enum KexError {
     DecoderError,
     NoCommonServerHostKeyAlgorithm,

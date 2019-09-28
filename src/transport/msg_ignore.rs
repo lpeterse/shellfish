@@ -19,11 +19,11 @@ impl <'a> Encode for MsgIgnore<'a> {
     }
 }
 
-impl<'a> Decode<'a> for MsgIgnore<'a> {
+impl<'a> DecodeRef<'a> for MsgIgnore<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {
-            data: Decode::decode(d)?,
+            data: DecodeRef::decode(d)?,
         }
         .into()
     }

@@ -35,17 +35,17 @@ where
     }
 }
 
-impl<'a, S: SignatureAlgorithm> Decode<'a> for PublicKeyMethod<S>
+impl<'a, S: SignatureAlgorithm> DecodeRef<'a> for PublicKeyMethod<S>
 where
-    S::PublicKey: Decode<'a>,
-    S::Signature: Decode<'a>,
+    S::PublicKey: DecodeRef<'a>,
+    S::Signature: DecodeRef<'a>,
 {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         let b = d.take_u8()? != 0;
-        let _: &str = Decode::decode(d).filter(|x| *x == S::NAME)?;
-        let public_key = Decode::decode(d)?;
+        let _: &str = DecodeRef::decode(d).filter(|x| *x == S::NAME)?;
+        let public_key = DecodeRef::decode(d)?;
         let signature = if b {
-            Some(Decode::decode(d)?)
+            Some(DecodeRef::decode(d)?)
         } else {
             None
         };

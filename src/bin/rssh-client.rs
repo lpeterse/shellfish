@@ -4,6 +4,24 @@ use std::future::Future;
 use env_logger;
 use log::*;
 
+
+async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
+    log::error!("CONNECTED");
+
+    async_std::task::sleep(std::time::Duration::from_secs(5)).await;
+    let session = conn.session().await??;
+    log::info!("SESSION OPEN");
+
+    async_std::task::sleep(std::time::Duration::from_secs(10)).await;
+    let process = session.exec("/bin/date".into()).await?;
+    log::info!("PROCESS STARTED");
+
+    async_std::task::sleep(std::time::Duration::from_secs(10)).await;    
+    conn.disconnect().await;
+    println!("DISCONNE");
+    Ok(())
+}
+
 fn main() {
     env_logger::init();
     info!("shdksjhda");
@@ -14,24 +32,14 @@ fn main() {
         let conn = client
             .connect("localhost:22")
             .await;
+        log::error!("OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO");
         match conn {
             Err(e) => println!("{:?}", e),
             Ok(mut conn) => {
-                loop {
-                    async_std::task::sleep(std::time::Duration::from_secs(5)).await;
-                    log::error!("DEBUG");
-                    conn.debug("QQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQQ".into()).await.expect("");
-                    async_std::task::sleep(std::time::Duration::from_secs(5)).await;
-                    log::error!("OPEN SESSION");
-                    conn.open_session().await.expect("");
-                    log::info!("SESSION OPEN");
+                match foobar(conn).await {
+                    Ok(()) => log::info!("Allright."),
+                    Err(e) => log::error!("Exit: {:?}", e),
                 }
-                conn.disconnect().await.expect("");
-                println!("DISCONNE");
-                //conn.foobar().await.expect("");
-                //async_std::task::sleep(std::time::Duration::from_secs(1)).await;
-                //println!("CONNECTED 3");
-                async_std::task::sleep(std::time::Duration::from_secs(10)).await;
             },
         }
     })

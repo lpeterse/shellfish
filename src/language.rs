@@ -33,8 +33,8 @@ impl Encode for Language {
     }
 }
 
-impl<'a> Decode<'a> for Language {
+impl<'a> DecodeRef<'a> for Language {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        Decode::decode(d).map(Self)
+        DecodeRef::decode(d).map(Self)
     }
 }

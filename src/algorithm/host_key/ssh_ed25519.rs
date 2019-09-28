@@ -33,10 +33,10 @@ impl Encode for Ed25519PublicKey {
     }
 }
 
-impl <'a> Decode<'a> for Ed25519PublicKey {
+impl <'a> DecodeRef<'a> for Ed25519PublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u32be().filter(|x| *x as usize == (4 + SshEd25519::NAME_SIZE + 4 + SshEd25519::PKEY_SIZE))?;
-        let _: &str = Decode::decode(c).filter(|x| *x == <SshEd25519 as SignatureAlgorithm>::NAME)?;
+        let _: &str = DecodeRef::decode(c).filter(|x| *x == <SshEd25519 as SignatureAlgorithm>::NAME)?;
         c.take_u32be().filter(|x| *x as usize == 32)?;
         let mut k = [0;32];
         c.take_into(&mut k)?;
@@ -58,10 +58,10 @@ impl Encode for Ed25519PrivateKey {
     }
 }
 
-impl <'a> Decode<'a> for Ed25519PrivateKey {
+impl <'a> DecodeRef<'a> for Ed25519PrivateKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u32be().filter(|x| *x as usize == (4 + SshEd25519::NAME_SIZE + 4 + SshEd25519::SKEY_SIZE))?;
-        let _: &str = Decode::decode(c).filter(|x| *x == <SshEd25519 as SignatureAlgorithm>::NAME)?;
+        let _: &str = DecodeRef::decode(c).filter(|x| *x == <SshEd25519 as SignatureAlgorithm>::NAME)?;
         c.take_u32be().filter(|x| *x as usize == 32)?;
         let mut k = [0;32];
         c.take_into(&mut k)?;
@@ -94,10 +94,10 @@ impl Encode for Ed25519Signature {
     }
 }
 
-impl <'a> Decode<'a> for Ed25519Signature {
+impl <'a> DecodeRef<'a> for Ed25519Signature {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u32be().filter(|x| *x as usize == (4 + SshEd25519::NAME_SIZE + 4 + SshEd25519::SIG_SIZE))?;
-        let _: &str = Decode::decode(c).filter(|x| *x == <SshEd25519 as SignatureAlgorithm>::NAME)?;
+        let _: &str = DecodeRef::decode(c).filter(|x| *x == <SshEd25519 as SignatureAlgorithm>::NAME)?;
         c.take_u32be().filter(|x| *x as usize == SshEd25519::SIG_SIZE)?;
         let mut k = [0;64];
         c.take_into(&mut k)?;

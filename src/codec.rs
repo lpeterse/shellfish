@@ -1,18 +1,38 @@
-mod encoder;
 mod decoder;
+mod encoder;
 
 use num::BigUint;
+use std::ops::Deref;
 
-pub use self::encoder::*;
 pub use self::decoder::*;
+pub use self::encoder::*;
 
 pub trait Encode {
     fn size(&self) -> usize;
     fn encode<E: Encoder>(&self, c: &mut E);
 }
 
-pub trait Decode<'a>: Encode + Sized {
+pub trait Decode: Encode + Sized {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>;
+}
+
+pub trait DecodeRef<'a>: Encode + Sized {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self>;
+}
+
+impl<'a, T: Decode> DecodeRef<'a> for T {
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        Decode::decode(d)
+    }
+}
+
+impl<T: Encode> Encode for &T {
+    fn size(&self) -> usize {
+        self.deref().size()
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        self.deref().encode(e)
+    }
 }
 
 impl Encode for () {
@@ -42,8 +62,8 @@ impl Encode for u32 {
     }
 }
 
-impl <'a> Decode<'a> for () {
-    fn decode<D: Decoder<'a>>(_: &mut D) -> Option<Self> {
+impl Decode for () {
+    fn decode<'a, D: Decoder<'a>>(_: &mut D) -> Option<Self> {
         Some(())
     }
 }
@@ -58,7 +78,7 @@ impl Encode for String {
     }
 }
 
-impl <'a> Decode<'a> for String {
+impl<'a> DecodeRef<'a> for String {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         c.take_string(len as usize)
@@ -75,7 +95,7 @@ impl Encode for &str {
     }
 }
 
-impl <'a> Decode<'a> for &'a str {
+impl<'a> DecodeRef<'a> for &'a str {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         c.take_str(len as usize)
@@ -92,14 +112,14 @@ impl Encode for &[u8] {
     }
 }
 
-impl <'a> Decode<'a> for &'a [u8] {
+impl<'a> DecodeRef<'a> for &'a [u8] {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         c.take_bytes(len as usize)
     }
 }
 
-impl <T: Encode, Q:Encode> Encode for (T,Q) {
+impl<T: Encode, Q: Encode> Encode for (T, Q) {
     fn size(&self) -> usize {
         self.0.size() + self.1.size()
     }
@@ -109,19 +129,19 @@ impl <T: Encode, Q:Encode> Encode for (T,Q) {
     }
 }
 
-impl <'a,T,Q> Decode<'a> for (T,Q)
-    where 
-        T: Decode<'a>,
-        Q: Decode<'a>,
+impl<'a, T, Q> DecodeRef<'a> for (T, Q)
+where
+    T: DecodeRef<'a>,
+    Q: DecodeRef<'a>,
 {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let t = Decode::decode(c)?;
-        let q = Decode::decode(c)?;
-        Some((t,q))
+        let t = DecodeRef::decode(c)?;
+        let q = DecodeRef::decode(c)?;
+        Some((t, q))
     }
 }
 
-impl <T: Encode> Encode for Vec<T> {
+impl<T: Encode> Encode for Vec<T> {
     fn size(&self) -> usize {
         let mut r = 4;
         for x in self {
@@ -137,14 +157,14 @@ impl <T: Encode> Encode for Vec<T> {
     }
 }
 
-impl <'a,T: Decode<'a>> Decode<'a> for Vec<T> {
+impl<'a, T: DecodeRef<'a>> DecodeRef<'a> for Vec<T> {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         // NB: Don't use `with_capacity` here as it might
         // lead to remote triggered resource exhaustion
         let mut v = Vec::new();
         for _ in 0..len {
-            v.push(Decode::decode(c)?);
+            v.push(DecodeRef::decode(c)?);
         }
         Some(v)
     }
@@ -174,7 +194,7 @@ impl Encode for BigUint {
     }
 }
 
-impl <'a> Decode<'a> for BigUint {
+impl<'a> DecodeRef<'a> for BigUint {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         let bytes = c.take_bytes(len as usize)?;
@@ -182,7 +202,9 @@ impl <'a> Decode<'a> for BigUint {
             Some(Self::from(0 as usize))
         } else {
             let mut i = 0;
-            while i < bytes.len() && bytes[i] == 0 { i += 1 };
+            while i < bytes.len() && bytes[i] == 0 {
+                i += 1
+            }
             Some(BigUint::from_bytes_be(&bytes[i..]))
         }
     }
@@ -213,7 +235,9 @@ impl NameList {
             }
         }
     }
-    pub fn decode<'a, T: std::convert::TryFrom<&'a [u8]>, D: Decoder<'a>>(c: &mut D) -> Option<Vec<T>> {
+    pub fn decode<'a, T: std::convert::TryFrom<&'a [u8]>, D: Decoder<'a>>(
+        c: &mut D,
+    ) -> Option<Vec<T>> {
         let len = c.take_u32be()?;
         let mut vec = Vec::new();
         if len > 0 {
@@ -237,9 +261,9 @@ impl NameList {
     }
 }
 
-pub struct MPInt<'a> (pub &'a [u8]);
+pub struct MPInt<'a>(pub &'a [u8]);
 
-impl <'a> Encode for MPInt<'a> {
+impl<'a> Encode for MPInt<'a> {
     fn size(&self) -> usize {
         4 + if self.0[0] > 127 { 1 } else { 0 } + self.0.len()
     }
@@ -255,11 +279,12 @@ impl <'a> Encode for MPInt<'a> {
     }
 }
 
-impl <'a> Decode<'a> for MPInt<'a> {
+impl<'a> DecodeRef<'a> for MPInt<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         let len = d.take_u32be()? as usize;
         let bytes = d.take_bytes(len)?;
-        if bytes[0] > 127 { // TODO: out of bounds
+        if bytes[0] > 127 {
+            // TODO: out of bounds
             Some(MPInt(&bytes[1..]))
         } else {
             Some(MPInt(bytes))
@@ -267,12 +292,12 @@ impl <'a> Decode<'a> for MPInt<'a> {
     }
 }
 
-pub enum E2<A,B> {
+pub enum E2<A, B> {
     A(A),
     B(B),
 }
 
-impl <A: Encode,B: Encode> Encode for E2<A,B> {
+impl<A: Encode, B: Encode> Encode for E2<A, B> {
     fn size(&self) -> usize {
         match self {
             Self::A(x) => Encode::size(x),
@@ -281,36 +306,180 @@ impl <A: Encode,B: Encode> Encode for E2<A,B> {
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         match self {
-            Self::A(x) => Encode::encode(x,c),
-            Self::B(x) => Encode::encode(x,c)
+            Self::A(x) => Encode::encode(x, c),
+            Self::B(x) => Encode::encode(x, c),
         }
     }
 }
 
-impl <'a,A: Decode<'a>,B: Decode<'a>> Decode<'a> for E2<A,B> {
+impl<'a, A: DecodeRef<'a>, B: DecodeRef<'a>> DecodeRef<'a> for E2<A, B> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         None.or_else(|| {
-                let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(Self::A);
-                if r.is_some() { *d = d_ };
-                r
-            })
-            .or_else(|| {
-                let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(Self::B);
-                if r.is_some() { *d = d_ };
-                r
-            })
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::A);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::B);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
     }
 }
 
-pub enum E3<A,B,C> {
+pub enum E9<A, B, C, D, E, F, G, H, I> {
+    A(A),
+    B(B),
+    C(C),
+    D(D),
+    E(E),
+    F(F),
+    G(G),
+    H(H),
+    I(I)
+}
+
+impl<A, B, C, D, E, F, G, H, I> Encode for E9<A, B, C, D, E, F, G, H, I>
+where
+    A: Encode,
+    B: Encode,
+    C: Encode,
+    D: Encode,
+    E: Encode,
+    F: Encode,
+    G: Encode,
+    H: Encode,
+    I: Encode,
+{
+    fn size(&self) -> usize {
+        match self {
+            Self::A(x) => Encode::size(x),
+            Self::B(x) => Encode::size(x),
+            Self::C(x) => Encode::size(x),
+            Self::D(x) => Encode::size(x),
+            Self::E(x) => Encode::size(x),
+            Self::F(x) => Encode::size(x),
+            Self::G(x) => Encode::size(x),
+            Self::H(x) => Encode::size(x),
+            Self::I(x) => Encode::size(x),
+        }
+    }
+    fn encode<T: Encoder>(&self, c: &mut T) {
+        match self {
+            Self::A(x) => Encode::encode(x, c),
+            Self::B(x) => Encode::encode(x, c),
+            Self::C(x) => Encode::encode(x, c),
+            Self::D(x) => Encode::encode(x, c),
+            Self::E(x) => Encode::encode(x, c),
+            Self::F(x) => Encode::encode(x, c),
+            Self::G(x) => Encode::encode(x, c),
+            Self::H(x) => Encode::encode(x, c),
+            Self::I(x) => Encode::encode(x, c),
+        }
+    }
+}
+
+impl<'a, A, B, C, D, E, F, G, H, I> DecodeRef<'a> for E9<A, B, C, D, E, F, G, H, I>
+where
+    A: DecodeRef<'a>,
+    B: DecodeRef<'a>,
+    C: DecodeRef<'a>,
+    D: DecodeRef<'a>,
+    E: DecodeRef<'a>,
+    F: DecodeRef<'a>,
+    G: DecodeRef<'a>,
+    H: DecodeRef<'a>,
+    I: DecodeRef<'a>,
+{
+    fn decode<T: Decoder<'a>>(d: &mut T) -> Option<Self> {
+        None.or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::A);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::B);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::C);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::D);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::E);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::F);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::G);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::H);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::I);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+    }
+}
+
+pub enum E3<A, B, C> {
     A(A),
     B(B),
     C(C),
 }
 
-impl <A: Encode, B:Encode, C:Encode> Encode for E3<A,B,C> {
+impl<A: Encode, B: Encode, C: Encode> Encode for E3<A, B, C> {
     fn size(&self) -> usize {
         match self {
             Self::A(x) => Encode::size(x),
@@ -320,38 +489,43 @@ impl <A: Encode, B:Encode, C:Encode> Encode for E3<A,B,C> {
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         match self {
-            Self::A(x) => Encode::encode(x,c),
-            Self::B(x) => Encode::encode(x,c),
-            Self::C(x) => Encode::encode(x,c)
+            Self::A(x) => Encode::encode(x, c),
+            Self::B(x) => Encode::encode(x, c),
+            Self::C(x) => Encode::encode(x, c),
         }
     }
 }
 
-impl <'a,A,B,C> Decode<'a> for E3<A,B,C>
-    where
-        A: Decode<'a>,
-        B: Decode<'a>,
-        C: Decode<'a>,
+impl<'a, A, B, C> DecodeRef<'a> for E3<A, B, C>
+where
+    A: DecodeRef<'a>,
+    B: DecodeRef<'a>,
+    C: DecodeRef<'a>,
 {
-
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         None.or_else(|| {
-                let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(Self::A);
-                if r.is_some() { *d = d_ };
-                r
-            })
-            .or_else(|| {
-                let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(Self::B);
-                if r.is_some() { *d = d_ };
-                r
-            })
-            .or_else(|| {
-                let mut d_ = d.clone();
-                let r = Decode::decode(&mut d_).map(Self::C);
-                if r.is_some() { *d = d_ };
-                r
-            })
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::A);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::B);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::C);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
     }
 }

@@ -16,7 +16,7 @@ impl Encode for MsgSuccess {
     }
 }
 
-impl <'a> Decode<'a> for MsgSuccess {
+impl <'a> DecodeRef<'a> for MsgSuccess {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {}.into()
@@ -45,7 +45,7 @@ mod test {
         let buf = [6];
         let mut dec = BDecoder::from(buf.as_ref());
         let res = Some(MsgSuccess {});
-        assert_eq!(res, Decode::decode(&mut dec));
+        assert_eq!(res, DecodeRef::decode(&mut dec));
     }
 
     #[test]
@@ -53,6 +53,6 @@ mod test {
         let buf = [0];
         let mut dec = BDecoder::from(buf.as_ref());
         let res: Option<MsgSuccess> = None;
-        assert_eq!(res, Decode::decode(&mut dec));
+        assert_eq!(res, DecodeRef::decode(&mut dec));
     }
 }

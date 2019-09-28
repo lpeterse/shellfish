@@ -21,7 +21,7 @@ impl <'a> Encode for Failure<'a> {
     }
 }
 
-impl<'a> Decode<'a> for Failure<'a> {
+impl<'a> DecodeRef<'a> for Failure<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {

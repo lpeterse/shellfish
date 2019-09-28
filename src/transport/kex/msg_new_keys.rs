@@ -16,7 +16,7 @@ impl Encode for NewKeys {
     }
 }
 
-impl <'a> Decode<'a> for NewKeys {
+impl <'a> DecodeRef<'a> for NewKeys {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Some(Self {})

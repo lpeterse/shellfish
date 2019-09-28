@@ -37,21 +37,21 @@ where
     }
 }
 
-impl<'a, S: SignatureAlgorithm> Decode<'a> for SignatureData<'a, S>
+impl<'a, S: SignatureAlgorithm> DecodeRef<'a> for SignatureData<'a, S>
 where
-    S::PublicKey: Decode<'a>,
-    S::Signature: Decode<'a>,
+    S::PublicKey: DecodeRef<'a>,
+    S::Signature: DecodeRef<'a>,
 {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        let session_id = Decode::decode(d)?;
+        let session_id = DecodeRef::decode(d)?;
         d.take_u8()
             .filter(|x| *x == MsgUserAuthRequest::<PublicKeyMethod<S>>::MSG_NUMBER)?;
-        let user_name = Decode::decode(d)?;
-        let service_name = Decode::decode(d)?;
-        let _: &str = Decode::decode(d).filter(|x| *x == <PublicKeyMethod<S> as Method>::NAME)?;
+        let user_name = DecodeRef::decode(d)?;
+        let service_name = DecodeRef::decode(d)?;
+        let _: &str = DecodeRef::decode(d).filter(|x| *x == <PublicKeyMethod<S> as Method>::NAME)?;
         d.take_u8().filter(|x| *x != 0)?;
-        let _: &str = Decode::decode(d).filter(|x| *x == S::NAME)?;
-        let public_key = Decode::decode(d)?;
+        let _: &str = DecodeRef::decode(d).filter(|x| *x == S::NAME)?;
+        let public_key = DecodeRef::decode(d)?;
         Self {
             session_id,
             user_name,

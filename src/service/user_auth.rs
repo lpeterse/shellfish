@@ -28,7 +28,6 @@ impl UserAuth {
         mut transport: Transport<T>,
         service_name: &str,
         user_name: &str,
-        password: Option<String>,
         agent: Option<Agent>
     ) -> Result<Transport<T>, UserAuthError> {
 
@@ -36,7 +35,7 @@ impl UserAuth {
             None => (),
             Some(mut a) => {
                 let identities = a.identities().await?;
-                for (key,i) in identities {
+                for (key,_comment) in identities {
                     match key {
                         PublicKey::Ed25519PublicKey(public_key) => {
                             let data: SignatureData<SshEd25519> = SignatureData {

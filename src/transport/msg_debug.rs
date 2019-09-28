@@ -34,13 +34,13 @@ impl Encode for MsgDebug {
     }
 }
 
-impl<'a> Decode<'a> for MsgDebug {
+impl<'a> DecodeRef<'a> for MsgDebug {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {
             always_display: d.take_u8()? != 0,
-            message: Decode::decode(d)?,
-            language: Decode::decode(d)?,
+            message: DecodeRef::decode(d)?,
+            language: DecodeRef::decode(d)?,
         }
         .into()
     }

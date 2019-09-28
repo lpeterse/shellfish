@@ -47,6 +47,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
             self.window.start = 0;
             self.window.end = 0;
         }
+        log::info!("CONSUME {}, HAVE {} LEFT", len, self.window.len());
         &self.buffer[start..start + len]
     }
 
@@ -206,8 +207,12 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         len: usize,
     ) -> Poll<Result<(), std::io::Error>> {
         loop {
-            log::error!("ASADSD {}", self.window.len());
+            log::error!("LEN   {}", self.window.len());
+            log::error!("START {}", self.window.start);
+            log::error!("END   {}", self.window.end);
+            log::info!("WINDOW {:?}", self.window());
             if self.window.len() >= len {
+                log::info!("REQUESTED {}, HAVE {}", len, self.window.len());
                 return Poll::Ready(Ok(()));
             } else {
                 match ready!(self.as_mut().poll_fill(cx)) {

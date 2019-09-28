@@ -17,9 +17,9 @@ impl <'a> Encode for MsgServiceAccept<'a> {
     }
 }
 
-impl<'a> Decode<'a> for MsgServiceAccept<'a> {
+impl<'a> DecodeRef<'a> for MsgServiceAccept<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
-        Self (Decode::decode(d)?).into()
+        Self (DecodeRef::decode(d)?).into()
     }
 }

@@ -39,7 +39,7 @@ impl Encode for Identification {
     }
 }
 
-impl <'a> Decode<'a> for Identification {
+impl <'a> DecodeRef<'a> for Identification {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_match(b"SSH-2.0-")?;
         if d.remaining() > Self::MAX_LEN { return None };

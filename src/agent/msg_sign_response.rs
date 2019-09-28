@@ -9,16 +9,6 @@ pub struct MsgSignResponse<S: SignatureAlgorithm> {
 
 impl <S: SignatureAlgorithm> MsgSignResponse<S> {
     pub const MSG_NUMBER: u8 = 14;
-
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>
-    where
-        S::Signature: Decode<'a>
-    {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
-        Self {
-            signature: Decode::decode(d)?
-        }.into()
-    }
 }
 
 impl <S: SignatureAlgorithm> Encode for MsgSignResponse<S>
@@ -34,14 +24,14 @@ where
     }
 }
 
-impl <'a, S: SignatureAlgorithm> Decode<'a> for MsgSignResponse<S>
+impl <'a, S: SignatureAlgorithm> DecodeRef<'a> for MsgSignResponse<S>
 where
-    S::Signature: Decode<'a>
+    S::Signature: DecodeRef<'a>
 {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
         Self {
-            signature: Decode::decode(d)?
+            signature: DecodeRef::decode(d)?
         }.into()
     }
 }

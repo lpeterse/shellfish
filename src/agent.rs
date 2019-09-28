@@ -63,7 +63,7 @@ impl Agent {
         let len = r.read_u32be().await?;
         let buf = r.read_exact(len as usize).await?;
         let mut dec = BDecoder(buf);
-        let res: MsgIdentitiesAnswer = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
+        let res: MsgIdentitiesAnswer = DecodeRef::decode(&mut dec).ok_or(AgentError::CodecError)?;
         Ok(res.identities)
     }
 
@@ -77,7 +77,7 @@ impl Agent {
     where
         S: SignatureAlgorithm,
         S::PublicKey: Encode,
-        S::Signature: Decode<'a>,
+        S::Signature: DecodeRef<'a>,
         D: Encode,
     {
         self.connect().await?;
@@ -95,7 +95,7 @@ impl Agent {
                 let len = r.read_u32be().await?;
                 let buf = r.read_exact(len as usize).await?;
                 let mut dec = BDecoder(&buf[..]);
-                let res: E2<MsgSignResponse<S>,MsgFailure> = Decode::decode(&mut dec).ok_or(AgentError::CodecError)?;
+                let res: E2<MsgSignResponse<S>,MsgFailure> = DecodeRef::decode(&mut dec).ok_or(AgentError::CodecError)?;
                 match res {
                     E2::A(x) => Ok(Some(x.signature)),
                     E2::B(_) => Ok(None),
@@ -106,8 +106,8 @@ impl Agent {
 
     pub async fn connect(&mut self) -> Result<(),std::io::Error> {
         let (rh,wh) = UnixStream::connect(&self.path).await?.split();
-        let mut s = BufferedSender::new(wh);
-        let mut r = BufferedReceiver::new(rh);
+        let s = BufferedSender::new(wh);
+        let r = BufferedReceiver::new(rh);
         self.stream = Some((s,r));
         Ok(())
     }

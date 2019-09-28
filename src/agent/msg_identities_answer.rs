@@ -20,11 +20,11 @@ impl Encode for MsgIdentitiesAnswer {
     }
 }
 
-impl<'a> Decode<'a> for MsgIdentitiesAnswer {
+impl<'a> DecodeRef<'a> for MsgIdentitiesAnswer {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::MSG_NUMBER)?;
         Self {
-            identities: Decode::decode(d)?,
+            identities: DecodeRef::decode(d)?,
         }
         .into()
     }
@@ -63,7 +63,7 @@ mod test {
             0, 0, 12, 114, 115, 115, 104, 45, 101, 120, 97, 109, 112, 108, 101,
         ];
         let mut dec = BDecoder(&mut input[..]);
-        let actual: Option<MsgIdentitiesAnswer> = Decode::decode(&mut dec);
+        let actual: Option<MsgIdentitiesAnswer> = DecodeRef::decode(&mut dec);
         let expected = Some(MsgIdentitiesAnswer {
             identities: vec![
                 (

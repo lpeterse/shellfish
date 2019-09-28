@@ -23,11 +23,11 @@ impl <'a> Encode for MsgGlobalRequest<'a> {
     }
 }
 
-impl<'a> Decode<'a> for MsgGlobalRequest<'a> {
+impl<'a> DecodeRef<'a> for MsgGlobalRequest<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
         Self {
-            name: Decode::decode(d)?,
+            name: DecodeRef::decode(d)?,
             want_reply: d.take_u8()? != 0,
             data: d.take_all()?,
         }.into()

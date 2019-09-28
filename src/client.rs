@@ -9,7 +9,6 @@ use async_std::net::ToSocketAddrs;
 
 pub struct Client {
     user_name: Option<String>,
-    password: Option<String>,
     agent: Option<Agent>,
 }
 
@@ -32,7 +31,6 @@ impl Client {
                     transport,
                     <Connection as Service>::NAME,
                     user,
-                    self.password.clone(),
                     self.agent.clone(),
                 )
                 .await?
@@ -43,10 +41,6 @@ impl Client {
     pub fn user_name(&mut self) -> &mut Option<String> {
         &mut self.user_name
     }
-
-    pub fn password(&mut self) -> &mut Option<String> {
-        &mut self.password
-    }
 }
 
 impl Default for Client {
@@ -55,7 +49,6 @@ impl Default for Client {
             user_name: std::env::var("LOGNAME")
                 .or_else(|_| std::env::var("USER"))
                 .ok(),
-            password: None,
             agent: Agent::new_env(),
         }
     }

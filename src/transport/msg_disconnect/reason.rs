@@ -46,7 +46,7 @@ impl Encode for Reason {
     }
 }
 
-impl<'a> Decode<'a> for Reason {
+impl<'a> DecodeRef<'a> for Reason {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u32be().map(|x| match x {
             1 => Self::HostNotAllowedToConnect,

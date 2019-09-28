@@ -16,7 +16,7 @@ impl Encode for MsgIdentitiesRequest {
     }
 }
 
-impl <'a> Decode<'a> for MsgIdentitiesRequest {
+impl <'a> DecodeRef<'a> for MsgIdentitiesRequest {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
@@ -45,7 +45,7 @@ mod test {
         let buf = [11];
         let mut dec = BDecoder::from(buf.as_ref());
         let res = Some(MsgIdentitiesRequest {});
-        assert_eq!(res, Decode::decode(&mut dec));
+        assert_eq!(res, DecodeRef::decode(&mut dec));
     }
 
     #[test]
@@ -53,6 +53,6 @@ mod test {
         let buf = [0];
         let mut dec = BDecoder::from(buf.as_ref());
         let res: Option<MsgIdentitiesRequest> = None;
-        assert_eq!(res, Decode::decode(&mut dec));
+        assert_eq!(res, DecodeRef::decode(&mut dec));
     }
 }
