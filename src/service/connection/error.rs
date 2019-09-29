@@ -13,12 +13,15 @@ pub enum ConnectionError {
     InvalidChannelState,
     ChannelOpenFailure(ChannelOpenFailureReason),
     ChannelRequestFailure,
+    ChannelFailureUnexpected,
+    ChannelSuccessUnexpected,
+    ChannelWindowSizeUnderrun,
     RequestError(requestable::Error),
     TransportError(TransportError),
 }
 
 impl <T> From<PoisonError<T>> for ConnectionError {
-    fn from(e: PoisonError<T>) -> Self {
+    fn from(_: PoisonError<T>) -> Self {
         Self::PoisonError
     }
 }

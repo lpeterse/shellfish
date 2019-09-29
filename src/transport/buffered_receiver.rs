@@ -47,7 +47,6 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
             self.window.start = 0;
             self.window.end = 0;
         }
-        log::info!("CONSUME {}, HAVE {} LEFT", len, self.window.len());
         &self.buffer[start..start + len]
     }
 
@@ -155,7 +154,6 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         self: Pin<&mut Self>,
         cx: &mut Context,
     ) -> Poll<Result<usize, std::io::Error>> {
-        log::error!("FILL");
         let mut s = Pin::into_inner(self);
         // Case 1: remaining capacity right >  0
         if s.window.end < s.buffer.len() {
@@ -192,7 +190,6 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         Poll::Ready(
             match ready!(Pin::new(&mut s.stream).poll_read(cx, &mut s.buffer[s.window.end..])) {
                 Ok(read) => {
-                    log::error!("READ {}", read);
                     s.window.end += read;
                     Ok(read)
                 }
@@ -207,12 +204,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         len: usize,
     ) -> Poll<Result<(), std::io::Error>> {
         loop {
-            log::error!("LEN   {}", self.window.len());
-            log::error!("START {}", self.window.start);
-            log::error!("END   {}", self.window.end);
-            log::info!("WINDOW {:?}", self.window());
             if self.window.len() >= len {
-                log::info!("REQUESTED {}, HAVE {}", len, self.window.len());
                 return Poll::Ready(Ok(()));
             } else {
                 match ready!(self.as_mut().poll_fill(cx)) {

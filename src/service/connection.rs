@@ -11,6 +11,7 @@ mod msg_channel_open_confirmation;
 mod msg_channel_open_failure;
 mod msg_channel_request;
 mod msg_channel_success;
+mod msg_channel_window_adjust;
 mod msg_global_request;
 
 use super::*;
@@ -24,12 +25,9 @@ use crate::codec::*;
 use crate::requestable;
 use crate::transport::*;
 
-use futures::channel::mpsc;
 use futures::channel::oneshot;
 use futures::future::FutureExt;
-use futures::future::TryFutureExt;
-use futures::sink::SinkExt;
-use std::convert::{TryFrom, TryInto};
+use std::convert::{TryFrom};
 
 pub struct Connection {
     error: oneshot::Receiver<ConnectionError>,

@@ -19,11 +19,25 @@ pub struct ChannelState {
     pub shared: TypedState,
 }
 
+impl ChannelState {
+    pub fn decrease_local_window_size(&mut self, n: usize) -> Result<(), ConnectionError> {
+        if (n as u32) > self.local_window_size {
+            Err(ConnectionError::ChannelWindowSizeUnderrun)
+        } else {
+            self.local_window_size -= n as u32;
+            Ok(())
+        }
+    }
+}
+
 pub enum TypedState {
     Session(Arc<Mutex<SharedState<Session>>>)
 }
 
 pub struct SharedState<T: ChannelType> {
+    pub is_closed: bool,
+    pub is_local_eof: bool,
+    pub is_remote_eof: bool,
     pub connection_task: AtomicWaker,
     pub connection_error: Option<ConnectionError>,
     pub user_task: AtomicWaker,
@@ -46,6 +60,9 @@ impl <T: ChannelType> SharedState<T> {
 impl <T: ChannelType> Default for SharedState<T> {
     fn default() -> Self {
         SharedState {
+            is_closed: false,
+            is_local_eof: false,
+            is_remote_eof: false,
             connection_task: AtomicWaker::new(),
             connection_error: None,
             user_task: AtomicWaker::new(),

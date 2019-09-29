@@ -1,6 +1,6 @@
+mod channels;
 mod requests;
 mod transport;
-mod channels;
 
 use super::channel::*;
 use super::msg_channel_open::*;
@@ -45,7 +45,7 @@ impl<T: TransportStream> ConnectionFuture<T> {
     fn poll_events(
         cx: &mut Context,
         t: Transport<T>,
-        request_sender: &mut requestable::Sender<Connection>,
+        _request_sender: &mut requestable::Sender<Connection>,
         request_receiver: &mut requestable::Receiver<Connection>,
         channels: &mut ChannelMap,
     ) -> Result<Result<Transport<T>, TransportFuture<T>>, ConnectionError> {
@@ -64,7 +64,6 @@ impl<T: TransportStream> ConnectionFuture<T> {
             Ok(t) => t,
             Err(f) => return Ok(Err(f)),
         };
-        log::info!("PENDING");
         Ok(Ok(t))
     }
 }
@@ -76,7 +75,6 @@ where
     type Output = ConnectionError;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        log::trace!("ConnectionFuture::poll");
         let mut self_ = Pin::into_inner(self);
 
         loop {

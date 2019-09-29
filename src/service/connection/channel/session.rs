@@ -23,19 +23,19 @@ impl Drop for Session {
 }
 
 impl Session {
-    pub async fn exec(mut self, command: String) -> Result<Process<Self>, ConnectionError> {
+    pub async fn exec(mut self, command: String) -> Result<Process, ConnectionError> {
         self.request(SessionRequest::ExecRequest(ExecRequest { command }))
             .await?;
         Ok(Process::new(self))
     }
 
-    pub async fn shell(mut self) -> Result<Process<Self>, ConnectionError> {
+    pub async fn shell(mut self) -> Result<Process, ConnectionError> {
         self.request(SessionRequest::ShellRequest(ShellRequest {}))
             .await?;
         Ok(Process::new(self))
     }
 
-    pub async fn subsystem(mut self, subsystem: String) -> Result<Process<Self>, ConnectionError> {
+    pub async fn subsystem(mut self, subsystem: String) -> Result<Process, ConnectionError> {
         self.request(SessionRequest::SubsystemRequest(SubsystemRequest {
             subsystem,
         }))

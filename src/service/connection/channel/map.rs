@@ -24,37 +24,35 @@ impl ChannelMap {
         len
     }
 
-    pub fn get(&mut self, i: usize) -> Option<&ChannelState> {
-        match self.elements.get(i) {
-            None => None,
-            Some(None) => None,
-            Some(Some(e)) => Some(&e),
+    pub fn get(&mut self, id: u32) -> Result<&mut ChannelState, ConnectionError> {
+        match self.elements.get_mut(id as usize) {
+            Some(Some(t)) => Ok(t),
+            _ => Err(ConnectionError::InvalidChannelId),
         }
     }
 
-    pub fn get_mut(&mut self, i: usize) -> Option<&mut ChannelState> {
-        match self.elements.get_mut(i) {
-            None => None,
-            Some(None) => None,
-            Some(Some(t)) => Some(t),
+    pub fn free(&self) -> Option<u32> {
+        for (i,e) in self.elements.iter().enumerate() {
+            match e {
+                None => return Some(i as u32),
+                _ => ()
+            }
         }
+        if self.elements.len() < self.capacity {
+            return Some(self.elements.len() as u32);
+        }
+        None
     }
 
-    pub fn free_key(&self) -> Option<usize> {
-        Some(0) // FIXME
-    }
-
-    pub fn insert(&mut self, _key: usize, t: ChannelState) {
+    pub fn insert(&mut self, t: ChannelState) -> Result<(), ConnectionError> {
         // FIXME
         self.elements.push(Some(t));
+        Ok(())
     }
 
-    pub fn remove(&mut self, i: usize) -> Option<ChannelState> {
-        // TODO: shrink vector
-        if i < self.elements.len() {
-            std::mem::replace(&mut self.elements[i], None)
-        } else {
-            None
+    pub fn remove(&mut self, id: u32) {
+        if (id as usize) < self.elements.len() {
+            self.elements[id as usize] = None;
         }
     }
 

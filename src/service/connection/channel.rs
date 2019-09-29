@@ -13,7 +13,6 @@ pub use self::other::*;
 pub use self::request::*;
 pub use self::state::*;
 pub use self::map::*;
-use super::msg_channel_open_failure::*;
 
 use crate::pipe::*;
 use std::sync::{Arc,Mutex};

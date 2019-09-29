@@ -10,7 +10,7 @@ use futures::task::{Context};
 pub fn poll<T: TransportStream>(
     cx: &mut Context,
     mut transport: Transport<T>,
-    requests: &mut requestable::Receiver<Connection>,
+    _requests: &mut requestable::Receiver<Connection>,
     channels: &mut ChannelMap,
 ) -> Result<Result<Transport<T>, TransportFuture<T>>, ConnectionError> {
 
@@ -28,7 +28,6 @@ pub fn poll<T: TransportStream>(
                 shared.connection_task.register(cx.waker());
                 match shared.specific.request {
                     RequestState::Open(ref r) => {
-                        log::info!("REQUEST {:?}", r);
                         let msg = MsgChannelRequest {
                             recipient_channel: channel.remote_channel,
                             want_reply: true,
@@ -36,8 +35,8 @@ pub fn poll<T: TransportStream>(
                         };
                         match transport.send2(&msg) {
                             Some(()) => {
+                                log::info!("Sent {:?}", &msg);
                                 shared.specific.request = RequestState::Progress;
-                                log::info!("REQUEST SENT");
                                 return Ok(Ok(transport));
                             }
                             None => {

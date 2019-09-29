@@ -333,7 +333,7 @@ impl<'a, A: DecodeRef<'a>, B: DecodeRef<'a>> DecodeRef<'a> for E2<A, B> {
     }
 }
 
-pub enum E9<A, B, C, D, E, F, G, H, I> {
+pub enum E10<A, B, C, D, E, F, G, H, I, J> {
     A(A),
     B(B),
     C(C),
@@ -342,10 +342,11 @@ pub enum E9<A, B, C, D, E, F, G, H, I> {
     F(F),
     G(G),
     H(H),
-    I(I)
+    I(I),
+    J(J),
 }
 
-impl<A, B, C, D, E, F, G, H, I> Encode for E9<A, B, C, D, E, F, G, H, I>
+impl<A, B, C, D, E, F, G, H, I, J> Encode for E10<A, B, C, D, E, F, G, H, I, J>
 where
     A: Encode,
     B: Encode,
@@ -356,6 +357,7 @@ where
     G: Encode,
     H: Encode,
     I: Encode,
+    J: Encode,
 {
     fn size(&self) -> usize {
         match self {
@@ -368,6 +370,7 @@ where
             Self::G(x) => Encode::size(x),
             Self::H(x) => Encode::size(x),
             Self::I(x) => Encode::size(x),
+            Self::J(x) => Encode::size(x),
         }
     }
     fn encode<T: Encoder>(&self, c: &mut T) {
@@ -381,11 +384,12 @@ where
             Self::G(x) => Encode::encode(x, c),
             Self::H(x) => Encode::encode(x, c),
             Self::I(x) => Encode::encode(x, c),
+            Self::J(x) => Encode::encode(x, c),
         }
     }
 }
 
-impl<'a, A, B, C, D, E, F, G, H, I> DecodeRef<'a> for E9<A, B, C, D, E, F, G, H, I>
+impl<'a, A, B, C, D, E, F, G, H, I, J> DecodeRef<'a> for E10<A, B, C, D, E, F, G, H, I, J>
 where
     A: DecodeRef<'a>,
     B: DecodeRef<'a>,
@@ -396,6 +400,7 @@ where
     G: DecodeRef<'a>,
     H: DecodeRef<'a>,
     I: DecodeRef<'a>,
+    J: DecodeRef<'a>,
 {
     fn decode<T: Decoder<'a>>(d: &mut T) -> Option<Self> {
         None.or_else(|| {
@@ -465,6 +470,14 @@ where
         .or_else(|| {
             let mut d_ = d.clone();
             let r = DecodeRef::decode(&mut d_).map(Self::I);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Self::J);
             if r.is_some() {
                 *d = d_
             };

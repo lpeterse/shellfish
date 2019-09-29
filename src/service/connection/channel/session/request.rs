@@ -8,6 +8,21 @@ pub enum RequestState<T> {
     Failure
 }
 
+impl <T> RequestState<T> {
+    pub fn success(&mut self) -> Result<(), ConnectionError> {
+        match self {
+            Self::Progress => return Ok(*self = Self::Success),
+            _ => return Err(ConnectionError::ChannelSuccessUnexpected)
+        }
+    }
+    pub fn failure(&mut self) -> Result<(), ConnectionError> {
+        match self {
+            Self::Progress => return Ok(*self = Self::Failure),
+            _ => return Err(ConnectionError::ChannelFailureUnexpected)
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum SessionRequest {
     EnvRequest(EnvRequest),

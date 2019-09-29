@@ -48,7 +48,7 @@ pub fn poll<T: TransportStream>(
             }
             ConnectionRequest::ChannelOpen(x) => {
                 log::debug!("Command::ChannelOpenSession");
-                match channels.free_key() {
+                match channels.free() {
                     None => {
                         // In case of local channel shortage, reject the request.
                         // It is safe to do nothing if the reply channel was dropped
