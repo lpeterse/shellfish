@@ -9,6 +9,7 @@ use super::state::*;
 use super::*;
 
 use crate::codec::*;
+use crate::ring_buffer::*;
 
 use futures::task::Poll;
 
@@ -95,3 +96,49 @@ impl Default for SessionState {
         }
     }
 }
+
+/*
+impl AsyncWrite for PipeWriter {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<Result<usize, Error>> {
+        if buf.is_empty() {
+            return Poll::Ready(Ok(0));
+        }
+        let mut stream = self.0.lock().unwrap();
+        stream.writer.register(cx.waker());
+        if stream.is_broken() {
+            return Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "")));
+        }
+        if stream.buffer.is_full() {
+            stream.reader.wake();
+            return Poll::Pending;
+        }
+        // Do not wake the reader! `poll_flush` does this!
+        let written = stream.buffer.write(buf);
+        Poll::Ready(Ok(written))
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
+        let stream = self.0.lock().unwrap();
+        if stream.is_broken() {
+            return Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "")));
+        }
+        if stream.buffer.is_empty() {
+            return Poll::Ready(Ok(()))
+        }
+        stream.writer.register(cx.waker());
+        stream.reader.wake();
+        Poll::Pending
+    }
+
+    fn poll_close(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Result<(), Error>> {
+        let mut stream = self.0.lock().unwrap();
+        stream.close();
+        stream.reader.wake();
+        Poll::Ready(Ok(()))
+    }
+}
+*/

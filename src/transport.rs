@@ -37,7 +37,6 @@ use async_std::net::TcpStream;
 use futures::future::Future;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, WriteHalf};
 use futures::ready;
-use futures::stream::{Stream};
 use futures::task::Context;
 use futures::task::Poll;
 use log;
@@ -50,12 +49,6 @@ use std::time::{Duration, Instant};
 pub enum Role {
     Client,
     Server,
-}
-
-#[derive(Debug)]
-pub struct Token {
-    packet_counter: u64,
-    buffer_size: usize,
 }
 
 pub trait TransportStream:
@@ -81,7 +74,7 @@ pub struct Transport<T> {
     kex_last_bytes_sent: u64,
     encryption_ctx: EncryptionContext,
     decryption_ctx: EncryptionContext,
-    unresolved_token: bool,
+    inbox: Option<usize>,
 }
 
 pub struct Receiver {}
@@ -116,7 +109,7 @@ impl<T: TransportStream> Transport<T> {
             kex_last_bytes_received: 0,
             encryption_ctx: EncryptionContext::new(),
             decryption_ctx: EncryptionContext::new(),
-            unresolved_token: false,
+            inbox: None,
         };
 
         t.kex(None).await?;
@@ -301,21 +294,6 @@ impl<T: TransportStream> Transport<T> {
         DecodeRef::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
     }
 
-    pub fn redeem_token<'a, M>(&'a mut self, token: Token) -> Option<M>
-    where
-        M: DecodeRef<'a>,
-    {
-        assert!(self.unresolved_token);
-        assert!(self.packets_received == token.packet_counter);
-
-        self.packets_received += 1;
-        self.unresolved_token = false;
-
-        let buf = self.receiver.consume(token.buffer_size);
-        log::error!("MESSAGE {:?}", &buf[5..]);
-        DecodeRef::decode(&mut BDecoder(&buf[5..]))
-    }
-
     pub fn flushed(&self) -> bool {
         self.sender.flushed()
     }
@@ -330,6 +308,72 @@ impl<T: TransportStream> Transport<T> {
 
     pub fn disconnect(self) -> TransportFuture<T> {
         TransportFuture::disconnect(self)
+    }
+
+    pub fn poll_send<Msg: Encode>(&mut self, _msg: &Msg) -> Poll<Result<(), TransportError>> {
+        panic!("")
+    }
+
+    pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        if self.inbox.is_some() {
+            return Poll::Ready(Ok(()))
+        }
+        let s = self;
+        let pc = s.packets_received;
+        let mut r = Pin::new(&mut s.receiver);
+        // Receive at least 8 bytes instead of the required 4
+        // in order to impede traffic analysis (as recommended by RFC).
+        match ready!(r.as_mut().poll_fetch(cx, 2 * PacketLayout::PACKET_LEN_SIZE)) {
+            Ok(()) => (),
+            Err(e) => return Poll::Ready(Err(e.into())),
+        }
+        // Decrypt the buffer len. Leave the original packet len field encrypted
+        // in order to keep this function reentrant.
+        assert!(r.window().len() >= PacketLayout::PACKET_LEN_SIZE);
+        let mut len = [0; 4];
+        len.copy_from_slice(&r.window()[..PacketLayout::PACKET_LEN_SIZE]);
+        let len = s.decryption_ctx.decrypt_len(pc, len);
+        if len > PacketLayout::MAX_PACKET_LEN {
+            return Poll::Ready(Err(TransportError::BadPacketLength));
+        }
+        // Wait for the whole packet to arrive (including MAC etc)
+        match ready!(r.as_mut().poll_fetch(cx, len)) {
+            Err(e) => return Poll::Ready(Err(e.into())),
+            Ok(()) => (),
+        }
+        // Try to decrypt the packet.
+        assert!(r.window().len() >= len);
+        match s
+            .decryption_ctx
+            .decrypt_packet(pc, &mut r.window_mut()[..len])
+        {
+            None => Poll::Ready(Err(TransportError::MessageIntegrity)),
+            Some(_) => {
+                s.inbox = Some(len);
+                Poll::Ready(Ok(()))
+            }
+        }
+    }
+
+    pub fn decode<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
+        match self.inbox {
+            None => panic!("nothing to decode"),
+            Some(_) => {
+                //log::error!("MESSAGE {:?}", &self.receiver.window()[5..]);
+                DecodeRef::decode(&mut BDecoder(&self.receiver.window()[5..]))
+            }
+        }
+    }
+
+    pub fn consume(&mut self) {
+        match self.inbox {
+            None => panic!("nothing to consume"),
+            Some(buffer_size) => {
+                self.packets_received += 1;
+                self.receiver.consume(buffer_size);
+                self.inbox = None;
+            }
+        }
     }
 }
 
@@ -379,58 +423,6 @@ where
                 }
                 _ => return Poll::Ready(Err(TransportError::DisconnectByUs)),
             },
-        }
-    }
-}
-
-impl<T: TransportStream> Stream for Transport<T> {
-    type Item = Result<Token, TransportError>;
-
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>>
-    where
-        Self: Unpin,
-    {
-        assert!(!self.unresolved_token);
-        let s = Pin::into_inner(self);
-        let pc = s.packets_received;
-        let mut r = Pin::new(&mut s.receiver);
-        // Receive at least 8 bytes instead of the required 4
-        // in order to impede traffic analysis (as recommended by RFC).
-        match ready!(r.as_mut().poll_fetch(cx, 2 * PacketLayout::PACKET_LEN_SIZE)) {
-            Ok(()) => (),
-            Err(e) => return Poll::Ready(Some(Err(e.into()))),
-        }
-        // Decrypt the buffer len. Leave the original packet len field encrypted
-        // in order to keep this function reentrant.
-        assert!(r.window().len() >= PacketLayout::PACKET_LEN_SIZE);
-        let mut len = [0; 4];
-        len.copy_from_slice(&r.window()[..PacketLayout::PACKET_LEN_SIZE]);
-        let len = s.decryption_ctx.decrypt_len(pc, len);
-        if len > PacketLayout::MAX_PACKET_LEN {
-            return Poll::Ready(Some(Err(TransportError::BadPacketLength)));
-        }
-        // Wait for the whole packet to arrive (including MAC etc)
-        match ready!(r.as_mut().poll_fetch(cx, len)) {
-            Err(e) => return Poll::Ready(Some(Err(e.into()))),
-            Ok(()) => (),
-        }
-        // Try to decrypt the packet.
-        assert!(r.window().len() >= len);
-        match s
-            .decryption_ctx
-            .decrypt_packet(pc, &mut r.window_mut()[..len])
-        {
-            None => Poll::Ready(Some(Err(TransportError::MessageIntegrity))),
-            Some(_) => {
-                // Return a token containing the current packet counter
-                // (for token uniqueness) and the number of bytes to be consumed
-                // from the buffer when redeeming the token.
-                s.unresolved_token = true;
-                Poll::Ready(Some(Ok(Token {
-                    packet_counter: pc,
-                    buffer_size: len,
-                })))
-            }
         }
     }
 }

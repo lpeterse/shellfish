@@ -14,7 +14,6 @@ pub use self::request::*;
 pub use self::state::*;
 pub use self::map::*;
 
-use crate::pipe::*;
 use std::sync::{Arc,Mutex};
 
 type Channel<T> = Arc<Mutex<SharedState<T>>>;

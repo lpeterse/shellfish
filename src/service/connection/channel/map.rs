@@ -67,20 +67,15 @@ impl ChannelMap {
             }
         }
     }
-}
 
-impl<'a> IntoIterator for &'a mut ChannelMap {
-    type Item = &'a mut ChannelState;
-    type IntoIter = LowestKeyMapIterator<'a>;
-
-    fn into_iter(self) -> LowestKeyMapIterator<'a> {
-        LowestKeyMapIterator(self.elements.iter_mut())
+    pub fn iter<'a>(&'a mut self) -> ChannelMapIterator<'a> {
+        ChannelMapIterator(self.elements.iter_mut())
     }
 }
 
-pub struct LowestKeyMapIterator<'a>(IterMut<'a, Option<ChannelState>>);
+pub struct ChannelMapIterator<'a>(IterMut<'a, Option<ChannelState>>);
 
-impl<'a> Iterator for LowestKeyMapIterator<'a> {
+impl<'a> Iterator for ChannelMapIterator<'a> {
     type Item = &'a mut ChannelState;
 
     fn next(&mut self) -> Option<Self::Item> {
