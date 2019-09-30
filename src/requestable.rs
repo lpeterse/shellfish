@@ -59,7 +59,7 @@ impl<T: Requestable> Receiver<T> {
                 }
                 None => match self.queue.poll_next_unpin(cx) {
                     Poll::Pending => return Poll::Pending,
-                    Poll::Ready(None) => return Poll::Ready(Err(Error::Canceled.into())),
+                    Poll::Ready(None) => return Poll::Ready(Err(Error::Canceled.into())), // FIXME: Called after None
                     Poll::Ready(Some(cmd)) => self.current = Some(cmd),
                 },
             }

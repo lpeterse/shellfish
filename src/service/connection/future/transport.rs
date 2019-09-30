@@ -9,164 +9,183 @@ use super::msg_channel_success::*;
 use super::msg_channel_window_adjust::*;
 use super::msg_global_request::*;
 use super::*;
-use super::{ChannelMap, Connection, ConnectionError, Session};
+use super::{ConnectionError, Session};
 
-use crate::requestable;
 use crate::transport::*;
 
-use futures::stream::Stream;
 use futures::task::{Context, Poll};
-use std::pin::*;
 use std::sync::{Arc, Mutex};
 
 pub fn poll<T: TransportStream>(
+    x: &mut ConnectionFuture<T>,
     cx: &mut Context,
-    mut transport: Transport<T>,
-    requests: &mut requestable::Receiver<Connection>,
-    channels: &mut ChannelMap,
-) -> Result<Result<Transport<T>, TransportFuture<T>>, ConnectionError> {
-    loop {
-        match transport.poll_receive(cx) {
-            Poll::Pending => return Ok(Ok(transport)),
-            Poll::Ready(Err(e)) => return Err(e.into()),
-            _ => ()
-        }
-        match transport.decode() {
-            Some(E10::A(msg)) => {
-                let _: MsgChannelData = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                channel.decrease_local_window_size(msg.data.len())?;
-                match channel.shared {
-                    TypedState::Session(ref st) => {
-                        let mut shared = st.lock().unwrap();
-                        let written = shared.specific.stdout.write(msg.data);
-                        assert!(written == msg.data.len());
-                        shared.user_task.wake();
-                    }
+) -> Poll<Result<(), ConnectionError>> {
+    ready!(x.transport.poll_receive(cx))?;
+    log::info!("INBOUND MESSAGE");
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelData = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            channel.decrease_local_window_size(msg.data.len())?;
+            match channel.shared {
+                TypedState::Session(ref st) => {
+                    let mut shared = st.lock().unwrap();
+                    let written = shared.specific.stdout.write(msg.data);
+                    assert!(written == msg.data.len());
+                    shared.user_task.wake();
                 }
-                transport.consume();
-                continue;
             }
-            Some(E10::B(msg)) => {
-                let _: MsgChannelExtendedData = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                channel.decrease_local_window_size(msg.data.len())?;
-                match channel.shared {
-                    TypedState::Session(ref st) => {
-                        let mut shared = st.lock().unwrap();
-                        let written = shared.specific.stderr.write(msg.data);
-                        assert!(written == msg.data.len());
-                        shared.user_task.wake();
-                    }
-                }
-                transport.consume();
-                continue;
-            }
-            Some(E10::C(msg)) => {
-                let _: MsgChannelEof = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                match channel.shared {
-                    TypedState::Session(ref st) => {
-                        let mut shared = st.lock().unwrap();
-                        shared.is_remote_eof = true;
-                        shared.user_task.wake();
-                    }
-                }
-                transport.consume();
-                continue;
-            }
-            Some(E10::D(msg)) => {
-                let _: MsgChannelClose = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                match channel.shared {
-                    TypedState::Session(ref st) => {
-                        let mut shared = st.lock().unwrap();
-                        if !shared.is_closed {
-                            let msg = MsgChannelClose { recipient_channel: channel.remote_channel };
-                            match transport.send2(&msg) {
-                                Some(()) => (),
-                                None => return Ok(Err(transport.flush2())),
-                            }
-                            shared.is_closed = true;
-                            shared.user_task.wake();
-                        }
-                    }
-                }
-                channels.remove(msg.recipient_channel);
-                transport.consume();
-                continue;
-            }
-            Some(E10::E(msg)) => {
-                log::info!("Ignoring {:?}", msg);
-                let _: MsgGlobalRequest = msg;
-                transport.consume();
-                continue;
-            }
-            Some(E10::F(msg)) => {
-                let _: MsgChannelOpenConfirmation<Session> = msg;
-                let x: ChannelOpenRequest = requests.take()?;
-                let shared = Arc::new(Mutex::new(Default::default()));
-                let state = ChannelState {
-                    is_closing: false,
-                    local_channel: msg.recipient_channel,
-                    local_window_size: x.initial_window_size,
-                    local_max_packet_size: x.max_packet_size,
-                    remote_channel: msg.sender_channel,
-                    remote_window_size: msg.initial_window_size,
-                    remote_max_packet_size: msg.maximum_packet_size,
-                    shared: TypedState::Session(shared.clone()),
-                };
-                let session: Session = Session { channel: shared };
-                channels.insert(state)?;
-                requests.respond(ConnectionResponse::OpenSession(session))?;
-                transport.consume();
-                continue;
-            }
-            Some(E10::G(msg)) => {
-                let _: MsgChannelOpenFailure = msg;
-                let _: ChannelOpenRequest = requests.take()?;
-                requests.respond(ConnectionResponse::OpenFailure(msg.reason))?;
-                transport.consume();
-                continue;
-            }
-            Some(E10::H(msg)) => {
-                let _: MsgChannelSuccess = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                match channel.shared {
-                    TypedState::Session(ref st) => {
-                        let mut shared = st.lock().unwrap();
-                        shared.specific.request.success()?;
-                        shared.user_task.wake();
-                    }
-                }
-                transport.consume();
-                continue;
-            }
-            Some(E10::I(msg)) => {
-                let _: MsgChannelFailure = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                match channel.shared {
-                    TypedState::Session(ref st) => {
-                        let mut shared = st.lock().unwrap();
-                        shared.specific.request.failure()?;
-                        shared.user_task.wake();
-                    }
-                }
-                transport.consume();
-                continue;
-            }
-            Some(E10::J(msg)) => {
-                let _: MsgChannelWindowAdjust = msg;
-                let channel = channels.get(msg.recipient_channel)?;
-                channel.remote_window_size += msg.bytes_to_add;
-                transport.consume();
-                continue;
-            }
-            None => {
-                log::error!("FIXME: unimplemented");
-                transport.consume();
-                continue;
-            }
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
         }
     }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelExtendedData = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            channel.decrease_local_window_size(msg.data.len())?;
+            match channel.shared {
+                TypedState::Session(ref st) => {
+                    let mut shared = st.lock().unwrap();
+                    let written = shared.specific.stderr.write(msg.data);
+                    assert!(written == msg.data.len());
+                    shared.user_task.wake();
+                }
+            }
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelEof = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            match channel.shared {
+                TypedState::Session(ref st) => {
+                    let mut shared = st.lock().unwrap();
+                    shared.is_remote_eof = true;
+                    shared.user_task.wake();
+                }
+            }
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelClose = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            match channel.shared {
+                TypedState::Session(ref st) => {
+                    let mut shared = st.lock().unwrap();
+                    if !shared.is_closed {
+                        let msg = MsgChannelClose {
+                            recipient_channel: channel.remote_channel,
+                        };
+                        ready!(x.transport.poll_send(cx, &msg))?;
+                        shared.is_closed = true;
+                        shared.user_task.wake();
+                    }
+                }
+            }
+            x.channels.remove(msg.recipient_channel);
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            log::info!("Ignoring {:?}", msg);
+            let _: MsgGlobalRequest = msg;
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelOpenConfirmation<Session> = msg;
+            let r: ChannelOpenRequest = x.request_receiver.take()?;
+            let shared = Arc::new(Mutex::new(Default::default()));
+            let state = ChannelState {
+                is_closing: false,
+                local_channel: msg.recipient_channel,
+                local_window_size: r.initial_window_size,
+                local_max_packet_size: r.max_packet_size,
+                remote_channel: msg.sender_channel,
+                remote_window_size: msg.initial_window_size,
+                remote_max_packet_size: msg.maximum_packet_size,
+                shared: TypedState::Session(shared.clone()),
+            };
+            let session: Session = Session { channel: shared };
+            x.channels.insert(state)?;
+            x.request_receiver
+                .respond(ConnectionResponse::OpenSession(session))?;
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelOpenFailure = msg;
+            let _: ChannelOpenRequest = x.request_receiver.take()?;
+            x.request_receiver
+                .respond(ConnectionResponse::OpenFailure(msg.reason))?;
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            log::error!("SUCCESS");
+            let _: MsgChannelSuccess = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            match channel.shared {
+                TypedState::Session(ref st) => {
+                    let mut shared = st.lock().unwrap();
+                    shared.specific.request.success()?;
+                    shared.user_task.wake();
+                }
+            }
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelFailure = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            match channel.shared {
+                TypedState::Session(ref st) => {
+                    let mut shared = st.lock().unwrap();
+                    shared.specific.request.failure()?;
+                    shared.user_task.wake();
+                }
+            }
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    match x.transport.decode() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelWindowAdjust = msg;
+            let channel = x.channels.get(msg.recipient_channel)?;
+            channel.remote_window_size += msg.bytes_to_add;
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
+    // FIXME: This is an error
+    log::error!("UNIMPLEMENTED MESSAGE");
+    x.transport.consume();
+    Poll::Pending
 }

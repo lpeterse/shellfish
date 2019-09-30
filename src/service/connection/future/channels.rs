@@ -1,6 +1,6 @@
 use super::msg_channel_request::*;
 use super::*;
-use super::{ChannelMap, Connection, ConnectionError};
+use super::{ConnectionFuture, ConnectionError};
 
 use crate::requestable;
 use crate::transport::*;
@@ -8,12 +8,10 @@ use crate::transport::*;
 use futures::task::Context;
 
 pub fn poll<T: TransportStream>(
+    x: &mut ConnectionFuture<T>,
     cx: &mut Context,
-    mut transport: Transport<T>,
-    _requests: &mut requestable::Receiver<Connection>,
-    channels: &mut ChannelMap,
-) -> Result<Result<Transport<T>, TransportFuture<T>>, ConnectionError> {
-    for channel in channels.iter() {
+) -> Poll<Result<(), ConnectionError>> {
+    for channel in x.channels.iter() {
         // Nothing to do if channel is closing.
         // We're expecting the peer's close message any moment..
         // The channel remove logic is located in the disconnect
@@ -32,16 +30,8 @@ pub fn poll<T: TransportStream>(
                             want_reply: true,
                             request: r,
                         };
-                        match transport.send2(&msg) {
-                            Some(()) => {
-                                log::info!("Sent {:?}", &msg);
-                                shared.specific.request = RequestState::Progress;
-                                return Ok(Ok(transport));
-                            }
-                            None => {
-                                return Ok(Err(transport.flush2()));
-                            }
-                        }
+                        ready!(x.transport.poll_send(cx, &msg))?;
+                        shared.specific.request = RequestState::Progress;
                     }
                     _ => (),
                 }
@@ -49,5 +39,5 @@ pub fn poll<T: TransportStream>(
         }
     }
 
-    return Ok(Ok(transport));
+    Poll::Pending
 }

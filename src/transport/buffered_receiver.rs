@@ -2,7 +2,6 @@ use async_std::io::Read;
 use futures::io::AsyncRead;
 use futures::ready;
 use futures::task::{Context, Poll};
-use pin_utils::*;
 use std::ops::Range;
 use std::pin::Pin;
 
@@ -16,8 +15,6 @@ pub struct BufferedReceiver<S> {
 }
 
 impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
-    unsafe_pinned!(stream: S);
-
     pub fn new(stream: S) -> Self {
         fn vec() -> Box<[u8]> {
             let mut v = Vec::with_capacity(MIN_BUFFER_SIZE);

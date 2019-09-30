@@ -310,12 +310,34 @@ impl<T: TransportStream> Transport<T> {
         TransportFuture::disconnect(self)
     }
 
-    pub fn poll_send<Msg: Encode>(&mut self, _msg: &Msg) -> Poll<Result<(), TransportError>> {
-        panic!("")
+    pub fn poll_send<Msg: Encode>(&mut self, cx: &mut Context, msg: &Msg) -> Poll<Result<(), TransportError>> {
+        let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
+        loop {
+            match self.sender.reserve(layout.buffer_len()) {
+                None => {
+                    ready!(self.poll_flush(cx))?;
+                    continue; // unlikely to succeed immediately
+                }
+                Some(buffer) => {
+                    let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
+                    Encode::encode(msg, &mut encoder);
+                    log::debug!("SEND2 {:?}", buffer);
+                    let pc = self.packets_sent;
+                    self.packets_sent += 1;
+                    self.encryption_ctx.encrypt_packet(pc, layout, buffer);
+                    return Poll::Ready(Ok(()))
+                }
+            }
+        }
+    }
+
+    pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        Pin::new(&mut (self.sender)).poll_flush(cx).map(|x| x.map_err(Into::into))
     }
 
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         if self.inbox.is_some() {
+            log::error!("POLL READY");
             return Poll::Ready(Ok(()))
         }
         let s = self;

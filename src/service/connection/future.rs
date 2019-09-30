@@ -15,7 +15,7 @@ use futures::task::{Context, Poll};
 use std::pin::*;
 
 pub struct ConnectionFuture<T> {
-    pub future: TransportFuture<T>,
+    pub transport: Transport<T>,
     pub request_sender: requestable::Sender<Connection>,
     pub request_receiver: requestable::Receiver<Connection>,
     pub channels: ChannelMap,
@@ -28,43 +28,64 @@ impl<T: TransportStream> ConnectionFuture<T> {
         request_receiver: requestable::Receiver<Connection>,
     ) -> Self {
         Self {
+            transport,
             request_sender,
             request_receiver,
-            future: TransportFuture::Ready(transport),
             channels: ChannelMap::new(256),
         }
     }
 
-    pub fn terminate(&mut self, e: ConnectionError) -> Poll<ConnectionError> {
+    fn terminate(&mut self, e: ConnectionError) -> ConnectionError {
         //self.request_sender.terminate(e); // FIXME
         self.request_receiver.terminate(e);
         self.channels.terminate(e);
-        Poll::Ready(e)
+        e
     }
 
-    fn poll_events(
-        cx: &mut Context,
-        t: Transport<T>,
-        _request_sender: &mut requestable::Sender<Connection>,
-        request_receiver: &mut requestable::Receiver<Connection>,
-        channels: &mut ChannelMap,
-    ) -> Result<Result<Transport<T>, TransportFuture<T>>, ConnectionError> {
-        // Poll for incoming messages
-        let t = match transport::poll(cx, t, request_receiver, channels)? {
-            Ok(t) => t,
-            Err(f) => return Ok(Err(f)),
-        };
-        // Poll for requests issued on the local connection handle
-        let t = match requests::poll(cx, t, request_receiver, channels)? {
-            Ok(t) => t,
-            Err(f) => return Ok(Err(f)),
-        };
-        // Poll for channel events
-        let t = match channels::poll(cx, t, request_receiver, channels)? {
-            Ok(t) => t,
-            Err(f) => return Ok(Err(f)),
-        };
-        Ok(Ok(t))
+    fn poll_events(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        loop {
+            // Loop over all event sources until none of it makes progress anymore.
+            // The transport shall not be flushed, but might be written to. A consolidated flush
+            // will be performed afterwards. This is benefecial for networking performance as it
+            // allows multiple messages to be sent in a single TCP segment (even with TCP_NODELAY)
+            // and impedes traffic analysis.
+            let mut made_progress = true;
+            while made_progress {
+                made_progress = false;
+                // Poll for incoming messages
+                match transport::poll(self, cx) {
+                    Poll::Pending => (),
+                    Poll::Ready(Ok(())) => made_progress = true,
+                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                }
+                // Poll for requests issued on the local connection handle
+                match requests::poll(self, cx) {
+                    Poll::Pending => (),
+                    Poll::Ready(Ok(())) => made_progress = true,
+                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                }
+                // Poll for channel events
+                match channels::poll(self, cx) {
+                    Poll::Pending => (),
+                    Poll::Ready(Ok(())) => made_progress = true,
+                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                }
+            }
+            // None of the previous actions shall actively flush the transport.
+            // If necessary, the transport will be flushed here after all actions have eventually
+            // written their output to the transport. It is necessary to loop again as some actions
+            // might be pending on output and unblock as soon as buffer space becomes available
+            // again. This is somewhat unlikely and will not occur unless the transport is under
+            // heavy load, but it is necessary to consider this for correctness or the connection
+            // will stop making progress as soon as single notification gets lost.
+            if !self.transport.flushed() {
+                ready!(self.transport.poll_flush(cx))?;
+                continue;
+            }
+            // Being here means all event sources are pending and the transport is flushed.
+            // Return pending as there is really nothing to anymore for now.
+            return Poll::Pending;
+        }
     }
 }
 
@@ -72,47 +93,10 @@ impl<T> Future for ConnectionFuture<T>
 where
     T: Unpin + TransportStream,
 {
-    type Output = ConnectionError;
+    type Output = Result<(), ConnectionError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let mut self_ = Pin::into_inner(self);
-
-        loop {
-            let transport = match ready!(Pin::new(&mut self_.future).poll(cx)) {
-                Ok(transport) => transport,
-                Err(e) => return self_.terminate(e.into()),
-            };
-
-            match Self::poll_events(
-                cx,
-                transport,
-                &mut self_.request_sender,
-                &mut self_.request_receiver,
-                &mut self_.channels,
-            ) {
-                Ok(Err(future)) => {
-                    // This means that the transport is busy with something and needs to
-                    // be polled in order to be freed. Loop entry does this or returns pending.
-                    self_.future = future;
-                    continue;
-                }
-                Ok(Ok(transport)) => {
-                    if !transport.flushed() {
-                        // All event sources polled and pending, but there is data available to be
-                        // sent. Loop entry will poll the transport future one more time
-                        // (important for waker registration) and return pending afterwards.
-                        self_.future = transport.flush2();
-                        continue;
-                    } else {
-                        // All events sources (commands, channels etc) polled and pending.
-                        // The transport is also flushed so there is nothing more to do.
-                        // NB: Must not call continue here (or endless loop until error).
-                        self_.future = transport.ready();
-                        return Poll::Pending;
-                    }
-                }
-                Err(e) => return self_.terminate(e),
-            }
-        }
+        let self_ = Pin::into_inner(self);
+        Poll::Ready(ready!(self_.poll_events(cx)).map_err(|e| self_.terminate(e)))
     }
 }

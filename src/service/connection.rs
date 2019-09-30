@@ -46,7 +46,7 @@ impl Connection {
         let (s3, r3) = requestable::channel(32);
         let future = ConnectionFuture::new(t, s3, r2).map(|e| {
             log::warn!("Connection died with {:?}", e);
-            s1.send(e).unwrap_or(())
+            s1.send(e.unwrap_err()).unwrap_or(())
         });
         async_std::task::spawn(future);
         Connection {
