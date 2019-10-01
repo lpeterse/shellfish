@@ -58,15 +58,19 @@ impl UserAuth {
                             };
                             transport.send(&req).await?;
                             transport.flush().await?;
-                            match transport.receive().await? {
+                            transport.receive().await?;
+                            match transport.decode().unwrap() { // TODO
                                 E2::A(x) => {
                                     let _: Success = x;
+                                    transport.consume();
                                     return Ok(transport)
                                 },
                                 E2::B(x) => {
                                     let _: Failure = x;
                                     let name = <PublicKeyMethod<SshEd25519> as Method>::NAME;
-                                    if !x.methods.contains(&name) { break };
+                                    let b =  !x.methods.contains(&name);
+                                    transport.consume();
+                                    if b { break };
                                 }
                             }
                         },

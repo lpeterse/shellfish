@@ -1,7 +1,5 @@
 use super::*;
 
-pub type TransportResult<T> = Result<T,TransportError>;
-
 #[derive(Debug,Copy,Clone)]
 pub enum TransportError {
     IoError(std::io::ErrorKind),

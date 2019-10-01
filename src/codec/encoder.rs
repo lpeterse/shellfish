@@ -1,4 +1,5 @@
 use sha2::Digest;
+use super::Encode;
 
 pub trait Encoder {
     fn push_bool(&mut self, x: bool);
@@ -30,6 +31,16 @@ impl <D: Digest> Encoder for D {
 pub struct BEncoder<'a> {
     pub pos: usize,
     pub buf: &'a mut [u8],
+}
+
+impl <'a> BEncoder<'a> {
+    pub fn encode<E: Encode>(e: &E) -> Vec<u8> {
+        let mut vec = Vec::new();
+        vec.resize(e.size(), 0);
+        let mut enc = BEncoder { pos: 0, buf: &mut vec };
+        Encode::encode(e, &mut enc);
+        vec
+    }
 }
 
 impl <'a> Encoder for BEncoder<'a> {

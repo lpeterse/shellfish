@@ -1,3 +1,5 @@
+use super::DecodeRef;
+
 pub trait Decoder<'a>: Clone {
     fn remaining(&self) -> usize;
     fn is_eoi(&self) -> bool;
@@ -32,6 +34,13 @@ pub trait Decoder<'a>: Clone {
 
 #[derive(Copy, Clone, Debug)]
 pub struct BDecoder<'a> (pub &'a [u8]);
+
+impl <'a> BDecoder<'a> {
+    pub fn decode<T: DecodeRef<'a>>(x: &'a [u8]) -> Option<T> {
+        let mut dec = BDecoder(x);
+        T::decode(&mut dec)
+    }
+}
 
 impl <'a> Decoder<'a> for BDecoder<'a> {
     fn remaining(&self) -> usize {

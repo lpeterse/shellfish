@@ -59,8 +59,8 @@ mod test {
 
     #[test]
     fn test_kex_hash_01() {
-        let client_identification = Identification::new("hssh_0.1.0.0".into());
-        let server_identification = Identification::new("hssh_0.1.0.0".into());
+        let client_identification = Identification::new("hssh_0.1.0.0".into(), "".into());
+        let server_identification = Identification::new("hssh_0.1.0.0".into(), "".into());
         let client_kex_init = KexInit {
             cookie: KexCookie([146,105,253,96,98,147,65,76,222,166,168,241,53,43,45,168]),
             kex_algorithms: vec![KexAlgorithm::Curve25519Sha256AtLibsshDotOrg],

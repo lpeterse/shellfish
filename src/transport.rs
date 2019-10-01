@@ -1,7 +1,7 @@
-mod encryption;
-mod error;
 mod buffered_receiver;
 mod buffered_sender;
+mod encryption;
+mod error;
 mod identification;
 mod kex;
 mod key_streams;
@@ -14,10 +14,10 @@ mod msg_unimplemented;
 mod packet_layout;
 mod session_id;
 
-pub use self::encryption::*;
-pub use self::error::*;
 pub use self::buffered_receiver::*;
 pub use self::buffered_sender::*;
+pub use self::encryption::*;
+pub use self::error::*;
 pub use self::identification::*;
 pub use self::kex::*;
 pub use self::key_streams::*;
@@ -34,7 +34,6 @@ use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
-use futures::future::Future;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, WriteHalf};
 use futures::ready;
 use futures::task::Context;
@@ -44,7 +43,7 @@ use std::convert::From;
 use std::marker::Unpin;
 use std::option::Option;
 use std::pin::Pin;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub enum Role {
     Client,
@@ -56,13 +55,29 @@ pub trait TransportStream:
 {
 }
 
+pub struct TransportConfig {
+    identification: Identification,
+    rekey_bytes: u64,
+    rekey_interval: std::time::Duration,
+}
+
+impl Default for TransportConfig {
+    fn default() -> Self {
+        Self {
+            identification: Identification::default(),
+            rekey_bytes: 1_000_000_000,
+            rekey_interval: std::time::Duration::from_secs(3600),
+        }
+    }
+}
+
 impl TransportStream for TcpStream {}
 
 pub struct Transport<T> {
+    config: TransportConfig,
     role: Role,
     sender: BufferedSender<WriteHalf<T>>,
     receiver: BufferedReceiver<ReadHalf<T>>,
-    local_id: Identification,
     remote_id: Identification,
     session_id: SessionId,
     bytes_sent: u64,
@@ -77,28 +92,29 @@ pub struct Transport<T> {
     inbox: Option<usize>,
 }
 
-pub struct Receiver {}
-
 impl<T: TransportStream> Transport<T> {
-    const REKEY_BYTES: u64 = 1000_000_000;
-    const REKEY_INTERVAL: Duration = Duration::from_secs(3600);
-
-    const MAX_BUFFER_SIZE: usize = 35_000;
-
-    pub async fn new(stream: T, role: Role) -> TransportResult<Self> {
+    /// Create a new transport.
+    ///
+    /// The initial key exchange has been completed successfully when this
+    /// function does not return an error.
+    pub async fn new(
+        config: TransportConfig,
+        stream: T,
+        role: Role,
+    ) -> Result<Self, TransportError> {
         let (rh, wh) = stream.split();
         let mut sender = BufferedSender::new(wh);
         let mut receiver = BufferedReceiver::new(rh);
 
-        let local_id = Self::send_id(&mut sender, Identification::default()).await?;
+        Self::send_id(&mut sender, &config.identification).await?;
         let remote_id = Self::receive_id(&mut receiver).await?;
 
         let mut t = Transport {
-            role: role,
+            config,
+            role,
             sender,
             receiver,
-            local_id: local_id,
-            remote_id: remote_id,
+            remote_id,
             session_id: SessionId::None,
             bytes_sent: 0,
             packets_sent: 0,
@@ -116,34 +132,38 @@ impl<T: TransportStream> Transport<T> {
         Ok(t)
     }
 
+    /// Return the session id belonging to the connection.
+    ///
+    /// The session id is a result of the initial key exchange. It is static for the whole
+    /// lifetime of the connection.
     pub fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 
-    pub async fn send<M: Encode>(&mut self, msg: &M) -> TransportResult<()> {
+    /// TODO
+    pub async fn send<M: Encode>(&mut self, msg: &M) -> Result<(), TransportError> {
         self.rekey_if_necessary().await?;
         self.send_raw(msg).await
     }
 
-    pub async fn receive<'a, M: DecodeRef<'a>>(&'a mut self) -> TransportResult<M> {
-        self.rekey_if_necessary().await?;
+    /// TODO
+    pub async fn receive(&mut self) -> Result<(), TransportError> {
+        //self.rekey_if_necessary().await?;
         self.receive_raw().await
     }
 
-    pub async fn try_receive<'a, M: DecodeRef<'a>>(&'a mut self) -> Result<Option<M>, TransportError> {
-        let x: E3<MsgDisconnect, MsgIgnore<'a>, M> = self.receive().await?;
-        match x {
-            E3::A(_) => Err(TransportError::DisconnectByPeer),
-            E3::B(_) => Ok(None),
-            E3::C(x) => Ok(Some(x)),
-        }
-    }
-
-    pub async fn flush(&mut self) -> TransportResult<()> {
+    /// Flush the transport.
+    pub async fn flush(&mut self) -> Result<(), TransportError> {
         Ok(self.sender.flush().await?)
     }
 
-    pub async fn rekey(&mut self) -> TransportResult<()> {
+    /// Check whether the transport is flushed.
+    pub fn flushed(&self) -> bool {
+        self.sender.flushed()
+    }
+
+    // TODO
+    pub async fn rekey(&mut self) -> Result<(), TransportError> {
         self.kex(None).await
     }
 
@@ -151,29 +171,36 @@ impl<T: TransportStream> Transport<T> {
         let req = MsgServiceRequest(service_name);
         self.send_raw(&req).await?;
         self.flush().await?;
-        let _: MsgServiceAccept<'_> = self.receive_raw().await?;
+        self.receive_raw().await?;
+        let _: MsgServiceAccept<'_> = self.decode().unwrap(); // TODO
+        self.consume();
         Ok(self)
     }
 
-    async fn rekey_if_necessary(&mut self) -> TransportResult<()> {
+    async fn rekey_if_necessary(&mut self) -> Result<(), TransportError> {
         let bytes_sent_since = self.bytes_sent - self.kex_last_bytes_sent;
         let bytes_received_since = self.bytes_received - self.kex_last_bytes_received;
-        if self.kex_last_time.elapsed() > Self::REKEY_INTERVAL
-            || bytes_sent_since > Self::REKEY_BYTES
-            || bytes_received_since > Self::REKEY_BYTES
+        if self.kex_last_time.elapsed() > self.config.rekey_interval
+            || bytes_sent_since > self.config.rekey_bytes
+            || bytes_received_since > self.config.rekey_bytes
         {
             self.rekey().await?
         }
         Ok(())
     }
 
-    async fn kex(&mut self, remote: Option<KexInit>) -> TransportResult<()> {
+    async fn kex(&mut self, remote: Option<KexInit>) -> Result<(), TransportError> {
         log::debug!("kex start");
         let local_init = KexInit::new(KexCookie::random());
         self.send_raw(&local_init).await?;
         self.flush().await?;
         let remote_init: KexInit = match remote {
-            None => self.receive_raw().await?,
+            None => {
+                self.receive_raw().await?;
+                let x = self.decode().unwrap();
+                self.consume();
+                x
+            }
             Some(init) => init,
         };
         log::debug!("kex foo");
@@ -184,16 +211,20 @@ impl<T: TransportStream> Transport<T> {
 
                 self.send_raw(ecdh.init()).await?;
                 self.flush().await?;
+                self.receive().await?;
                 let mut output = ecdh.reply(
-                    self.receive_raw().await?,
-                    &self.local_id,
+                    self.decode().unwrap(), // TODO
+                    &self.config.identification,
                     &self.remote_id,
                     &self.session_id,
                 )?;
+                self.consume();
 
                 self.send_raw(&NewKeys {}).await?;
                 self.flush().await?;
-                let NewKeys {} = self.receive_raw().await?;
+                self.receive().await?;
+                let NewKeys {} = self.decode().unwrap(); // TODO
+                self.consume();
 
                 self.encryption_ctx.new_keys(
                     &output.encryption_algorithm_client_to_server,
@@ -221,96 +252,46 @@ impl<T: TransportStream> Transport<T> {
         Ok(())
     }
 
+    /// Send the local identification string.
     async fn send_id(
         stream: &mut BufferedSender<WriteHalf<T>>,
-        id: Identification,
-    ) -> TransportResult<Identification> {
+        id: &Identification,
+    ) -> Result<(), TransportError> {
         let mut enc = BEncoder::from(stream.alloc(Encode::size(&id) + 2).await?);
         Encode::encode(&id, &mut enc);
         enc.push_u8('\r' as u8);
         enc.push_u8('\n' as u8);
         stream.flush().await?;
-        Ok(id)
+        Ok(())
     }
 
+    /// Receive the remote identification string.
     async fn receive_id(
         stream: &mut BufferedReceiver<ReadHalf<T>>,
-    ) -> TransportResult<Identification> {
+    ) -> Result<Identification, TransportError> {
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
             let line = stream.read_line(Identification::MAX_LEN).await?;
             match DecodeRef::decode(&mut BDecoder(line)) {
-                Some(id) => break Ok(id),
                 None => (),
+                Some(id) => return Ok(id),
             }
         }
     }
 
-    async fn send_raw<M: Encode>(&mut self, msg: &M) -> TransportResult<()> {
-        let pc = self.packets_sent;
-        self.packets_sent += 1;
-        let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
-        let buffer = self.sender.alloc(layout.buffer_len()).await?;
-        let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
-        Encode::encode(msg, &mut encoder);
-        Ok(self.encryption_ctx.encrypt_packet(pc, layout, buffer))
+    async fn send_raw<M: Encode>(&mut self, msg: &M) -> Result<(), TransportError> {
+        futures::future::poll_fn(|cx| self.poll_send(cx, msg)).await
     }
 
-    pub fn send2<M: Encode>(&mut self, msg: &M) -> Option<()> {
-        let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
-        let buffer = self.sender.reserve(layout.buffer_len())?;
-        let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
-        Encode::encode(msg, &mut encoder);
-        log::debug!("SEND2 {:?}", buffer);
-        let pc = self.packets_sent;
-        self.packets_sent += 1;
-        self.encryption_ctx.encrypt_packet(pc, layout, buffer);
-        Some(())
+    async fn receive_raw(&mut self) -> Result<(), TransportError> {
+        futures::future::poll_fn(|cx| self.poll_receive(cx)).await
     }
 
-    async fn receive_raw<'a, M: DecodeRef<'a>>(&'a mut self) -> TransportResult<M> {
-        let pc = self.packets_received;
-        log::error!("RECEIVE RAW {}", pc);
-        self.packets_received += 1;
-        self.receiver
-            .fetch(2 * PacketLayout::PACKET_LEN_SIZE)
-            .await?; // Don't decode size before 8 bytes have arrived
-
-        let len: &[u8] = self.receiver.peek_exact(4).await?;
-        let buffer_size = self
-            .decryption_ctx
-            .decrypt_buffer_size(pc, len)
-            .filter(|size| *size <= Self::MAX_BUFFER_SIZE)
-            .ok_or(TransportError::BadPacketLength)?;
-
-        let buffer = self.receiver.read_exact(buffer_size).await?;
-        let packet = self
-            .decryption_ctx
-            .decrypt_packet(pc, buffer)
-            .ok_or(TransportError::MessageIntegrity)?;
-
-        log::warn!("RECEIVE RAW {}", pc);
-
-        DecodeRef::decode(&mut BDecoder(&packet[1..])).ok_or(TransportError::DecoderError)
-    }
-
-    pub fn flushed(&self) -> bool {
-        self.sender.flushed()
-    }
-
-    pub fn ready(self) -> TransportFuture<T> {
-        TransportFuture::ready(self)
-    }
-
-    pub fn flush2(self) -> TransportFuture<T> {
-        TransportFuture::flush(self)
-    }
-
-    pub fn disconnect(self) -> TransportFuture<T> {
-        TransportFuture::disconnect(self)
-    }
-
-    pub fn poll_send<Msg: Encode>(&mut self, cx: &mut Context, msg: &Msg) -> Poll<Result<(), TransportError>> {
+    pub fn poll_send<Msg: Encode>(
+        &mut self,
+        cx: &mut Context,
+        msg: &Msg,
+    ) -> Poll<Result<(), TransportError>> {
         let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
         loop {
             match self.sender.reserve(layout.buffer_len()) {
@@ -321,24 +302,25 @@ impl<T: TransportStream> Transport<T> {
                 Some(buffer) => {
                     let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
                     Encode::encode(msg, &mut encoder);
-                    log::debug!("SEND2 {:?}", buffer);
                     let pc = self.packets_sent;
                     self.packets_sent += 1;
                     self.encryption_ctx.encrypt_packet(pc, layout, buffer);
-                    return Poll::Ready(Ok(()))
+                    return Poll::Ready(Ok(()));
                 }
             }
         }
     }
 
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        Pin::new(&mut (self.sender)).poll_flush(cx).map(|x| x.map_err(Into::into))
+        Pin::new(&mut (self.sender))
+            .poll_flush(cx)
+            .map(|x| x.map_err(Into::into))
     }
 
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         if self.inbox.is_some() {
             log::error!("POLL READY");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
         let s = self;
         let pc = s.packets_received;
@@ -381,7 +363,7 @@ impl<T: TransportStream> Transport<T> {
         match self.inbox {
             None => panic!("nothing to decode"),
             Some(_) => {
-                //log::error!("MESSAGE {:?}", &self.receiver.window()[5..]);
+                // TODO: Use layout
                 DecodeRef::decode(&mut BDecoder(&self.receiver.window()[5..]))
             }
         }
@@ -395,56 +377,6 @@ impl<T: TransportStream> Transport<T> {
                 self.receiver.consume(buffer_size);
                 self.inbox = None;
             }
-        }
-    }
-}
-
-pub enum TransportFuture<T> {
-    Pending,
-    Ready(Transport<T>),
-    Flush(Transport<T>),
-    Disconnect(Transport<T>),
-}
-
-impl<T> TransportFuture<T> {
-    pub fn ready(t: Transport<T>) -> Self {
-        Self::Ready(t)
-    }
-    pub fn flush(t: Transport<T>) -> Self {
-        Self::Flush(t)
-    }
-    pub fn disconnect(t: Transport<T>) -> Self {
-        Self::Disconnect(t)
-    }
-}
-
-impl<T> Future for TransportFuture<T>
-where
-    T: AsyncRead + AsyncWrite,
-{
-    type Output = Result<Transport<T>, TransportError>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let s = Pin::into_inner(self);
-        let x = std::mem::replace(s, TransportFuture::Pending);
-        match x {
-            Self::Pending => Poll::Pending,
-            Self::Ready(t) => Poll::Ready(Ok(t)),
-            Self::Flush(mut t) => match Pin::new(&mut t.sender).poll_flush(cx) {
-                Poll::Pending => {
-                    std::mem::replace(s, Self::Flush(t));
-                    return Poll::Pending;
-                }
-                Poll::Ready(Ok(())) => return Poll::Ready(Ok(t)),
-                Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
-            },
-            Self::Disconnect(mut t) => match Pin::new(&mut t.sender).poll_flush(cx) {
-                Poll::Pending => {
-                    std::mem::replace(s, Self::Disconnect(t));
-                    return Poll::Pending;
-                }
-                _ => return Poll::Ready(Err(TransportError::DisconnectByUs)),
-            },
         }
     }
 }
