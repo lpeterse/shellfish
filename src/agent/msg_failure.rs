@@ -16,8 +16,8 @@ impl Encode for MsgFailure {
     }
 }
 
-impl <'a> DecodeRef<'a> for MsgFailure {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgFailure {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
     }

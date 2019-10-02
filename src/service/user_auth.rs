@@ -33,7 +33,7 @@ impl UserAuth {
 
         match agent {
             None => (),
-            Some(mut a) => {
+            Some(a) => {
                 let identities = a.identities().await?;
                 for (key,_comment) in identities {
                     match key {
@@ -44,7 +44,7 @@ impl UserAuth {
                                 service_name,
                                 public_key: public_key.clone(),
                             };
-                            let signature: Ed25519Signature = match a.sign::<SshEd25519, SignatureData<SshEd25519>>(&public_key, &data, 0).await? {
+                            let signature: SshEd25519Signature = match a.sign::<SshEd25519, SignatureData<SshEd25519>>(&public_key, &data, Default::default()).await? {
                                 None => continue,
                                 Some(s) => s,
                             };

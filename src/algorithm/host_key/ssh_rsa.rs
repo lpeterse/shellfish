@@ -8,6 +8,7 @@ impl SignatureAlgorithm for SshRsa {
     type PublicKey = SshRsaPublicKey;
     type PrivateKey = ();
     type Signature = ();
+    type SignatureFlags = SshRsaSignatureFlags;
 
     const NAME: &'static str = "ssh-rsa";
 }
@@ -34,7 +35,7 @@ impl Encode for SshRsaPublicKey {
 
 impl<'a> DecodeRef<'a> for SshRsaPublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let len = c.take_u32be()?; // TODO: use
+        let _len = c.take_u32be()?; // TODO: use
         let _: &str = DecodeRef::decode(c).filter(|x| *x == <SshRsa as SignatureAlgorithm>::NAME)?;
         let e = DecodeRef::decode(c)?;
         let n = DecodeRef::decode(c)?;
@@ -42,5 +43,23 @@ impl<'a> DecodeRef<'a> for SshRsaPublicKey {
             public_e: e,
             public_n: n,
         })
+    }
+}
+
+#[derive(Copy, Clone, Debug)]
+pub struct SshRsaSignatureFlags {
+    // SSH_AGENT_RSA_SHA2_256
+    // SSH_AGENT_RSA_SHA2_512
+}
+
+impl Default for SshRsaSignatureFlags {
+    fn default() -> Self {
+        Self {}
+    }
+}
+
+impl Into<u32> for SshRsaSignatureFlags {
+    fn into(self) -> u32 {
+        0
     }
 }

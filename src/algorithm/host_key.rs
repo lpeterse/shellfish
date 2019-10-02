@@ -10,6 +10,7 @@ pub trait SignatureAlgorithm {
     type PublicKey;
     type PrivateKey;
     type Signature;
+    type SignatureFlags: Copy + Default + Into<u32>;
 
     const NAME: &'static str;
 }

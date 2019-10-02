@@ -1,8 +1,7 @@
 use super::msg_channel_request::*;
 use super::*;
-use super::{ConnectionFuture, ConnectionError};
+use super::{ConnectionError, ConnectionFuture};
 
-use crate::requestable;
 use crate::transport::*;
 
 use futures::task::Context;

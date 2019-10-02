@@ -4,25 +4,23 @@ use crate::codec::*;
 pub struct Curve25519PublicKey ([u8;32]);
 
 impl Curve25519PublicKey {
-    pub fn new() -> Self {
-        Self([7;32])
-    }
+    const SIZE: u32 = 32;
 }
 
 impl Encode for Curve25519PublicKey {
     fn size(&self) -> usize {
-        4 + 32
+        std::mem::size_of::<u32>() + Self::SIZE as usize
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u32be(32);
+        c.push_u32be(Self::SIZE);
         c.push_bytes(&self.0);
     }
 }
 
-impl <'a> DecodeRef<'a> for Curve25519PublicKey {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+impl Decode for Curve25519PublicKey {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let mut k = [0;32];
-        c.take_u32be().filter(|x| x == &32)?;
+        c.expect_u32be(Self::SIZE)?;
         c.take_into(&mut k)?;
         Some(Self(k))
     }

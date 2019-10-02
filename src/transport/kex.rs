@@ -6,8 +6,8 @@ mod msg_ecdh_reply;
 mod msg_kex_init;
 mod msg_new_keys;
 
-pub use self::ecdh_algorithm::*;
 pub use self::cookie::*;
+pub use self::ecdh_algorithm::*;
 pub use self::ecdh_hash::*;
 pub use self::msg_ecdh_init::*;
 pub use self::msg_ecdh_reply::*;
@@ -31,38 +31,45 @@ pub struct Ecdh<A: EcdhAlgorithm> {
     mac_algorithm_server_to_client: Option<MacAlgorithm>,
 }
 
-impl <A: EcdhAlgorithm> Ecdh<A> {
+impl<A: EcdhAlgorithm> Ecdh<A> {
     pub fn new(client_kex_init: KexInit, server_kex_init: KexInit) -> Result<Ecdh<A>, KexError> {
         // Compute the common algorithms, abort on mismatch
         let kex_algorithm = common_algorithm(
-                &client_kex_init.kex_algorithms,
-                &server_kex_init.kex_algorithms)
-            .ok_or(KexError::NoCommonKexAlgorithm)?;
+            &client_kex_init.kex_algorithms,
+            &server_kex_init.kex_algorithms,
+        )
+        .ok_or(KexError::NoCommonKexAlgorithm)?;
 
         let encryption_algorithm_client_to_server = common_algorithm(
-                &client_kex_init.encryption_algorithms_client_to_server,
-                &server_kex_init.encryption_algorithms_client_to_server)
-            .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+            &client_kex_init.encryption_algorithms_client_to_server,
+            &server_kex_init.encryption_algorithms_client_to_server,
+        )
+        .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
         let encryption_algorithm_server_to_client = common_algorithm(
-                &client_kex_init.encryption_algorithms_server_to_client,
-                &server_kex_init.encryption_algorithms_server_to_client)
-            .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+            &client_kex_init.encryption_algorithms_server_to_client,
+            &server_kex_init.encryption_algorithms_server_to_client,
+        )
+        .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
 
         let compression_algorithm_client_to_server = common_algorithm(
-                &client_kex_init.compression_algorithms_client_to_server,
-                &server_kex_init.compression_algorithms_client_to_server)
-            .ok_or(KexError::NoCommonCompressionAlgorithm)?;
+            &client_kex_init.compression_algorithms_client_to_server,
+            &server_kex_init.compression_algorithms_client_to_server,
+        )
+        .ok_or(KexError::NoCommonCompressionAlgorithm)?;
         let compression_algorithm_server_to_client = common_algorithm(
-                &client_kex_init.compression_algorithms_server_to_client,
-                &server_kex_init.compression_algorithms_server_to_client)
-            .ok_or(KexError::NoCommonCompressionAlgorithm)?;
+            &client_kex_init.compression_algorithms_server_to_client,
+            &server_kex_init.compression_algorithms_server_to_client,
+        )
+        .ok_or(KexError::NoCommonCompressionAlgorithm)?;
 
         let mac_algorithm_client_to_server = common_algorithm(
-                &client_kex_init.mac_algorithms_client_to_server,
-                &server_kex_init.mac_algorithms_client_to_server);
+            &client_kex_init.mac_algorithms_client_to_server,
+            &server_kex_init.mac_algorithms_client_to_server,
+        );
         let mac_algorithm_server_to_client = common_algorithm(
-                &client_kex_init.mac_algorithms_server_to_client,
-                &server_kex_init.mac_algorithms_server_to_client);
+            &client_kex_init.mac_algorithms_server_to_client,
+            &server_kex_init.mac_algorithms_server_to_client,
+        );
 
         // Emit next state and messages based on negotiated kex algorithm
         match kex_algorithm {
@@ -83,8 +90,8 @@ impl <A: EcdhAlgorithm> Ecdh<A> {
                     compression_algorithm_client_to_server,
                     compression_algorithm_server_to_client,
                 })
-            },
-            _ => panic!("kex algorithm not supported")
+            }
+            _ => panic!("kex algorithm not supported"),
         }
     }
 
@@ -92,11 +99,17 @@ impl <A: EcdhAlgorithm> Ecdh<A> {
         &self.client_dh_init
     }
 
-    pub fn reply(self, ecdh_reply: KexEcdhReply<A>, client_id: &Identification, server_id: &Identification, session_id: &SessionId) -> Result<KexOutput, KexError> {
+    pub fn reply(
+        self,
+        ecdh_reply: KexEcdhReply<A>,
+        client_id: &Identification,
+        server_id: &Identification,
+        session_id: &SessionId,
+    ) -> Result<KexOutput, KexError> {
         // Compute the DH shared secret
         let k = A::diffie_hellman(self.client_dh_secret, &ecdh_reply.dh_public);
         // Compute the exchange hash over the data exchanged so far
-        let h: [u8;32] = KexEcdhHash::<A> {
+        let h: [u8; 32] = KexEcdhHash::<A> {
             client_identification: &client_id,
             server_identification: &server_id,
             client_kex_init: &self.client_kex_init,
@@ -105,7 +118,8 @@ impl <A: EcdhAlgorithm> Ecdh<A> {
             dh_client_key: &self.client_dh_public,
             dh_server_key: &ecdh_reply.dh_public,
             dh_secret: A::secret_as_ref(&k),
-        }.sha256();
+        }
+        .sha256();
 
         let key_streams = if session_id.is_uninitialized() {
             KeyStreams::new_sha256(A::secret_as_ref(&k), &h, &h)
@@ -114,7 +128,11 @@ impl <A: EcdhAlgorithm> Ecdh<A> {
         };
 
         Ok(KexOutput {
-            session_id: if session_id.is_uninitialized() { Some(SessionId::from(h)) } else { None },
+            session_id: if session_id.is_uninitialized() {
+                Some(SessionId::from(h))
+            } else {
+                None
+            },
             key_streams,
             encryption_algorithm_client_to_server: self.encryption_algorithm_client_to_server,
             encryption_algorithm_server_to_client: self.encryption_algorithm_server_to_client,
@@ -153,7 +171,7 @@ fn common_algorithm<T: Clone + PartialEq>(client: &Vec<T>, server: &Vec<T>) -> O
     for c in client {
         for s in server {
             if c == s {
-                return Some(c.clone())
+                return Some(c.clone());
             }
         }
     }

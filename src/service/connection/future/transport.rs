@@ -110,22 +110,22 @@ pub fn poll<T: TransportStream>(
         None => (),
         Some(msg) => {
             let _: MsgChannelOpenConfirmation<Session> = msg;
-            let r: ChannelOpenRequest = x.request_receiver.take()?;
-            let shared = Arc::new(Mutex::new(Default::default()));
-            let state = ChannelState {
-                is_closing: false,
-                local_channel: msg.recipient_channel,
-                local_window_size: r.initial_window_size,
-                local_max_packet_size: r.max_packet_size,
-                remote_channel: msg.sender_channel,
-                remote_window_size: msg.initial_window_size,
-                remote_max_packet_size: msg.maximum_packet_size,
-                shared: TypedState::Session(shared.clone()),
-            };
-            let session: Session = Session { channel: shared };
+            let state = x.request_receiver.complete(|r: ChannelOpenRequest| {
+                let shared = Arc::new(Mutex::new(Default::default()));
+                let state = ChannelState {
+                    is_closing: false,
+                    local_channel: msg.recipient_channel,
+                    local_window_size: r.initial_window_size,
+                    local_max_packet_size: r.max_packet_size,
+                    remote_channel: msg.sender_channel,
+                    remote_window_size: msg.initial_window_size,
+                    remote_max_packet_size: msg.maximum_packet_size,
+                    shared: TypedState::Session(shared.clone()),
+                };
+                let session: Session = Session { channel: shared };
+                Ok((Ok(session), state))
+            })?;
             x.channels.insert(state)?;
-            x.request_receiver
-                .respond(ConnectionResponse::OpenSession(session))?;
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }
@@ -134,9 +134,10 @@ pub fn poll<T: TransportStream>(
         None => (),
         Some(msg) => {
             let _: MsgChannelOpenFailure = msg;
-            let _: ChannelOpenRequest = x.request_receiver.take()?;
-            x.request_receiver
-                .respond(ConnectionResponse::OpenFailure(msg.reason))?;
+            x.request_receiver.complete(|_: ChannelOpenRequest|{
+                let failure = ChannelOpenFailure { reason: msg.reason };
+                Ok((Err(failure), ()))
+            })?;
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }

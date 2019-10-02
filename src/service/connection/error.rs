@@ -1,28 +1,36 @@
 use super::*;
-use crate::requestable;
 
 use std::sync::PoisonError;
 
 #[derive(Copy, Clone, Debug)]
 pub enum ConnectionError {
-    Canceled,
+    Terminated,
+    IoError(std::io::ErrorKind),
+    TransportError(TransportError),
     PoisonError,
     CommandStreamExhausted,
     TransportStreamExhausted,
     InvalidChannelId,
     InvalidChannelState,
-    ChannelOpenFailure(ChannelOpenFailureReason),
+    ChannelOpenFailure(ChannelOpenFailure),
     ChannelRequestFailure,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
     ChannelWindowSizeUnderrun,
-    RequestError(requestable::Error),
-    TransportError(TransportError),
+    RequestSenderDropped,
+    RequestReceiverDropped,
+    RequestUnexpectedResponse,
 }
 
 impl <T> From<PoisonError<T>> for ConnectionError {
     fn from(_: PoisonError<T>) -> Self {
         Self::PoisonError
+    }
+}
+
+impl From<std::io::Error> for ConnectionError {
+    fn from(e: std::io::Error) -> Self {
+        Self::IoError(e.kind())
     }
 }
 
@@ -32,20 +40,8 @@ impl From<TransportError> for ConnectionError {
     }
 }
 
-impl From<futures::channel::oneshot::Canceled> for ConnectionError {
-    fn from(_: futures::channel::oneshot::Canceled) -> Self {
-        Self::Canceled
-    }
-}
-
-impl From<requestable::Error> for ConnectionError {
-    fn from(e: requestable::Error) -> Self {
-        Self::RequestError(e)
-    }
-}
-
-impl From<ChannelOpenFailureReason> for ConnectionError {
-    fn from(e: ChannelOpenFailureReason) -> Self {
+impl From<ChannelOpenFailure> for ConnectionError {
+    fn from(e: ChannelOpenFailure) -> Self {
         Self::ChannelOpenFailure(e)
     }
 }

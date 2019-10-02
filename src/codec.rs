@@ -44,24 +44,6 @@ impl Encode for () {
     }
 }
 
-impl Encode for u8 {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u8>()
-    }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(*self)
-    }
-}
-
-impl Encode for u32 {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u32>()
-    }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u32be(*self)
-    }
-}
-
 impl Decode for () {
     fn decode<'a, D: Decoder<'a>>(_: &mut D) -> Option<Self> {
         Some(())
@@ -78,8 +60,8 @@ impl Encode for String {
     }
 }
 
-impl<'a> DecodeRef<'a> for String {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+impl Decode for String {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         c.take_string(len as usize)
     }

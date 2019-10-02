@@ -1,9 +1,8 @@
 use rssh::client::*;
 use rssh::service::connection::*;
-use std::future::Future;
-use env_logger;
-use log::*;
+use futures::io::AsyncReadExt;
 
+use env_logger;
 
 async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
     log::error!("CONNECTED");
@@ -13,8 +12,10 @@ async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
     log::info!("SESSION OPEN");
 
     async_std::task::sleep(std::time::Duration::from_secs(10)).await;
-    let process = session.exec("/bin/date".into()).await?;
-    log::info!("PROCESS STARTED");
+    let mut process = session.exec("/bin/date".into()).await?;
+    let mut buf: [u8;32] = [0;32];
+    process.read(&mut buf).await?;
+    log::error!("READ STDOUT {:?}", String::from_utf8(Vec::from(&buf[..])));
 
     async_std::task::sleep(std::time::Duration::from_secs(10)).await;    
     conn.disconnect().await;
@@ -24,18 +25,12 @@ async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
 
 fn main() {
     env_logger::init();
-    info!("shdksjhda");
 
     futures::executor::block_on(async move {
-        let mut client = Client::default();
-        //*client.user_name() = None;
-        let conn = client
-            .connect("localhost:22")
-            .await;
-        log::error!("OOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOOO");
-        match conn {
+        let client = Client::default();
+        match client.connect("localhost:22").await {
             Err(e) => println!("{:?}", e),
-            Ok(mut conn) => {
+            Ok(conn) => {
                 match foobar(conn).await {
                     Ok(()) => log::info!("Allright."),
                     Err(e) => log::error!("Exit: {:?}", e),

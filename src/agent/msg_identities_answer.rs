@@ -20,8 +20,8 @@ impl Encode for MsgIdentitiesAnswer {
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgIdentitiesAnswer {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgIdentitiesAnswer {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::MSG_NUMBER)?;
         Self {
             identities: DecodeRef::decode(d)?,
@@ -86,7 +86,7 @@ mod test {
                     "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so".into(),
                 ),
                 (
-                    PublicKey::Ed25519PublicKey(Ed25519PublicKey([
+                    PublicKey::Ed25519PublicKey(SshEd25519PublicKey([
                         111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178,
                         182, 197, 240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63,
                     ])),

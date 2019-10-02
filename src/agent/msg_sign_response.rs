@@ -2,7 +2,7 @@ use crate::codec::*;
 
 use crate::algorithm::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MsgSignResponse<S: SignatureAlgorithm> {
     pub signature: S::Signature,
 }
@@ -24,14 +24,52 @@ where
     }
 }
 
-impl <'a, S: SignatureAlgorithm> DecodeRef<'a> for MsgSignResponse<S>
+impl <S: SignatureAlgorithm> Decode for MsgSignResponse<S>
 where
-    S::Signature: DecodeRef<'a>
+    S::Signature: Decode
 {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.expect_u8(Self::MSG_NUMBER)?;
         Self {
             signature: DecodeRef::decode(d)?
         }.into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[derive(Debug, PartialEq)]
+    pub struct Foobar {}
+
+    impl SignatureAlgorithm for Foobar {
+        const NAME: &'static str = "foobar";
+
+        type PublicKey = ();
+        type PrivateKey = ();
+        type Signature = String;
+        type SignatureFlags = u32;
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg: MsgSignResponse<Foobar> = MsgSignResponse {
+            signature: "SIGNATURE".into(),
+        };
+        assert_eq!(
+            vec![14, 0, 0, 0, 9, 83, 73, 71, 78, 65, 84, 85, 82, 69],
+            BEncoder::encode(&msg)
+        );
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let msg: MsgSignResponse<Foobar> = MsgSignResponse {
+            signature: "SIGNATURE".into(),
+        };
+        assert_eq!(Some(msg),
+            BDecoder::decode(&[14, 0, 0, 0, 9, 83, 73, 71, 78, 65, 84, 85, 82, 69][..])
+        );
     }
 }

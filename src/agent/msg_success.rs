@@ -16,9 +16,9 @@ impl Encode for MsgSuccess {
     }
 }
 
-impl <'a> DecodeRef<'a> for MsgSuccess {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+impl Decode for MsgSuccess {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
     }
 }

@@ -6,7 +6,6 @@ use super::channel::*;
 use super::msg_channel_open::*;
 use super::*;
 
-use crate::requestable;
 use crate::transport::*;
 
 use futures::future::Future;
@@ -16,16 +15,16 @@ use std::pin::*;
 
 pub struct ConnectionFuture<T> {
     pub transport: Transport<T>,
-    pub request_sender: requestable::Sender<Connection>,
-    pub request_receiver: requestable::Receiver<Connection>,
+    pub request_sender: RequestSender,
+    pub request_receiver: RequestReceiver,
     pub channels: ChannelMap,
 }
 
 impl<T: TransportStream> ConnectionFuture<T> {
     pub fn new(
         transport: Transport<T>,
-        request_sender: requestable::Sender<Connection>,
-        request_receiver: requestable::Receiver<Connection>,
+        request_sender: RequestSender,
+        request_receiver: RequestReceiver,
     ) -> Self {
         Self {
             transport,

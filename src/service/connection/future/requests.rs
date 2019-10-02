@@ -1,8 +1,7 @@
 use super::{
-    ChannelOpenFailureReason, ConnectionError, ConnectionRequest, MsgChannelOpen, Session,
+    ChannelOpenFailure, ChannelOpenFailureReason, ChannelOpenRequest, ConnectionError,
+    ConnectionFuture, DisconnectRequest, MsgChannelOpen, Request, Session,
 };
-
-use super::{ConnectionFuture, ConnectionResponse};
 use crate::transport::*;
 
 use futures::ready;
@@ -13,40 +12,37 @@ pub fn poll<T: TransportStream>(
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     match ready!(x.request_receiver.poll(cx))? {
-        ConnectionRequest::Debug(ref msg) => {
-            log::debug!("Command::Debug");
-            let msg = MsgDebug::new(msg.clone());
-            ready!(x.transport.poll_send(cx, &msg))?;
-            x.request_receiver.accept()?;
-            x.request_receiver.respond(ConnectionResponse::Ok)?;
-            return Poll::Ready(Ok(()));
-        }
-        ConnectionRequest::Disconnect => {
+        Request::Disconnect(_) => {
             log::debug!("Command::Disconnect");
             let msg = MsgDisconnect::by_application("".into());
             ready!(x.transport.poll_send(cx, &msg))?;
-            x.request_receiver.accept()?;
-            x.request_receiver.respond(ConnectionResponse::Ok)?;
+            x.request_receiver.accept();
+            x.request_receiver
+                .complete(|_: DisconnectRequest| Ok(((), ())))?;
             return Poll::Ready(Ok(()));
         }
-        ConnectionRequest::ChannelOpen(r) => {
+        Request::ChannelOpen(r) => {
             log::debug!("Command::ChannelOpenSession");
             match x.channels.free() {
                 None => {
                     // In case of local channel shortage, reject the request.
-                    x.request_receiver.accept()?;
-                    x.request_receiver
-                        .respond(ChannelOpenFailureReason::RESOURCE_SHORTAGE)?;
+                    x.request_receiver.accept();
+                    x.request_receiver.complete(|r: ChannelOpenRequest| {
+                        let failure = ChannelOpenFailure {
+                            reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
+                        };
+                        Ok((Err(failure), ()))
+                    })?;
                 }
                 Some(local_channel) => {
                     let msg: MsgChannelOpen<Session> = MsgChannelOpen {
                         sender_channel: local_channel,
-                        initial_window_size: r.initial_window_size,
-                        maximum_packet_size: r.max_packet_size,
+                        initial_window_size: r.input.initial_window_size,
+                        maximum_packet_size: r.input.max_packet_size,
                         channel_type: (),
                     };
                     ready!(x.transport.poll_send(cx, &msg))?;
-                    x.request_receiver.accept()?;
+                    x.request_receiver.accept();
                 }
             }
             return Poll::Ready(Ok(()));

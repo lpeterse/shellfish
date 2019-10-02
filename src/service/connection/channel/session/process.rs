@@ -23,8 +23,17 @@ impl Process {
     }
 }
 
-pub struct Stdin<'a>(&'a mut Process);
+impl AsyncRead for Process {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &mut [u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
+        Pin::new(&mut (self.stdout())).poll_read(cx, buf)
+    }
+}
 
+pub struct Stdin<'a>(&'a mut Process);
 
 pub struct Stdout<'a>(&'a mut Process);
 

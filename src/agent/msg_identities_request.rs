@@ -16,8 +16,8 @@ impl Encode for MsgIdentitiesRequest {
     }
 }
 
-impl <'a> DecodeRef<'a> for MsgIdentitiesRequest {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgIdentitiesRequest {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::MSG_NUMBER)?;
         Self {}.into()
     }
