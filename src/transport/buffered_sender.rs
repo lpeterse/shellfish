@@ -1,5 +1,6 @@
 use async_std::io::Write;
 use futures::io::AsyncWrite;
+use futures::io::AsyncWriteExt;
 use std::pin::*;
 use futures::ready;
 use futures::task::{Poll,Context};

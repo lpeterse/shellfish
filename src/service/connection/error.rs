@@ -1,18 +1,12 @@
 use super::*;
 
-use std::sync::PoisonError;
-
 #[derive(Copy, Clone, Debug)]
 pub enum ConnectionError {
     Terminated,
     IoError(std::io::ErrorKind),
     TransportError(TransportError),
-    PoisonError,
-    CommandStreamExhausted,
-    TransportStreamExhausted,
-    InvalidChannelId,
-    InvalidChannelState,
     ChannelOpenFailure(ChannelOpenFailure),
+    ChannelIdInvalid,
     ChannelRequestFailure,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
@@ -20,12 +14,6 @@ pub enum ConnectionError {
     RequestSenderDropped,
     RequestReceiverDropped,
     RequestUnexpectedResponse,
-}
-
-impl <T> From<PoisonError<T>> for ConnectionError {
-    fn from(_: PoisonError<T>) -> Self {
-        Self::PoisonError
-    }
 }
 
 impl From<std::io::Error> for ConnectionError {

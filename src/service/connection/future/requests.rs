@@ -27,7 +27,7 @@ pub fn poll<T: TransportStream>(
                 None => {
                     // In case of local channel shortage, reject the request.
                     x.request_receiver.accept();
-                    x.request_receiver.complete(|r: ChannelOpenRequest| {
+                    x.request_receiver.complete(|_: ChannelOpenRequest| {
                         let failure = ChannelOpenFailure {
                             reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
                         };

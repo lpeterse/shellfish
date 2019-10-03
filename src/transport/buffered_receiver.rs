@@ -1,5 +1,5 @@
 use async_std::io::Read;
-use futures::io::AsyncRead;
+use futures::io::{AsyncRead, AsyncReadExt};
 use futures::ready;
 use futures::task::{Context, Poll};
 use std::ops::Range;

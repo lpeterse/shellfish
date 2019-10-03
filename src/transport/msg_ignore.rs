@@ -2,7 +2,7 @@ use crate::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgIgnore<'a> {
-    data: &'a [u8]
+    pub data: &'a [u8]
 }
 
 impl <'a> MsgIgnore<'a> {

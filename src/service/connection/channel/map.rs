@@ -27,7 +27,7 @@ impl ChannelMap {
     pub fn get(&mut self, id: u32) -> Result<&mut ChannelState, ConnectionError> {
         match self.elements.get_mut(id as usize) {
             Some(Some(t)) => Ok(t),
-            _ => Err(ConnectionError::InvalidChannelId),
+            _ => Err(ConnectionError::ChannelIdInvalid),
         }
     }
 

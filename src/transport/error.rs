@@ -10,6 +10,7 @@ pub enum TransportError {
     UnexpectedMessageType(u8),
     DisconnectByUs,
     DisconnectByPeer,
+    InactivityTimeout,
 }
 
 impl From<std::io::Error> for TransportError {

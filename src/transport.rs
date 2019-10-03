@@ -34,16 +34,17 @@ use crate::codec::*;
 
 use async_std::io::{Read, Write};
 use async_std::net::TcpStream;
+use futures::future::FutureExt;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, ReadHalf, WriteHalf};
 use futures::ready;
 use futures::task::Context;
 use futures::task::Poll;
+use futures_timer::Delay;
 use log;
 use std::convert::From;
 use std::marker::Unpin;
 use std::option::Option;
 use std::pin::Pin;
-use std::time::Instant;
 
 pub enum Role {
     Client,
@@ -59,6 +60,8 @@ pub struct TransportConfig {
     identification: Identification,
     rekey_bytes: u64,
     rekey_interval: std::time::Duration,
+    alive_interval: std::time::Duration,
+    inactivity_timeout: std::time::Duration,
 }
 
 impl Default for TransportConfig {
@@ -67,6 +70,8 @@ impl Default for TransportConfig {
             identification: Identification::default(),
             rekey_bytes: 1_000_000_000,
             rekey_interval: std::time::Duration::from_secs(3600),
+            alive_interval: std::time::Duration::from_secs(300),
+            inactivity_timeout: std::time::Duration::from_secs(330),
         }
     }
 }
@@ -84,12 +89,14 @@ pub struct Transport<T> {
     packets_sent: u64,
     bytes_received: u64,
     packets_received: u64,
-    kex_last_time: Instant,
     kex_last_bytes_received: u64,
     kex_last_bytes_sent: u64,
     encryption_ctx: EncryptionContext,
     decryption_ctx: EncryptionContext,
     inbox: Option<usize>,
+    rekey_timer: Delay,
+    alive_timer: Delay,
+    inactivity_timer: Delay,
 }
 
 impl<T: TransportStream> Transport<T> {
@@ -109,6 +116,10 @@ impl<T: TransportStream> Transport<T> {
         Self::send_id(&mut sender, &config.identification).await?;
         let remote_id = Self::receive_id(&mut receiver).await?;
 
+        let rekey_timer = Delay::new(config.rekey_interval);
+        let alive_timer = Delay::new(config.alive_interval);
+        let inactivity_timer = Delay::new(config.inactivity_timeout);
+
         let mut t = Transport {
             config,
             role,
@@ -120,12 +131,14 @@ impl<T: TransportStream> Transport<T> {
             packets_sent: 0,
             bytes_received: 0,
             packets_received: 0,
-            kex_last_time: Instant::now(),
             kex_last_bytes_sent: 0,
             kex_last_bytes_received: 0,
             encryption_ctx: EncryptionContext::new(),
             decryption_ctx: EncryptionContext::new(),
             inbox: None,
+            rekey_timer,
+            alive_timer,
+            inactivity_timer,
         };
 
         t.kex(None).await?;
@@ -180,8 +193,7 @@ impl<T: TransportStream> Transport<T> {
     async fn rekey_if_necessary(&mut self) -> Result<(), TransportError> {
         let bytes_sent_since = self.bytes_sent - self.kex_last_bytes_sent;
         let bytes_received_since = self.bytes_received - self.kex_last_bytes_received;
-        if self.kex_last_time.elapsed() > self.config.rekey_interval
-            || bytes_sent_since > self.config.rekey_bytes
+        if bytes_sent_since > self.config.rekey_bytes
             || bytes_received_since > self.config.rekey_bytes
         {
             self.rekey().await?
@@ -243,7 +255,7 @@ impl<T: TransportStream> Transport<T> {
             }
             Role::Server => panic!("server role not implemented yet"),
         };
-        self.kex_last_time = Instant::now();
+        self.rekey_timer.reset(self.config.rekey_interval);
         self.kex_last_bytes_received = self.bytes_received;
         self.kex_last_bytes_sent = self.bytes_sent;
         // The session id will only be set after the initial key exchange
@@ -317,11 +329,43 @@ impl<T: TransportStream> Transport<T> {
             .map(|x| x.map_err(Into::into))
     }
 
+    pub fn poll_housekeeping(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        // Return exception when inactivity timer fired.
+        match self.inactivity_timer.poll_unpin(cx) {
+            Poll::Pending => (),
+            Poll::Ready(_) => return Poll::Ready(Err(TransportError::InactivityTimeout)),
+        }
+        // Initiate rekey when corrsponding timer fired.
+        match self.rekey_timer.poll_unpin(cx) {
+            Poll::Pending => (),
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(TransportError::IoError(e.kind()))),
+            Poll::Ready(Ok(())) => {
+                // TODO: INITIATE REKEYING
+            }
+        }
+        // Send MsgIgnore when no other data has been sent for the configured interval.
+        match self.alive_timer.poll_unpin(cx) {
+            Poll::Pending => (),
+            Poll::Ready(Err(e)) => return Poll::Ready(Err(TransportError::IoError(e.kind()))),
+            Poll::Ready(Ok(())) => {
+                let data = [];
+                let msg = MsgIgnore { data: &data[..] };
+                match self.poll_send(cx, &msg) {
+                    // Fail with inactivity timeout when immediate sending fails.
+                    // The peer must be blocking or the connection is otherwise faulty.
+                    Poll::Pending => return Poll::Ready(Err(TransportError::InactivityTimeout)),
+                    Poll::Ready(x) => return Poll::Ready(x),
+                }
+            }
+        }
+        Poll::Pending
+    }
+
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         if self.inbox.is_some() {
-            log::error!("POLL READY");
             return Poll::Ready(Ok(()));
         }
+
         let s = self;
         let pc = s.packets_received;
         let mut r = Pin::new(&mut s.receiver);
