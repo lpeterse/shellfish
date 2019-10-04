@@ -5,6 +5,10 @@ pub struct NewKeys {}
 
 impl NewKeys {
     const MSG_NUMBER: u8 = 21;
+
+    pub fn new() -> Self {
+        Self {}
+    }
 }
 
 impl Encode for NewKeys {
@@ -16,9 +20,9 @@ impl Encode for NewKeys {
     }
 }
 
-impl <'a> DecodeRef<'a> for NewKeys {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        c.take_u8().filter(|x| x == &Self::MSG_NUMBER)?;
+impl Decode for NewKeys {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        c.expect_u8(Self::MSG_NUMBER)?;
         Some(Self {})
     }
 }

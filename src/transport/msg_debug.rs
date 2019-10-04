@@ -4,7 +4,7 @@ use crate::language::*;
 #[derive(Clone, Debug)]
 pub struct MsgDebug {
     always_display: bool,
-    message: String,
+    message: String, // TODO: str
     language: Language,
 }
 

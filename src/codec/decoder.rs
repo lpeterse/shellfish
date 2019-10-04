@@ -19,7 +19,12 @@ pub trait Decoder<'a>: Clone {
     fn take_match<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
     // Convenience with default implementation
     fn expect_u8(&mut self, x: u8) -> Option<()> {
-        self.take_u8().filter(|y| *y == x).map(drop)
+        let self_ = self.clone();
+        let r = self.take_u8().filter(|y| *y == x).map(drop);
+        if r.is_none() {
+            *self = self_;
+        }
+        r
     }
     fn expect_u32be(&mut self, x: u32) -> Option<()> {
         self.take_u32be().filter(|y| *y == x).map(drop)

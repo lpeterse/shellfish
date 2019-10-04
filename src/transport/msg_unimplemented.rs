@@ -1,6 +1,6 @@
 use crate::codec::*;
 
-#[derive(Clone, Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct MsgUnimplemented {
     pub packet_number: u32
 }

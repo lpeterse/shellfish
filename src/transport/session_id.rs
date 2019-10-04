@@ -1,15 +1,20 @@
 use crate::codec::*;
 
+#[derive(Copy, Clone)]
 pub enum SessionId {
     None,
     SessionId32([u8;32])
 }
 
 impl SessionId {
-    pub fn is_uninitialized(&self) -> bool {
+    pub fn new() -> Self {
+        Self::None
+    }
+    pub fn set_if_uninitialized(&mut self, x: [u8;32]) {
+        // The session id must only be set once, just ignore new values.
         match self {
-            Self::None => true,
-            _ => false,
+            Self::None => *self = SessionId::SessionId32(x),
+            _ => (),
         }
     }
 }
@@ -23,7 +28,7 @@ impl From<[u8;32]> for SessionId {
 impl AsRef<[u8]> for SessionId {
     fn as_ref(&self) -> &[u8] {
         match self {
-            Self::None => &[],
+            Self::None => panic!("session id uninitialized"),
             Self::SessionId32(x) => x.as_ref(),
         }
     }

@@ -14,6 +14,7 @@ pub trait EcdhAlgorithm {
     fn secret_as_ref(x: &Self::SharedSecret) -> &[u8];
 }
 
+#[derive(Debug)]
 pub struct X25519 {}
 
 impl EcdhAlgorithm for X25519 {
@@ -53,8 +54,8 @@ impl Encode for x25519_dalek::PublicKey {
     }
 }
 
-impl <'a> DecodeRef<'a> for x25519_dalek::PublicKey {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for x25519_dalek::PublicKey {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u32be(32)?;
         let mut buf: [u8;32] = [0;32];
         d.take_into(&mut buf)?;

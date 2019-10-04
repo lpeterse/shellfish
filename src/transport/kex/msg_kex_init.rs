@@ -72,9 +72,9 @@ impl Encode for KexInit {
     }
 }
 
-impl <'a> DecodeRef<'a> for KexInit {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().and_then(|x| if x == Self::MSG_NUMBER { Some(()) } else { None })?;
+impl Decode for KexInit {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.expect_u8(Self::MSG_NUMBER)?;
         let r = Self {
             cookie: KexCookie({ let mut x = [0;16]; d.take_into(&mut x)?; x }),
             kex_algorithms: NameList::decode(d)?,

@@ -29,11 +29,11 @@ where
     }
 }
 
-impl<'a, A: EcdhAlgorithm> DecodeRef<'a> for KexEcdhInit<A>
+impl<A: EcdhAlgorithm> Decode for KexEcdhInit<A>
 where
-    A::PublicKey: DecodeRef<'a>
+    A::PublicKey: Decode
 {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.expect_u8(Self::MSG_NUMBER)?;
         Self {
             dh_public: DecodeRef::decode(c)?,

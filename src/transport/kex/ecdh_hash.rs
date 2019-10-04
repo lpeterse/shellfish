@@ -1,4 +1,4 @@
-use super::{KexInit};
+use super::msg_kex_init::KexInit;
 use crate::transport::identification::*;
 use crate::keys::*;
 use crate::codec::*;

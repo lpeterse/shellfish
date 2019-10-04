@@ -21,14 +21,7 @@ pub fn poll<T: TransportStream>(
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
 
-    /*match x.transport.poll_idle_timeout(cx) {
-        Poll::Pending => (),
-        Poll::Ready(x) => {
-            x?;
-            log::error!("IDLE TIMEOUT");
-        }
-    }*/
-
+    //ready!(x.transport.poll_kex(cx))?;
     ready!(x.transport.poll_receive(cx))?;
     log::info!("INBOUND MESSAGE");
     match x.transport.decode() {

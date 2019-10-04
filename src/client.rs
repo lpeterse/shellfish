@@ -15,8 +15,9 @@ pub struct Client {
 impl Client {
     pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<Connection, ConnectError> {
         let stream = TcpStream::connect(addr).await?;
+        let config = TransportConfig::default();
         let transport: Transport<TcpStream> =
-            Transport::new(Default::default(), stream, Role::Client).await?;
+            Transport::new(&config, stream).await?;
         let transport = match self.user_name {
             None => {
                 transport

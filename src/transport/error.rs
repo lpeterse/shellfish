@@ -7,6 +7,7 @@ pub enum TransportError {
     KexError(KexError),
     BadPacketLength,
     MessageIntegrity,
+    MessageUnimplemented(MsgUnimplemented),
     UnexpectedMessageType(u8),
     DisconnectByUs,
     DisconnectByPeer,
