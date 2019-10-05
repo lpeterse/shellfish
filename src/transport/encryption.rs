@@ -51,14 +51,14 @@ impl EncryptionContext {
         }
     }
 
-    pub fn decrypt_len(&self, pc: u64, len: [u8; 4]) -> usize {
+    pub fn decrypt_len(&self, pc: u64, len: [u8; 4]) -> Option<usize> {
         match self {
             Self::Plain(ctx) => ctx.decrypt_len(pc, len),
             Self::Chacha20Poly1305(ctx) => ctx.decrypt_len(pc, len),
         }
     }
 
-    pub fn decrypt_packet<'a>(&self, pc: u64, buf: &'a mut [u8]) -> Option<&'a [u8]> {
+    pub fn decrypt_packet(&self, pc: u64, buf: &mut [u8]) -> Option<usize> {
         match self {
             Self::Plain(ctx) => ctx.decrypt_packet(pc, buf),
             Self::Chacha20Poly1305(ctx) => ctx.decrypt_packet(pc, buf),

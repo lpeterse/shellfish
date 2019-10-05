@@ -3,6 +3,7 @@ use futures::io::AsyncWrite;
 use futures::io::AsyncWriteExt;
 use std::pin::*;
 use futures::ready;
+use futures::future::poll_fn;
 use futures::task::{Poll,Context};
 use std::ops::Range;
 
@@ -33,45 +34,15 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
         self.buffer.len() - self.window.end
     }
 
-    pub fn reserve(&mut self, len: usize) -> Option<&mut [u8]> {
-        assert!(len <= MAX_BUFFER_SIZE);
-        if self.available() < len {
-            None
-        } else {
-            let start = self.window.end;
-            self.window.end += len;
-            let end = self.window.end;
-            Some(&mut self.buffer[start .. end])
-        }
-    }
-
-    pub async fn alloc(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
-        let available = self.buffer.len() - self.window.end;
-        if available < len {
-            self.flush().await?;
-        }
-        let available = self.buffer.len();
-        if available < len {
-            let mut new_size = available;
-            loop {
-                new_size *= 2;
-                if new_size >= MAX_BUFFER_SIZE {
-                    return Err(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "max buffer size exhausted",
-                    ));
-                };
-                if new_size >= len {
-                    break;
-                };
-            }
-            let mut vec = Vec::with_capacity(new_size);
-            vec.resize(new_size, 0);
-            self.buffer = vec.into_boxed_slice();
-        }
-        let start = self.window.end;
-        self.window.end += len;
-        Ok(&mut self.buffer[start..self.window.end])
+    // FIXME: This function should not exist
+    pub async fn reserve(&mut self, len: usize) -> Result<&mut [u8], std::io::Error> {
+        poll_fn(|cx| {
+            ready!(self.poll_reserve(cx, len))?;
+            Poll::Ready(Ok::<(), std::io::Error>(()))
+        }).await?;
+        let start = self.window.end - len;
+        let end = self.window.end;
+        Ok(&mut self.buffer[start..end])
     }
 
     pub async fn flush(&mut self) -> async_std::io::Result<()> {
@@ -86,27 +57,47 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
         self.window.len() == 0
     }
 
-    pub fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), std::io::Error>> {
-        let s = Pin::into_inner(self);
+    pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), std::io::Error>> {
         loop {
-            if s.window.len() == 0 {
+            if self.window.len() == 0 {
                 return Poll::Ready(Ok(()))
             }
-            let buf = &s.buffer[s.window.start .. s.window.end];
-            match ready!(Pin::new(&mut s.stream).poll_write(cx, buf)) {
+            let buf = &self.buffer[self.window.start .. self.window.end];
+            match ready!(Pin::new(&mut self.stream).poll_write(cx, buf)) {
                 Err(e) => {
                     return Poll::Ready(Err(e));
                 }
                 Ok(written) => {
-                    s.window.start += written;
-                    if s.window.len() == 0 {
-                        s.window = Range { start: 0, end: 0 };
+                    self.window.start += written;
+                    if self.window.len() == 0 {
+                        self.window = Range { start: 0, end: 0 };
                         return Poll::Ready(Ok(()))
                     }
                     continue;
                 }
             }
         }
+    }
+
+    pub fn poll_reserve(&mut self, cx: &mut Context, len: usize) -> Poll<Result<&mut [u8], std::io::Error>> {
+        assert!(len <= MAX_BUFFER_SIZE);
+        // If the available space is insufficient, first try to flush the buffer.
+        if self.available() < len {
+            ready!(self.poll_flush(cx))?;
+        }
+        // If the available space is still insufficient, resize the buffer.
+        // Copying data is not necessary as the buffer is flushed.
+        if self.available() < len {
+            let mut vec = Vec::with_capacity(len);
+            vec.resize(len, 0);
+            self.buffer = vec.into_boxed_slice();
+            self.window.start = 0;
+            self.window.end = 0;
+        }
+        // The buffer window (unsent data) is extended to the right by requested len.
+        let start = self.window.end;
+        self.window.end += len;
+        Poll::Ready(Ok(&mut self.buffer[start..self.window.end]))
     }
 }
 

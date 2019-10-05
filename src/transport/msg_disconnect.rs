@@ -3,9 +3,9 @@ use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgDisconnect<'a> {
-    reason: Reason,
-    description: &'a str,
-    language: &'a str,
+    pub reason: Reason,
+    pub description: &'a str,
+    pub language: &'a str,
 }
 
 impl<'a> MsgDisconnect<'a> {
@@ -48,7 +48,7 @@ impl<'a> DecodeRef<'a> for MsgDisconnect<'a> {
     }
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Reason(u32);
 
 impl Reason {

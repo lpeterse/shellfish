@@ -1,9 +1,10 @@
 use async_std::io::Read;
-use futures::io::{AsyncRead, AsyncReadExt};
+use futures::io::{AsyncRead};
 use futures::ready;
 use futures::task::{Context, Poll};
 use std::ops::Range;
 use std::pin::Pin;
+use std::io::{Error, ErrorKind};
 
 const MIN_BUFFER_SIZE: usize = 1100;
 const MAX_BUFFER_SIZE: usize = 35000;
@@ -177,8 +178,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         }
         // Case 4: no remaining capacity at all, MAX_BUFFER_SIZE reached -> err
         else {
-            return Poll::Ready(Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Poll::Ready(Err(Error::new(ErrorKind::Other,
                 "max buffer size exhausted",
             )));
         }
@@ -224,6 +224,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
 #[cfg(test)]
 mod test {
     use super::*;
+    use futures::io::AsyncReadExt;
 
     struct ChunkedStream(Vec<Vec<u8>>);
 

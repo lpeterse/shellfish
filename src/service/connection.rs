@@ -27,6 +27,7 @@ use crate::codec::*;
 use crate::transport::*;
 use crate::role::*;
 use crate::client::*;
+use crate::socket::*;
 
 use futures::channel::oneshot;
 use futures::future::FutureExt;
@@ -43,7 +44,7 @@ impl <R: Role> Service for Connection<R> {
 }
 
 impl <R: Role> Connection<R> {
-    pub fn new<T: TransportStream>(t: Transport<R, T>) -> Connection<R> {
+    pub fn new<T: Socket>(t: Transport<R, T>) -> Connection<R> {
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();

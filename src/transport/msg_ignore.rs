@@ -3,14 +3,20 @@ use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgIgnore<'a> {
-    pub data: &'a [u8]
+    pub data: &'a [u8],
 }
 
-impl <'a> Message for MsgIgnore<'a> {
+impl<'a> MsgIgnore<'a> {
+    pub fn new() -> Self {
+        Self { data: &[] }
+    }
+}
+
+impl<'a> Message for MsgIgnore<'a> {
     const NUMBER: u8 = 2;
 }
 
-impl <'a> Encode for MsgIgnore<'a> {
+impl<'a> Encode for MsgIgnore<'a> {
     fn size(&self) -> usize {
         1 + Encode::size(&self.data)
     }

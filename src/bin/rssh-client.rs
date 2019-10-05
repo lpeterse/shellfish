@@ -18,7 +18,7 @@ async fn foobar(mut conn: Connection<Client>) -> Result<(), ConnectionError> {
     process.read(&mut buf).await?;
     log::error!("READ STDOUT {:?}", String::from_utf8(Vec::from(&buf[..])));
 
-    //async_std::task::sleep(std::time::Duration::from_secs(10)).await;    
+    async_std::task::sleep(std::time::Duration::from_secs(30)).await;    
     conn.disconnect().await;
     println!("DISCONNE");
     Ok(())

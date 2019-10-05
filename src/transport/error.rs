@@ -1,16 +1,18 @@
 use super::*;
 
+use crate::transport::msg_disconnect::Reason;
+
 #[derive(Debug,Copy,Clone)]
 pub enum TransportError {
     IoError(std::io::ErrorKind),
-    DecoderError,
     KexError(KexError),
+    DecoderError,
     BadPacketLength,
     MessageIntegrity,
-    MessageUnimplemented(MsgUnimplemented),
-    UnexpectedMessageType(u8),
-    DisconnectByUs,
-    DisconnectByPeer,
+    MessageUnexpected,
+    MessageUnimplemented,
+    DisconnectByUs(Reason),
+    DisconnectByPeer(Reason),
     InactivityTimeout,
 }
 

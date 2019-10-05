@@ -17,7 +17,7 @@ use crate::transport::*;
 use futures::task::{Context, Poll};
 use std::sync::{Arc, Mutex};
 
-pub fn poll<R: Role, T: TransportStream>(
+pub fn poll<R: Role, T: Socket>(
     x: &mut ConnectionFuture<R,T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {

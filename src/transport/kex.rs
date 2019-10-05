@@ -26,8 +26,8 @@ pub trait KexMachine {
     fn is_init_sent(&self) -> bool;
     fn is_init_received(&self) -> bool;
     fn is_in_progress<T>(&mut self, cx: &mut Context, t: &mut Transmitter<T>) -> Result<bool, KexError>;
-    fn consume<T: TransportStream>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError>;
-    fn poll_flush<T: TransportStream>(
+    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError>;
+    fn poll_flush<T: Socket>(
         &mut self,
         cx: &mut Context,
         t: &mut Transmitter<T>,

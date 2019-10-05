@@ -59,7 +59,7 @@ impl Agent<Client> {
         // Send request
         let req = MsgIdentitiesRequest {};
         let len = Encode::size(&req);
-        let mut enc = BEncoder::from(s.alloc(4 + len).await?);
+        let mut enc = BEncoder::from(s.reserve(4 + len).await?);
         enc.push_u32be(len as u32);
         Encode::encode(&req, &mut enc);
         s.flush().await?;
@@ -89,7 +89,7 @@ impl Agent<Client> {
         // Send request
         let req: MsgSignRequest<S, D> = MsgSignRequest { key, data, flags };
         let len = Encode::size(&req);
-        let mut enc = BEncoder::from(s.alloc(4 + len).await?);
+        let mut enc = BEncoder::from(s.reserve(4 + len).await?);
         enc.push_u32be(len as u32);
         req.encode(&mut enc);
         s.flush().await?;

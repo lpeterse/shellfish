@@ -4,11 +4,12 @@ use super::{
 };
 use crate::transport::*;
 use crate::role::*;
+use crate::socket::*;
 
 use futures::ready;
 use futures::task::{Context, Poll};
 
-pub fn poll<R: Role, T: TransportStream>(
+pub fn poll<R: Role, T: Socket>(
     x: &mut ConnectionFuture<R,T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {

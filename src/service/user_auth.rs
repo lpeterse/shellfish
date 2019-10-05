@@ -18,6 +18,7 @@ use crate::codec::*;
 use crate::keys::*;
 use crate::transport::*;
 use crate::role::*;
+use crate::socket::*;
 
 pub struct UserAuth {}
 
@@ -26,7 +27,7 @@ impl Service for UserAuth {
 }
 
 impl UserAuth {
-    pub async fn authenticate<R: Role, T: TransportStream>(
+    pub async fn authenticate<R: Role, T: Socket>(
         mut transport: Transport<R, T>,
         service_name: &str,
         user_name: &str,

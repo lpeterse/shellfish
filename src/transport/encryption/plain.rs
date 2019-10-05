@@ -1,6 +1,6 @@
 use super::*;
 
-use std::convert::TryInto;
+use std::ops::Range;
 
 pub struct PlainEncryptionContext {}
 
@@ -20,12 +20,23 @@ impl PlainEncryptionContext {
         layout.pad_zero(buf);
     }
 
-    pub fn decrypt_len(&self, _pc: u64, len: [u8; 4]) -> usize {
-        PacketLayout::PACKET_LEN_SIZE + (u32::from_be_bytes(len) as usize)
+    pub fn decrypt_len(&self, _pc: u64, len: [u8; 4]) -> Option<usize> {
+        let len = PacketLayout::PACKET_LEN_SIZE + (u32::from_be_bytes(len) as usize);
+        if len <= PacketLayout::MAX_PACKET_LEN {
+            Some(len)
+        } else {
+            None
+        }
     }
 
-    pub fn decrypt_packet<'a>(&self, _pc: u64, buf: &'a mut [u8]) -> Option<&'a [u8]> {
-        Some(&buf[PacketLayout::PACKET_LEN_SIZE..])
+    pub fn decrypt_packet<'a>(&self, _pc: u64, buf: &'a mut [u8]) -> Option<usize> {
+        let padding_bytes: usize = *buf.get(PacketLayout::PACKET_LEN_SIZE)? as usize;
+        let overhead = PacketLayout::PACKET_LEN_SIZE + PacketLayout::PADDING_LEN_SIZE + padding_bytes;
+        if buf.len() >= overhead {
+            Some(buf.len() - overhead)
+        } else {
+            None
+        }
     }
 }
 

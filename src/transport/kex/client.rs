@@ -138,7 +138,7 @@ impl KexMachine for ClientKexMachine {
         Ok(())
     }
 
-    fn consume<T: TransportStream>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError> {
+    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError> {
         log::trace!("consume");
         match t.decode() {
             Some(msg) => {
@@ -248,7 +248,7 @@ impl KexMachine for ClientKexMachine {
         return Err(KexError::ProtocolError);
     }
 
-    fn poll_flush<T: TransportStream>(
+    fn poll_flush<T: Socket>(
         &mut self,
         cx: &mut Context,
         t: &mut Transmitter<T>,

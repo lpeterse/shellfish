@@ -7,6 +7,7 @@ use super::msg_channel_open::*;
 use super::*;
 
 use crate::transport::*;
+use crate::socket::*;
 
 use futures::future::Future;
 use futures::ready;
@@ -20,7 +21,7 @@ pub struct ConnectionFuture<R: Role, T> {
     pub channels: ChannelMap,
 }
 
-impl<R: Role, T: TransportStream> ConnectionFuture<R,T> {
+impl<R: Role, T: Socket> ConnectionFuture<R,T> {
     pub fn new(
         transport: Transport<R,T>,
         request_sender: RequestSender,
@@ -77,7 +78,7 @@ impl<R: Role, T: TransportStream> ConnectionFuture<R,T> {
             // again. This is somewhat unlikely and will not occur unless the transport is under
             // heavy load, but it is necessary to consider this for correctness or the connection
             // will stop making progress as soon as single notification gets lost.
-            if !self.transport.flushed() {
+            if !self.transport.is_flushed() {
                 ready!(self.transport.poll_flush(cx))?;
                 continue;
             }
@@ -90,7 +91,7 @@ impl<R: Role, T: TransportStream> ConnectionFuture<R,T> {
 
 impl<R: Role, T> Future for ConnectionFuture<R,T>
 where
-    T: Unpin + TransportStream,
+    T: Unpin + Socket,
 {
     type Output = Result<(), ConnectionError>;
 

@@ -13,6 +13,7 @@ impl PacketLayout {
     pub const PACKET_MIN_SIZE: usize = 16;
     pub const PADDING_LEN_SIZE: usize = 1;
     pub const PADDING_MIN_SIZE: usize = 4;
+    pub const PAYLOAD_OFFSET: usize = 5;
 
     pub fn new(payload_len: usize, block_len: usize, mac_len: usize) -> PacketLayout {
         let padding_len = {
