@@ -51,13 +51,6 @@ impl EncryptionContext {
         }
     }
 
-    pub fn decrypt_buffer_size(&self, pc: u64, len: &[u8]) -> Option<usize> {
-        match self {
-            Self::Plain(ctx) => ctx.decrypt_buffer_size(pc, len),
-            Self::Chacha20Poly1305(ctx) => ctx.decrypt_buffer_size(pc, len),
-        }
-    }
-
     pub fn decrypt_len(&self, pc: u64, len: [u8; 4]) -> usize {
         match self {
             Self::Plain(ctx) => ctx.decrypt_len(pc, len),

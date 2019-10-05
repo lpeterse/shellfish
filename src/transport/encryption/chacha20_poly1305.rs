@@ -57,14 +57,6 @@ impl Chacha20Poly1305EncryptionContext {
         mac.copy_from_slice(poly.result().as_ref());
     }
 
-    pub fn decrypt_buffer_size(&self, pc: u64, len: &[u8]) -> Option<usize> {
-        let mut len: [u8; 4] = len.try_into().ok()?;
-        let nonce: [u8; 8] = pc.to_be_bytes();
-        let mut chacha = ChaCha20Legacy::new_var(&self.k1, &nonce).unwrap();
-        chacha.apply_keystream(&mut len);
-        Some(PacketLayout::PACKET_LEN_SIZE + (u32::from_be_bytes(len) as usize) + Self::MAC_LEN)
-    }
-
     pub fn decrypt_len(&self, pc: u64, mut len: [u8; 4]) -> usize {
         let nonce: [u8; 8] = pc.to_be_bytes();
         let mut chacha = ChaCha20Legacy::new_var(&self.k1, &nonce).unwrap();
