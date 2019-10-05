@@ -2,7 +2,7 @@ use super::{
     ChannelOpenFailure, ChannelOpenFailureReason, ChannelOpenRequest, ConnectionError,
     ConnectionFuture, DisconnectRequest, MsgChannelOpen, Request, Session,
 };
-use crate::transport::*;
+use crate::transport::msg_disconnect::*;
 use crate::role::*;
 use crate::socket::*;
 

@@ -16,7 +16,8 @@ use crate::client::*;
 use crate::codec::*;
 use crate::keys::PublicKey;
 use crate::role::*;
-use crate::transport::{BufferedReceiver, BufferedSender};
+use crate::transport::buffered_receiver::BufferedReceiver;
+use crate::transport::buffered_sender::BufferedSender;
 
 use async_std::os::unix::net::UnixStream;
 use futures::io::{AsyncReadExt, ReadHalf, WriteHalf};

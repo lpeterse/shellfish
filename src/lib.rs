@@ -1,12 +1,13 @@
 pub mod agent;
-pub mod algorithm;
 pub mod client;
-pub mod codec;
-pub mod keys;
-pub mod language;
-pub mod message;
-pub mod ring_buffer;
-pub mod role;
-pub mod service;
-pub mod socket;
 pub mod transport;
+pub mod service;
+
+pub (crate) mod socket;
+pub (crate) mod role;
+pub (crate) mod keys;
+pub (crate) mod algorithm;
+pub (crate) mod language;
+pub (crate) mod message;
+pub (crate) mod codec;
+pub (crate) mod ring_buffer;

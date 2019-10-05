@@ -1,5 +1,4 @@
 use crate::agent::Agent;
-use crate::role::*;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
 use crate::service::*;
@@ -13,14 +12,12 @@ pub struct Client {
     agent: Option<Agent<Client>>,
 }
 
-impl Role for Client {}
-
 impl Client {
     pub async fn connect<A: ToSocketAddrs>(
         &self,
         addr: A,
-    ) -> Result<Connection<Self>, ConnectError> {
-        let stream = TcpStream::connect(addr).await?;
+    ) -> Result<Connection<Self>, ClientError> {
+        let stream = TcpStream::connect(addr).await.map_err(ClientError::ConnectError)?;
         let config = TransportConfig::default();
         let transport: Transport<Client, TcpStream> = Transport::new(&config, stream).await?;
         let transport = match self.user_name {
@@ -63,26 +60,27 @@ impl Default for Client {
 }
 
 #[derive(Debug)]
-pub enum ConnectError {
+pub enum ClientError {
     ConnectError(std::io::Error),
     TransportError(TransportError),
     UserAuthError(UserAuthError),
+    ConnectionError(ConnectionError),
 }
 
-impl From<std::io::Error> for ConnectError {
-    fn from(e: std::io::Error) -> Self {
-        Self::ConnectError(e)
-    }
-}
-
-impl From<TransportError> for ConnectError {
+impl From<TransportError> for ClientError {
     fn from(e: TransportError) -> Self {
         Self::TransportError(e)
     }
 }
 
-impl From<UserAuthError> for ConnectError {
+impl From<UserAuthError> for ClientError {
     fn from(e: UserAuthError) -> Self {
         Self::UserAuthError(e)
+    }
+}
+
+impl From<ConnectionError> for ClientError {
+    fn from(e: ConnectionError) -> Self {
+        Self::ConnectionError(e)
     }
 }
