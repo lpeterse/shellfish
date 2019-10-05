@@ -12,8 +12,10 @@ use self::msg_sign_request::*;
 use self::msg_sign_response::*;
 
 use crate::algorithm::*;
+use crate::client::*;
 use crate::codec::*;
 use crate::keys::PublicKey;
+use crate::role::*;
 use crate::transport::{BufferedReceiver, BufferedSender};
 
 use async_std::os::unix::net::UnixStream;
@@ -22,17 +24,22 @@ use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::path::{Path, PathBuf};
 
-#[derive(Clone)]
-pub struct Agent {
+pub struct Agent<R: Role> {
+    phantom: std::marker::PhantomData<R>,
     path: PathBuf,
 }
 
-impl Agent {
+impl<R: Role> Agent<R> {
     const SSH_AUTH_SOCK: &'static str = "SSH_AUTH_SOCK";
+}
 
+impl Agent<Client> {
     /// Create a new agent instance by path.
     pub fn new(path: &Path) -> Self {
-        Self { path: path.into() }
+        Self {
+            phantom: std::marker::PhantomData,
+            path: path.into(),
+        }
     }
 
     /// Create a new agent instance with the value
@@ -40,6 +47,7 @@ impl Agent {
     pub fn new_env() -> Option<Self> {
         let s = std::env::var_os(Self::SSH_AUTH_SOCK)?;
         Self {
+            phantom: std::marker::PhantomData,
             path: TryFrom::try_from(s).ok()?,
         }
         .into()
@@ -113,9 +121,18 @@ impl Agent {
     }
 }
 
+impl<R: Role> Clone for Agent<R> {
+    fn clone(&self) -> Self {
+        Self {
+            phantom: std::marker::PhantomData,
+            path: self.path.clone(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum AgentError {
-    IoError(Error)
+    IoError(Error),
 }
 
 impl From<Error> for AgentError {

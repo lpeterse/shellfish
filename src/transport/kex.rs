@@ -18,7 +18,6 @@ pub use self::msg_new_keys::*;
 pub use super::transmitter::*;
 
 use super::*;
-use crate::algorithm::*;
 
 pub trait KexMachine {
     fn new(interval_bytes: u64, interval_duration: std::time::Duration) -> Self;
@@ -34,25 +33,6 @@ pub trait KexMachine {
         t: &mut Transmitter<T>,
     ) -> Poll<Result<(), TransportError>>;
     fn session_id(&self) -> &SessionId;
-}
-
-#[derive(Debug)]
-pub enum KexMsg {
-    Init(KexInit),
-    EcdhInit(KexEcdhInit<X25519>),
-    EcdhReply(KexEcdhReply<X25519>),
-    NewKeys(NewKeys),
-}
-
-#[derive(Debug)]
-pub struct KexOutput {
-    pub key_streams: KeyStreams,
-    pub encryption_algorithm_client_to_server: EncryptionAlgorithm,
-    pub encryption_algorithm_server_to_client: EncryptionAlgorithm,
-    pub compression_algorithm_client_to_server: CompressionAlgorithm,
-    pub compression_algorithm_server_to_client: CompressionAlgorithm,
-    pub mac_algorithm_client_to_server: Option<MacAlgorithm>,
-    pub mac_algorithm_server_to_client: Option<MacAlgorithm>,
 }
 
 pub fn common_algorithm<T: Clone + PartialEq>(client: &Vec<T>, server: &Vec<T>) -> Option<T> {

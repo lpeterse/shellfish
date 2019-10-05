@@ -3,6 +3,7 @@ use super::msg_channel_data::MsgChannelData;
 use super::msg_channel_eof::MsgChannelEof;
 use super::msg_channel_extended_data::MsgChannelExtendedData;
 use super::msg_channel_failure::*;
+use super::msg_channel_request::*;
 use super::msg_channel_open_confirmation::*;
 use super::msg_channel_open_failure::*;
 use super::msg_channel_success::*;
@@ -16,18 +17,18 @@ use crate::transport::*;
 use futures::task::{Context, Poll};
 use std::sync::{Arc, Mutex};
 
-pub fn poll<T: TransportStream>(
-    x: &mut ConnectionFuture<T>,
+pub fn poll<R: Role, T: TransportStream>(
+    x: &mut ConnectionFuture<R,T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
 
-    //ready!(x.transport.poll_kex(cx))?;
     ready!(x.transport.poll_receive(cx))?;
     log::info!("INBOUND MESSAGE");
-    match x.transport.decode() {
+    match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
             let _: MsgChannelData = msg;
+            log::debug!("Received MSG_CHANNEL_DATA ({} bytes)", msg.data.len());
             let channel = x.channels.get(msg.recipient_channel)?;
             channel.decrease_local_window_size(msg.data.len())?;
             match channel.shared {
@@ -42,10 +43,11 @@ pub fn poll<T: TransportStream>(
             return Poll::Ready(Ok(()));
         }
     }
-    match x.transport.decode() {
+    match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
             let _: MsgChannelExtendedData = msg;
+            log::debug!("Received MSG_CHANNEL_EXTENDED_DATA ({} bytes)", msg.data.len());
             let channel = x.channels.get(msg.recipient_channel)?;
             channel.decrease_local_window_size(msg.data.len())?;
             match channel.shared {
@@ -64,6 +66,7 @@ pub fn poll<T: TransportStream>(
         None => (),
         Some(msg) => {
             let _: MsgChannelEof = msg;
+            log::debug!("Received MSG_CHANNEL_EOF");
             let channel = x.channels.get(msg.recipient_channel)?;
             match channel.shared {
                 TypedState::Session(ref st) => {
@@ -76,10 +79,11 @@ pub fn poll<T: TransportStream>(
             return Poll::Ready(Ok(()));
         }
     }
-    match x.transport.decode() {
+    match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
             let _: MsgChannelClose = msg;
+            log::debug!("Received MSG_CHANNEL_CLOSE");
             let channel = x.channels.get(msg.recipient_channel)?;
             match channel.shared {
                 TypedState::Session(ref st) => {
@@ -99,11 +103,11 @@ pub fn poll<T: TransportStream>(
             return Poll::Ready(Ok(()));
         }
     }
-    match x.transport.decode() {
+    match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
-            log::info!("Ignoring {:?}", msg);
             let _: MsgGlobalRequest = msg;
+            log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }
@@ -112,6 +116,7 @@ pub fn poll<T: TransportStream>(
         None => (),
         Some(msg) => {
             let _: MsgChannelOpenConfirmation<Session> = msg;
+            log::debug!("Received MSG_CHANNEL_OPEN_CONFIRMATION");
             let state = x.request_receiver.complete(|r: ChannelOpenRequest| {
                 let shared = Arc::new(Mutex::new(Default::default()));
                 let state = ChannelState {
@@ -132,10 +137,11 @@ pub fn poll<T: TransportStream>(
             return Poll::Ready(Ok(()));
         }
     }
-    match x.transport.decode() {
+    match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
             let _: MsgChannelOpenFailure = msg;
+            log::debug!("Received MSG_CHANNEL_OPEN_FAILURE");
             x.request_receiver.complete(|_: ChannelOpenRequest|{
                 let failure = ChannelOpenFailure { reason: msg.reason };
                 Ok((Err(failure), ()))
@@ -147,7 +153,7 @@ pub fn poll<T: TransportStream>(
     match x.transport.decode() {
         None => (),
         Some(msg) => {
-            log::error!("SUCCESS");
+            log::debug!("Received MSG_CHANNEL_SUCCESS");
             let _: MsgChannelSuccess = msg;
             let channel = x.channels.get(msg.recipient_channel)?;
             match channel.shared {
@@ -165,6 +171,7 @@ pub fn poll<T: TransportStream>(
         None => (),
         Some(msg) => {
             let _: MsgChannelFailure = msg;
+            log::debug!("Received MSG_CHANNEL_FAILURE");
             let channel = x.channels.get(msg.recipient_channel)?;
             match channel.shared {
                 TypedState::Session(ref st) => {
@@ -177,10 +184,20 @@ pub fn poll<T: TransportStream>(
             return Poll::Ready(Ok(()));
         }
     }
+    match x.transport.decode_ref() {
+        None => (),
+        Some(msg) => {
+            let _: MsgChannelRequest2 = msg;
+            log::debug!("Received MSG_CHANNEL_REQUEST: {}", msg.request);
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+    }
     match x.transport.decode() {
         None => (),
         Some(msg) => {
             let _: MsgChannelWindowAdjust = msg;
+            log::debug!("Received MSG_CHANNEL_WINDOW_ADJUST");
             let channel = x.channels.get(msg.recipient_channel)?;
             channel.remote_window_size += msg.bytes_to_add;
             x.transport.consume();

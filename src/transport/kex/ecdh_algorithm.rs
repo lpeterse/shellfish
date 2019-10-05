@@ -62,4 +62,3 @@ impl Decode for x25519_dalek::PublicKey {
         x25519_dalek::PublicKey::from(buf).into()
     }
 }
-

@@ -3,7 +3,6 @@ use super::super::error::*;
 pub use super::type_::*;
 pub use super::session::*;
 pub use super::other::*;
-pub use super::request::*;
 
 use std::sync::{Arc,Mutex};
 use futures::task::{AtomicWaker};

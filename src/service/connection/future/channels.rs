@@ -6,8 +6,8 @@ use crate::transport::*;
 
 use futures::task::Context;
 
-pub fn poll<T: TransportStream>(
-    x: &mut ConnectionFuture<T>,
+pub fn poll<R: Role, T: TransportStream>(
+    x: &mut ConnectionFuture<R,T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     for channel in x.channels.iter() {

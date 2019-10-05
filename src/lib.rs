@@ -7,3 +7,5 @@ pub mod language;
 pub mod transport;
 pub mod service;
 pub mod ring_buffer;
+pub mod role;
+pub mod message;

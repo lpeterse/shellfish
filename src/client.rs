@@ -1,4 +1,5 @@
 use crate::agent::Agent;
+use crate::role::*;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
 use crate::service::*;
@@ -9,19 +10,23 @@ use async_std::net::ToSocketAddrs;
 
 pub struct Client {
     user_name: Option<String>,
-    agent: Option<Agent>,
+    agent: Option<Agent<Client>>,
 }
 
+impl Role for Client {}
+
 impl Client {
-    pub async fn connect<A: ToSocketAddrs>(&self, addr: A) -> Result<Connection, ConnectError> {
+    pub async fn connect<A: ToSocketAddrs>(
+        &self,
+        addr: A,
+    ) -> Result<Connection<Self>, ConnectError> {
         let stream = TcpStream::connect(addr).await?;
         let config = TransportConfig::default();
-        let transport: Transport<TcpStream> =
-            Transport::new(&config, stream).await?;
+        let transport: Transport<Client, TcpStream> = Transport::new(&config, stream).await?;
         let transport = match self.user_name {
             None => {
                 transport
-                    .request_service(<Connection as Service>::NAME)
+                    .request_service(<Connection<Self> as Service>::NAME)
                     .await?
             }
             Some(ref user) => {
@@ -30,7 +35,7 @@ impl Client {
                     .await?;
                 UserAuth::authenticate(
                     transport,
-                    <Connection as Service>::NAME,
+                    <Connection<Self> as Service>::NAME,
                     user,
                     self.agent.clone(),
                 )
@@ -38,7 +43,7 @@ impl Client {
             }
         };
 
-        Ok(Connection::new(transport))
+        Ok(Connection::<Self>::new(transport))
     }
 
     pub fn user_name(&mut self) -> &mut Option<String> {

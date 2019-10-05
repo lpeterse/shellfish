@@ -25,15 +25,34 @@ impl<T: ChannelRequest + Encode> Encode for MsgChannelRequest<T> {
     }
 }
 
-/*
-impl<T> Decode<T> for MsgChannelRequest<T> {
+#[derive(Debug)]
+pub struct MsgChannelRequest2<'a> {
+    pub recipient_channel: u32,
+    pub request: &'a str,
+    pub want_reply: bool,
+    pub specific: &'a [u8],
+}
+
+impl<'a> MsgChannelRequest2<'a> {
+    const MSG_NUMBER: u8 = 98;
+}
+
+impl <'a> Encode for MsgChannelRequest2<'a> {
+    fn size(&self) -> usize {
+        0
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+    }
+}
+
+impl<'a> DecodeRef<'a> for MsgChannelRequest2<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
+        d.expect_u8(Self::MSG_NUMBER)?;
         Self {
-            name: Decode::decode(d)?,
+            recipient_channel: d.take_u32be()?,
+            request: DecodeRef::decode(d)?,
             want_reply: d.take_u8()? != 0,
-            data: d.take_all()?,
+            specific: d.take_all()?,
         }.into()
     }
 }
-*/

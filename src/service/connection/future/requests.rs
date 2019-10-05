@@ -3,18 +3,19 @@ use super::{
     ConnectionFuture, DisconnectRequest, MsgChannelOpen, Request, Session,
 };
 use crate::transport::*;
+use crate::role::*;
 
 use futures::ready;
 use futures::task::{Context, Poll};
 
-pub fn poll<T: TransportStream>(
-    x: &mut ConnectionFuture<T>,
+pub fn poll<R: Role, T: TransportStream>(
+    x: &mut ConnectionFuture<R,T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     match ready!(x.request_receiver.poll(cx))? {
         Request::Disconnect(_) => {
             log::debug!("Command::Disconnect");
-            let msg = MsgDisconnect::by_application("".into());
+            let msg = MsgDisconnect::new(Reason::BY_APPLICATION);
             ready!(x.transport.poll_send(cx, &msg))?;
             x.request_receiver.accept();
             x.request_receiver

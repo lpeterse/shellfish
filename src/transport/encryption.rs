@@ -1,10 +1,10 @@
 mod chacha20_poly1305;
 mod plain;
 
-use crate::algorithm::*;
 use self::chacha20_poly1305::*;
 use self::plain::*;
 use super::*;
+use crate::algorithm::*;
 
 pub enum EncryptionContext {
     Plain(PlainEncryptionContext),
@@ -58,7 +58,7 @@ impl EncryptionContext {
         }
     }
 
-    pub fn decrypt_len(&self, pc: u64, len: [u8;4]) -> usize {
+    pub fn decrypt_len(&self, pc: u64, len: [u8; 4]) -> usize {
         match self {
             Self::Plain(ctx) => ctx.decrypt_len(pc, len),
             Self::Chacha20Poly1305(ctx) => ctx.decrypt_len(pc, len),

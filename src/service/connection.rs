@@ -25,22 +25,25 @@ use self::msg_channel_open_failure::ChannelOpenFailureReason;
 
 use crate::codec::*;
 use crate::transport::*;
+use crate::role::*;
+use crate::client::*;
 
 use futures::channel::oneshot;
 use futures::future::FutureExt;
 
-pub struct Connection {
+pub struct Connection<R: Role> {
+    phantom: std::marker::PhantomData<R>,
     error: oneshot::Receiver<ConnectionError>,
     request_sender: RequestSender,
     request_receiver: RequestReceiver,
 }
 
-impl Service for Connection {
+impl <R: Role> Service for Connection<R> {
     const NAME: &'static str = "ssh-connection";
 }
 
-impl Connection {
-    pub fn new<T: TransportStream>(t: Transport<T>) -> Connection {
+impl <R: Role> Connection<R> {
+    pub fn new<T: TransportStream>(t: Transport<R, T>) -> Connection<R> {
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();
@@ -50,6 +53,7 @@ impl Connection {
         });
         async_std::task::spawn(future);
         Connection {
+            phantom: std::marker::PhantomData,
             error: r1,
             request_sender: s2,
             request_receiver: r3,
@@ -62,13 +66,15 @@ impl Connection {
             .await
             .unwrap_or(())
     }
+}
 
+impl Connection<Client> {
     pub async fn session(
         &mut self,
     ) -> Result<Result<Session, ChannelOpenFailure>, ConnectionError> {
         self.request_sender
             .request(ChannelOpenRequest {
-                initial_window_size: 1024,
+                initial_window_size: 8192,
                 max_packet_size: 1024,
             })
             .await

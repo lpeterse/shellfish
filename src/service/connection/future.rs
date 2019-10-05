@@ -13,16 +13,16 @@ use futures::ready;
 use futures::task::{Context, Poll};
 use std::pin::*;
 
-pub struct ConnectionFuture<T> {
-    pub transport: Transport<T>,
+pub struct ConnectionFuture<R: Role, T> {
+    pub transport: Transport<R,T>,
     pub request_sender: RequestSender,
     pub request_receiver: RequestReceiver,
     pub channels: ChannelMap,
 }
 
-impl<T: TransportStream> ConnectionFuture<T> {
+impl<R: Role, T: TransportStream> ConnectionFuture<R,T> {
     pub fn new(
-        transport: Transport<T>,
+        transport: Transport<R,T>,
         request_sender: RequestSender,
         request_receiver: RequestReceiver,
     ) -> Self {
@@ -88,7 +88,7 @@ impl<T: TransportStream> ConnectionFuture<T> {
     }
 }
 
-impl<T> Future for ConnectionFuture<T>
+impl<R: Role, T> Future for ConnectionFuture<R,T>
 where
     T: Unpin + TransportStream,
 {

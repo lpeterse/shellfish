@@ -141,49 +141,53 @@ impl KexMachine for ClientKexMachine {
     fn consume<T: TransportStream>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError> {
         log::trace!("consume");
         match t.decode() {
-            Some(msg) => match &mut self.state {
-                ClientKexState2::Ecdh(ecdh) => {
-                    let reply: KexEcdhReply<X25519> = msg;
-                    // Compute the DH shared secret (create a new placeholder while
-                    // the actual secret get consumed in the operation).
-                    let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
-                    let dh_public = X25519::public(&dh_secret);
-                    let k = X25519::diffie_hellman(dh_secret, &reply.dh_public);
-                    // Compute the exchange hash over the data exchanged so far.
-                    let h: [u8; 32] = KexEcdhHash::<X25519> {
-                        client_identification: &t.local_id,
-                        server_identification: &t.remote_id,
-                        client_kex_init: &ecdh.client_init,
-                        server_kex_init: &ecdh.server_init,
-                        server_host_key: &reply.host_key,
-                        dh_client_key: &dh_public,
-                        dh_server_key: &reply.dh_public,
-                        dh_secret: X25519::secret_as_ref(&k),
-                    }
-                    .sha256();
-                    // The session id is only computed during first kex and constant afterwards.
-                    self.session_id.set_if_uninitialized(h);
-                    self.state = ClientKexState2::NewKeys(NewKeys2 {
-                        sent: false,
-                        client_init: ecdh.client_init.clone(),
-                        server_init: ecdh.server_init.clone(),
-                        key_streams: KeyStreams::new_sha256(
-                            X25519::secret_as_ref(&k),
-                            &h,
-                            self.session_id,
-                        ),
-                    });
+            Some(msg) => {
+                log::debug!("Received MSG_ECDH_REPLY");
+                match &mut self.state {
+                    ClientKexState2::Ecdh(ecdh) => {
+                        let reply: KexEcdhReply<X25519> = msg;
+                        // Compute the DH shared secret (create a new placeholder while
+                        // the actual secret get consumed in the operation).
+                        let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
+                        let dh_public = X25519::public(&dh_secret);
+                        let k = X25519::diffie_hellman(dh_secret, &reply.dh_public);
+                        // Compute the exchange hash over the data exchanged so far.
+                        let h: [u8; 32] = KexEcdhHash::<X25519> {
+                            client_identification: &t.local_id,
+                            server_identification: &t.remote_id,
+                            client_kex_init: &ecdh.client_init,
+                            server_kex_init: &ecdh.server_init,
+                            server_host_key: &reply.host_key,
+                            dh_client_key: &dh_public,
+                            dh_server_key: &reply.dh_public,
+                            dh_secret: X25519::secret_as_ref(&k),
+                        }
+                        .sha256();
+                        // The session id is only computed during first kex and constant afterwards.
+                        self.session_id.set_if_uninitialized(h);
+                        self.state = ClientKexState2::NewKeys(NewKeys2 {
+                            sent: false,
+                            client_init: ecdh.client_init.clone(),
+                            server_init: ecdh.server_init.clone(),
+                            key_streams: KeyStreams::new_sha256(
+                                X25519::secret_as_ref(&k),
+                                &h,
+                                self.session_id,
+                            ),
+                        });
 
-                    t.consume();
-                    return Ok(());
+                        t.consume();
+                        return Ok(());
+                    }
+                    _ => (),
                 }
-                _ => (),
-            },
+            }
             None => (),
         }
         match t.decode() {
             Some(msg) => {
                 let _: NewKeys = msg;
+                log::debug!("Received MSG_NEW_KEYS");
                 let state = ClientKexState2::Delay(Delay::new(self.interval_duration));
                 let state = std::mem::replace(&mut self.state, state);
                 match state {

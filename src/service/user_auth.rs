@@ -12,10 +12,12 @@ pub use self::signature::*;
 
 use super::Service;
 use crate::algorithm::*;
+use crate::client::*;
 use crate::agent::*;
 use crate::codec::*;
 use crate::keys::*;
 use crate::transport::*;
+use crate::role::*;
 
 pub struct UserAuth {}
 
@@ -24,12 +26,12 @@ impl Service for UserAuth {
 }
 
 impl UserAuth {
-    pub async fn authenticate<T: TransportStream>(
-        mut transport: Transport<T>,
+    pub async fn authenticate<R: Role, T: TransportStream>(
+        mut transport: Transport<R, T>,
         service_name: &str,
         user_name: &str,
-        agent: Option<Agent>
-    ) -> Result<Transport<T>, UserAuthError> {
+        agent: Option<Agent<Client>>
+    ) -> Result<Transport<R, T>, UserAuthError> {
 
         match agent {
             None => (),
@@ -59,7 +61,7 @@ impl UserAuth {
                             transport.send(&req).await?;
                             transport.flush().await?;
                             transport.receive().await?;
-                            match transport.decode().unwrap() { // TODO
+                            match transport.decode_ref().unwrap() { // TODO
                                 E2::A(x) => {
                                     let _: Success = x;
                                     transport.consume();
