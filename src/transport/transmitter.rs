@@ -1,44 +1,26 @@
 use super::*;
 
 pub struct Transmitter<T> {
-    pub sender: BufferedSender<WriteHalf<T>>,
-    pub receiver: BufferedReceiver<ReadHalf<T>>,
-    pub receiver_state: ReceiverState,
-    pub local_id: Identification,
-    pub remote_id: Identification,
-    pub bytes_sent: u64,
-    pub packets_sent: u64,
-    pub bytes_received: u64,
-    pub packets_received: u64,
-    pub encryption_ctx: EncryptionContext,
-    pub decryption_ctx: EncryptionContext,
-    pub alive_timer: Delay,
-    pub alive_interval: std::time::Duration,
-    pub inactivity_timer: Delay,
-    pub inactivity_timeout: std::time::Duration,
+    sender: BufferedSender<WriteHalf<T>>,
+    receiver: BufferedReceiver<ReadHalf<T>>,
+    receiver_state: ReceiverState,
+    local_id: Identification,
+    remote_id: Identification,
+    bytes_sent: u64,
+    packets_sent: u64,
+    bytes_received: u64,
+    packets_received: u64,
+    encryption_ctx: EncryptionContext,
+    decryption_ctx: EncryptionContext,
+    alive_timer: Delay,
+    alive_interval: std::time::Duration,
+    inactivity_timer: Delay,
+    inactivity_timeout: std::time::Duration,
 }
 
-pub struct ReceiverState {
-    pub buffer_len: usize,
-    pub payload_len: usize,
-}
-
-impl ReceiverState {
-    pub fn new() -> Self {
-        Self {
-            buffer_len: 0,
-            payload_len: 0,
-        }
-    }
-    pub fn reset(&mut self) {
-        self.buffer_len = 0;
-        self.payload_len = 0;
-    }
-}
-
-impl<T: Socket> Transmitter<T> {
-    pub async fn new(config: &TransportConfig, stream: T) -> Result<Self, TransportError> {
-        let (rh, wh) = stream.split();
+impl<S: Socket> Transmitter<S> {
+    pub async fn new(config: &TransportConfig, socket: S) -> Result<Self, TransportError> {
+        let (rh, wh) = socket.split();
         let mut sender = BufferedSender::new(wh);
         let mut receiver = BufferedReceiver::new(rh);
 
@@ -62,6 +44,30 @@ impl<T: Socket> Transmitter<T> {
             inactivity_timer: Delay::new(config.inactivity_timeout),
             inactivity_timeout: config.inactivity_timeout,
         })
+    }
+
+    pub fn local_id(&self) -> &Identification  {
+        &self.local_id
+    }
+
+    pub fn remote_id(&self) -> &Identification {
+        &self.remote_id
+    }
+
+    pub fn bytes_sent(&self) -> u64 {
+        self.bytes_sent
+    }
+
+    pub fn bytes_received(&self) -> u64 {
+        self.bytes_received
+    }
+
+    pub fn encryption_ctx(&mut self) -> &mut EncryptionContext {
+        &mut self.encryption_ctx
+    }
+
+    pub fn decryption_ctx(&mut self) -> &mut EncryptionContext {
+        &mut self.decryption_ctx
     }
 
     /// Flush the transport.
@@ -144,24 +150,24 @@ impl<T: Socket> Transmitter<T> {
 
     /// Send the local identification string.
     async fn send_id(
-        stream: &mut BufferedSender<WriteHalf<T>>,
+        socket: &mut BufferedSender<WriteHalf<S>>,
         id: &Identification,
     ) -> Result<(), TransportError> {
-        let mut enc = BEncoder::from(stream.reserve(Encode::size(&id) + 2).await?);
+        let mut enc = BEncoder::from(socket.reserve(Encode::size(&id) + 2).await?);
         Encode::encode(&id, &mut enc);
         enc.push_u8('\r' as u8);
         enc.push_u8('\n' as u8);
-        stream.flush().await?;
+        socket.flush().await?;
         Ok(())
     }
 
     /// Receive the remote identification string.
     async fn receive_id(
-        stream: &mut BufferedReceiver<ReadHalf<T>>,
+        socket: &mut BufferedReceiver<ReadHalf<S>>,
     ) -> Result<Identification, TransportError> {
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
-            let line = stream.read_line(Identification::MAX_LEN).await?;
+            let line = socket.read_line(Identification::MAX_LEN).await?;
             match DecodeRef::decode(&mut BDecoder(line)) {
                 None => (),
                 Some(id) => return Ok(id),
@@ -199,5 +205,23 @@ impl<T: Socket> Transmitter<T> {
             Poll::Ready(Ok(())) => Err(TransportError::InactivityTimeout),
             Poll::Ready(Err(e)) => Err(e.into()),
         }
+    }
+}
+
+struct ReceiverState {
+    pub buffer_len: usize,
+    pub payload_len: usize,
+}
+
+impl ReceiverState {
+    pub fn new() -> Self {
+        Self {
+            buffer_len: 0,
+            payload_len: 0,
+        }
+    }
+    pub fn reset(&mut self) {
+        self.buffer_len = 0;
+        self.payload_len = 0;
     }
 }

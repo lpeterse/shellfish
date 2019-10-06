@@ -28,9 +28,9 @@ impl Client {
             }
             Some(ref user) => {
                 let transport = transport
-                    .request_service(<UserAuth as Service>::NAME)
+                    .request_service(<UserAuth<Self> as Service>::NAME)
                     .await?;
-                UserAuth::authenticate(
+                UserAuth::<Self>::authenticate(
                     transport,
                     <Connection<Self> as Service>::NAME,
                     user,

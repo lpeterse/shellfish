@@ -2,9 +2,10 @@ use super::method::*;
 use super::msg_userauth_request::*;
 use crate::algorithm::*;
 use crate::codec::*;
+use crate::transport::SessionId;
 
 pub struct SignatureData<'a, S: SignatureAlgorithm> {
-    pub session_id: &'a [u8],
+    pub session_id: &'a SessionId,
     pub user_name: &'a str,
     pub service_name: &'a str,
     pub public_key: S::PublicKey,
@@ -37,6 +38,7 @@ where
     }
 }
 
+/*
 impl<'a, S: SignatureAlgorithm> DecodeRef<'a> for SignatureData<'a, S>
 where
     S::PublicKey: DecodeRef<'a>,
@@ -61,3 +63,4 @@ where
         .into()
     }
 }
+*/

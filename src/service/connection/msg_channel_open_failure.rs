@@ -1,5 +1,4 @@
 use crate::codec::*;
-use crate::language::*;
 
 use std::fmt;
 
@@ -7,7 +6,7 @@ pub struct MsgChannelOpenFailure {
     pub recipient_channel: u32,
     pub reason: ChannelOpenFailureReason,
     pub description: String,
-    pub language: Language,
+    pub language: String,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

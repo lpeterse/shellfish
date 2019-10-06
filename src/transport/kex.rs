@@ -17,33 +17,27 @@ pub use self::msg_kex_init::*;
 pub use self::msg_new_keys::*;
 pub use super::transmitter::*;
 
+use super::config::*;
 use super::*;
 
 pub trait KexMachine {
-    fn new(interval_bytes: u64, interval_duration: std::time::Duration) -> Self;
+    fn new(config: &TransportConfig) -> Self;
     fn init_local(&mut self);
-    fn init_remote(&mut self, msg: KexInit) -> Result<(), KexError>;
+    fn init_remote(&mut self, msg: MsgKexInit) -> Result<(), KexError>;
     fn is_init_sent(&self) -> bool;
     fn is_init_received(&self) -> bool;
-    fn is_in_progress<T>(&mut self, cx: &mut Context, t: &mut Transmitter<T>) -> Result<bool, KexError>;
+    fn is_in_progress<T: Socket>(
+        &mut self,
+        cx: &mut Context,
+        t: &mut Transmitter<T>,
+    ) -> Result<bool, KexError>;
     fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError>;
     fn poll_flush<T: Socket>(
         &mut self,
         cx: &mut Context,
         t: &mut Transmitter<T>,
     ) -> Poll<Result<(), TransportError>>;
-    fn session_id(&self) -> &SessionId;
-}
-
-pub fn common_algorithm<T: Clone + PartialEq>(client: &Vec<T>, server: &Vec<T>) -> Option<T> {
-    for c in client {
-        for s in server {
-            if c == s {
-                return Some(c.clone());
-            }
-        }
-    }
-    None
+    fn session_id(&self) -> &Option<SessionId>;
 }
 
 #[derive(Copy, Clone, Debug)]

@@ -1,5 +1,5 @@
 use crate::codec::*;
-use crate::message::*;
+use super::message::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgServiceAccept<'a>(&'a str);

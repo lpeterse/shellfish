@@ -15,20 +15,26 @@ pub enum KexAlgorithm {
     Unknown(String),
 }
 
+impl KexAlgorithm {
+    pub fn supported() -> Vec<Self> {
+        vec![Self::Curve25519Sha256, Self::Curve25519Sha256AtLibsshDotOrg]
+    }
+}
+
 impl AsRef<[u8]> for KexAlgorithm {
     fn as_ref(&self) -> &[u8] {
         match self {
-            KexAlgorithm::Curve25519Sha256 => b"curve25519-sha256",
-            KexAlgorithm::Curve25519Sha256AtLibsshDotOrg => b"curve25519-sha256@libssh.org",
-            KexAlgorithm::EcdhSha2Nistp256 => b"ecdh-sha2-nistp256",
-            KexAlgorithm::EcdhSha2Nistp384 => b"ecdh-sha2-nistp384",
-            KexAlgorithm::EcdhSha2Nistp521 => b"ecdh-sha2-nistp521",
-            KexAlgorithm::DiffieHellmanGroupExchangeSha256 => b"diffie-hellman-group-exchange-sha256",
-            KexAlgorithm::DiffieHellmanGroup16Sha512 => b"diffie-hellman-group16-sha512",
-            KexAlgorithm::DiffieHellmanGroup8Sha512 => b"diffie-hellman-group18-sha512",
-            KexAlgorithm::DiffieHellmanGroup14Sha256 => b"diffie-hellman-group14-sha256",
-            KexAlgorithm::DiffieHellmanGroup14Sha1 => b"diffie-hellman-group14-sha1",
-            KexAlgorithm::Unknown(s) => s.as_bytes(),
+            Self::Curve25519Sha256 => b"curve25519-sha256",
+            Self::Curve25519Sha256AtLibsshDotOrg => b"curve25519-sha256@libssh.org",
+            Self::EcdhSha2Nistp256 => b"ecdh-sha2-nistp256",
+            Self::EcdhSha2Nistp384 => b"ecdh-sha2-nistp384",
+            Self::EcdhSha2Nistp521 => b"ecdh-sha2-nistp521",
+            Self::DiffieHellmanGroupExchangeSha256 => b"diffie-hellman-group-exchange-sha256",
+            Self::DiffieHellmanGroup16Sha512 => b"diffie-hellman-group16-sha512",
+            Self::DiffieHellmanGroup8Sha512 => b"diffie-hellman-group18-sha512",
+            Self::DiffieHellmanGroup14Sha256 => b"diffie-hellman-group14-sha256",
+            Self::DiffieHellmanGroup14Sha1 => b"diffie-hellman-group14-sha1",
+            Self::Unknown(s) => s.as_bytes(),
         }
     }
 }
@@ -39,38 +45,38 @@ impl TryFrom<&[u8]> for KexAlgorithm {
 
     fn try_from(x: &[u8]) -> Result<Self, std::string::FromUtf8Error> {
         Ok(
-            if x == KexAlgorithm::Curve25519Sha256AtLibsshDotOrg.as_ref() {
-                KexAlgorithm::Curve25519Sha256AtLibsshDotOrg
+            if x == Self::Curve25519Sha256AtLibsshDotOrg.as_ref() {
+                Self::Curve25519Sha256AtLibsshDotOrg
             }
-            else if x == KexAlgorithm::Curve25519Sha256.as_ref() {
-                KexAlgorithm::Curve25519Sha256
+            else if x == Self::Curve25519Sha256.as_ref() {
+                Self::Curve25519Sha256
             }
-            else if x == KexAlgorithm::EcdhSha2Nistp256.as_ref() {
-                KexAlgorithm::EcdhSha2Nistp256
+            else if x == Self::EcdhSha2Nistp256.as_ref() {
+                Self::EcdhSha2Nistp256
             }
-            else if x == KexAlgorithm::EcdhSha2Nistp384.as_ref() {
-                KexAlgorithm::EcdhSha2Nistp384
+            else if x == Self::EcdhSha2Nistp384.as_ref() {
+                Self::EcdhSha2Nistp384
             }
-            else if x == KexAlgorithm::EcdhSha2Nistp521.as_ref() {
-                KexAlgorithm::EcdhSha2Nistp521
+            else if x == Self::EcdhSha2Nistp521.as_ref() {
+                Self::EcdhSha2Nistp521
             }
-            else if x == KexAlgorithm::DiffieHellmanGroupExchangeSha256.as_ref() {
-                KexAlgorithm::DiffieHellmanGroupExchangeSha256
+            else if x == Self::DiffieHellmanGroupExchangeSha256.as_ref() {
+                Self::DiffieHellmanGroupExchangeSha256
             }
-            else if x == KexAlgorithm::DiffieHellmanGroup16Sha512.as_ref() {
-                KexAlgorithm::DiffieHellmanGroup16Sha512
+            else if x == Self::DiffieHellmanGroup16Sha512.as_ref() {
+                Self::DiffieHellmanGroup16Sha512
             }
-            else if x == KexAlgorithm::DiffieHellmanGroup8Sha512.as_ref() {
-                KexAlgorithm::DiffieHellmanGroup8Sha512
+            else if x == Self::DiffieHellmanGroup8Sha512.as_ref() {
+                Self::DiffieHellmanGroup8Sha512
             }
-            else if x == KexAlgorithm::DiffieHellmanGroup14Sha256.as_ref() {
-                KexAlgorithm::DiffieHellmanGroup14Sha256
+            else if x == Self::DiffieHellmanGroup14Sha256.as_ref() {
+                Self::DiffieHellmanGroup14Sha256
             }
-            else if x == KexAlgorithm::DiffieHellmanGroup14Sha1.as_ref() {
-                KexAlgorithm::DiffieHellmanGroup14Sha1
+            else if x == Self::DiffieHellmanGroup14Sha1.as_ref() {
+                Self::DiffieHellmanGroup14Sha1
             }
             else {
-                KexAlgorithm::Unknown(String::from_utf8(Vec::from(x))?)
+                Self::Unknown(String::from_utf8(Vec::from(x))?)
             }
         )
     }

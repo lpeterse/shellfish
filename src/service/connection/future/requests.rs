@@ -3,14 +3,14 @@ use super::{
     ConnectionFuture, DisconnectRequest, MsgChannelOpen, Request, Session,
 };
 use crate::transport::msg_disconnect::*;
+use crate::transport::Socket;
 use crate::role::*;
-use crate::socket::*;
 
 use futures::ready;
 use futures::task::{Context, Poll};
 
-pub fn poll<R: Role, T: Socket>(
-    x: &mut ConnectionFuture<R,T>,
+pub fn poll<R: Role, S: Socket>(
+    x: &mut ConnectionFuture<R,S>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     match ready!(x.request_receiver.poll(cx))? {

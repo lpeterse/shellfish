@@ -7,7 +7,7 @@ pub struct Identification {
 }
 
 impl Identification {
-    pub const MAX_LEN: usize = 253;
+    pub (crate) const MAX_LEN: usize = 253;
     const PREFIX: &'static [u8] = b"SSH-2.0-";
 
     pub fn new(version: String, comment: String) -> Self {

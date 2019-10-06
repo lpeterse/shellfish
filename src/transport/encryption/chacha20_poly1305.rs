@@ -5,7 +5,6 @@ use chacha20::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use chacha20::ChaCha20Legacy;
 use poly1305::subtle::ConstantTimeEq;
 use poly1305::Poly1305;
-use std::convert::TryInto;
 
 pub struct Chacha20Poly1305EncryptionContext {
     k1: [u8; 32],

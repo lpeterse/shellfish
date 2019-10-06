@@ -27,7 +27,6 @@ use crate::codec::*;
 use crate::transport::*;
 use crate::role::*;
 use crate::client::*;
-use crate::socket::*;
 
 use futures::channel::oneshot;
 use futures::future::FutureExt;

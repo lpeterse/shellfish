@@ -1,21 +1,11 @@
 use crate::codec::*;
-use crate::message::*;
+use super::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgDebug<'a> {
     pub always_display: bool,
     pub message: &'a str,
     pub language: &'a str,
-}
-
-impl<'a> MsgDebug<'a> {
-    pub fn new(message: &'a str, language: &'a str) -> Self {
-        Self {
-            always_display: true,
-            message,
-            language
-        }
-    }
 }
 
 impl<'a> Message for MsgDebug<'a> {

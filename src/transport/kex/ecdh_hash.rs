@@ -1,4 +1,4 @@
-use super::msg_kex_init::KexInit;
+use super::msg_kex_init::MsgKexInit;
 use crate::transport::identification::*;
 use crate::keys::*;
 use crate::codec::*;
@@ -9,8 +9,8 @@ use sha2::{Sha256, Digest};
 pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
     pub client_identification: &'a Identification,
     pub server_identification: &'a Identification,
-    pub client_kex_init: &'a KexInit,
-    pub server_kex_init: &'a KexInit,
+    pub client_kex_init: &'a MsgKexInit,
+    pub server_kex_init: &'a MsgKexInit,
     pub server_host_key: &'a PublicKey,
     pub dh_client_key: &'a A::PublicKey,
     pub dh_server_key: &'a A::PublicKey,
@@ -61,7 +61,7 @@ mod test {
     fn test_kex_hash_01() {
         let client_identification = Identification::new("hssh_0.1.0.0".into(), "".into());
         let server_identification = Identification::new("hssh_0.1.0.0".into(), "".into());
-        let client_kex_init = KexInit {
+        let client_kex_init = MsgKexInit {
             cookie: KexCookie([146,105,253,96,98,147,65,76,222,166,168,241,53,43,45,168]),
             kex_algorithms: vec![KexAlgorithm::Curve25519Sha256AtLibsshDotOrg],
             server_host_key_algorithms: vec![HostKeyAlgorithm::SshEd25519],
@@ -75,7 +75,7 @@ mod test {
             languages_server_to_client: vec![],
             first_packet_follows: false
         };
-        let server_kex_init = KexInit {
+        let server_kex_init = MsgKexInit {
             cookie: KexCookie([120,224,145,197,172,191,2,206,157,48,249,184,200,249,43,201]),
             kex_algorithms: vec![KexAlgorithm::Curve25519Sha256AtLibsshDotOrg],
             server_host_key_algorithms: vec![HostKeyAlgorithm::SshEd25519],

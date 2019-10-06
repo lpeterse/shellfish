@@ -1,26 +1,36 @@
-pub (crate) mod buffered_receiver;
-pub (crate) mod buffered_sender;
-pub (crate) mod encryption;
-pub (crate) mod error;
-pub (crate) mod identification;
-pub (crate) mod kex;
-pub (crate) mod key_streams;
-pub (crate) mod msg_debug;
-pub (crate) mod msg_disconnect;
-pub (crate) mod msg_ignore;
-pub (crate) mod msg_service_accept;
-pub (crate) mod msg_service_request;
-pub (crate) mod msg_unimplemented;
-pub (crate) mod packet_layout;
-pub (crate) mod session_id;
-pub (crate) mod transmitter;
+pub(crate) mod buffered_receiver;
+pub(crate) mod buffered_sender;
+pub(crate) mod config;
+pub(crate) mod encryption;
+pub(crate) mod error;
+pub(crate) mod identification;
+pub(crate) mod kex;
+pub(crate) mod key_streams;
+pub(crate) mod message;
+pub(crate) mod msg_debug;
+pub(crate) mod msg_disconnect;
+pub(crate) mod msg_ignore;
+pub(crate) mod msg_service_accept;
+pub(crate) mod msg_service_request;
+pub(crate) mod msg_unimplemented;
+pub(crate) mod packet_layout;
+pub(crate) mod session_id;
+pub(crate) mod socket;
+pub(crate) mod transmitter;
 
+pub use self::config::*;
 pub use self::error::*;
+pub use self::identification::*;
+pub use self::message::*;
+pub use self::session_id::*;
+pub use self::socket::*;
+pub use crate::algorithm::{
+    CompressionAlgorithm, EncryptionAlgorithm, HostKeyAlgorithm, KexAlgorithm, MacAlgorithm,
+};
 
 use self::buffered_receiver::*;
 use self::buffered_sender::*;
 use self::encryption::*;
-use self::identification::*;
 use self::kex::*;
 use self::key_streams::*;
 use self::msg_debug::*;
@@ -30,12 +40,10 @@ use self::msg_service_accept::*;
 use self::msg_service_request::*;
 use self::msg_unimplemented::*;
 use self::packet_layout::*;
-use self::session_id::*;
 
 use crate::client::Client;
 use crate::codec::*;
 use crate::role::*;
-use crate::socket::*;
 
 use futures::future::poll_fn;
 use futures::future::FutureExt;
@@ -57,53 +65,30 @@ impl HasTransport for Client {
     type KexMachine = ClientKexMachine;
 }
 
-pub struct TransportConfig {
-    identification: Identification,
-    kex_interval_bytes: u64,
-    kex_interval_duration: std::time::Duration,
-    alive_interval: std::time::Duration,
-    inactivity_timeout: std::time::Duration,
-}
-
-impl Default for TransportConfig {
-    fn default() -> Self {
-        Self {
-            identification: Identification::default(),
-            kex_interval_bytes: 1_000_000_000,
-            kex_interval_duration: std::time::Duration::from_secs(3600),
-            alive_interval: std::time::Duration::from_secs(3),
-            inactivity_timeout: std::time::Duration::from_secs(10),
-        }
-    }
-}
-
-pub struct Transport<R: Role, T> {
-    transmitter: Transmitter<T>,
+pub struct Transport<R: Role, S> {
+    transmitter: Transmitter<S>,
     kex: <R as HasTransport>::KexMachine,
 }
 
-impl<R: Role, T: Socket> Transport<R, T> {
+impl<R: Role, S: Socket> Transport<R, S> {
     /// Create a new transport.
     ///
     /// The initial key exchange has been completed successfully when this
     /// function does not return an error.
-    pub async fn new(config: &TransportConfig, stream: T) -> Result<Self, TransportError> {
+    pub async fn new(config: &TransportConfig, socket: S) -> Result<Self, TransportError> {
         let mut transport = Self {
-            transmitter: Transmitter::new(config, stream).await?,
-            kex: <R as HasTransport>::KexMachine::new(
-                config.kex_interval_bytes,
-                config.kex_interval_duration,
-            ),
+            transmitter: Transmitter::new(config, socket).await?,
+            kex: <R as HasTransport>::KexMachine::new(config),
         };
         transport.rekey().await?;
         Ok(transport)
     }
 
-    /// Return the session id belonging to the connection.
+    /// Return the connection's session id.
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
     /// lifetime of the connection.
-    pub fn session_id(&self) -> &SessionId {
+    pub fn session_id(&self) -> &Option<SessionId> {
         &self.kex.session_id()
     }
 
@@ -161,7 +146,7 @@ impl<R: Role, T: Socket> Transport<R, T> {
     }
 
     /// Consumes the current message (only after `receive` or `poll_receive`).
-    /// 
+    ///
     /// The message shall have been decoded and processed before being cosumed.
     pub fn consume(&mut self) {
         self.transmitter.consume()

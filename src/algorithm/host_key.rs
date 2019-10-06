@@ -21,6 +21,12 @@ pub enum HostKeyAlgorithm {
     Unknown(String),
 }
 
+impl HostKeyAlgorithm {
+    pub fn supported() -> Vec<Self> {
+        vec![Self::SshEd25519]
+    }
+}
+
 impl AsRef<[u8]> for HostKeyAlgorithm {
     fn as_ref(&self) -> &[u8] {
         match self {

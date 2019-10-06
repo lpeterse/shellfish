@@ -7,12 +7,18 @@ pub enum CompressionAlgorithm {
     Unknown(String)
 }
 
+impl CompressionAlgorithm {
+    pub fn supported() -> Vec<Self> {
+        vec![Self::None]
+    }
+}
+
 impl AsRef<[u8]> for CompressionAlgorithm {
     fn as_ref(&self) -> &[u8] {
         match self {
-            CompressionAlgorithm::None => b"none",
-            CompressionAlgorithm::ZlibAtOpenSshDotCom => b"zlib@openssh.com",
-            CompressionAlgorithm::Unknown(s) => s.as_bytes(),
+            Self::None => b"none",
+            Self::ZlibAtOpenSshDotCom => b"zlib@openssh.com",
+            Self::Unknown(s) => s.as_bytes(),
         }
     }
 }
@@ -23,14 +29,14 @@ impl TryFrom<&[u8]> for CompressionAlgorithm {
 
     fn try_from(x: &[u8]) -> Result<Self, std::string::FromUtf8Error> {
         Ok(
-            if x == CompressionAlgorithm::None.as_ref() {
-                CompressionAlgorithm::None
+            if x == Self::None.as_ref() {
+                Self::None
             } 
-            else if x == CompressionAlgorithm::ZlibAtOpenSshDotCom.as_ref() {
-                CompressionAlgorithm::ZlibAtOpenSshDotCom
+            else if x == Self::ZlibAtOpenSshDotCom.as_ref() {
+                Self::ZlibAtOpenSshDotCom
             }
             else {
-                CompressionAlgorithm::Unknown(String::from_utf8(Vec::from(x))?)
+                Self::Unknown(String::from_utf8(Vec::from(x))?)
             }
         )
     }

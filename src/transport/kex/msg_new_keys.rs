@@ -1,28 +1,31 @@
+use super::*;
 use crate::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct NewKeys {}
+pub struct MsgNewKeys {}
 
-impl NewKeys {
-    const MSG_NUMBER: u8 = 21;
-
+impl MsgNewKeys {
     pub fn new() -> Self {
         Self {}
     }
 }
 
-impl Encode for NewKeys {
+impl Message for MsgNewKeys {
+    const NUMBER: u8 = 21;
+}
+
+impl Encode for MsgNewKeys {
     fn size(&self) -> usize {
         1
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(Self::MSG_NUMBER);
+        c.push_u8(<Self as Message>::NUMBER);
     }
 }
 
-impl Decode for NewKeys {
+impl Decode for MsgNewKeys {
     fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        c.expect_u8(Self::MSG_NUMBER)?;
+        c.expect_u8(<Self as Message>::NUMBER)?;
         Some(Self {})
     }
 }

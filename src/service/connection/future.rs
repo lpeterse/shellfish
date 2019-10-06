@@ -7,7 +7,6 @@ use super::msg_channel_open::*;
 use super::*;
 
 use crate::transport::*;
-use crate::socket::*;
 
 use futures::future::Future;
 use futures::ready;

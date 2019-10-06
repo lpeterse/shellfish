@@ -241,6 +241,17 @@ impl NameList {
         }
         vec.into()
     }
+    pub fn decode_string<'a, D: Decoder<'a>>(c: &mut D) -> Option<Vec<String>> {
+        let len = c.take_u32be()?;
+        let mut vec = Vec::new();
+        if len > 0 {
+            let bytes: &'a [u8] = c.take_bytes(len as usize)?;
+            for name in bytes.split(|c| c == &(',' as u8)) {
+                vec.push(String::from_utf8(Vec::from(name)).ok()?);
+            }
+        }
+        vec.into()
+    }
 }
 
 pub struct MPInt<'a>(pub &'a [u8]);
