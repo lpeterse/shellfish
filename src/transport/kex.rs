@@ -21,7 +21,7 @@ use super::config::*;
 use super::*;
 
 pub trait KexMachine {
-    fn new(config: &TransportConfig) -> Self;
+    fn new<C: TransportConfig>(config: &C) -> Self;
     fn init_local(&mut self);
     fn init_remote(&mut self, msg: MsgKexInit) -> Result<(), KexError>;
     fn is_init_sent(&self) -> bool;

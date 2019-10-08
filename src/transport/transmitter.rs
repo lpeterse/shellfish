@@ -19,19 +19,19 @@ pub struct Transmitter<T> {
 }
 
 impl<S: Socket> Transmitter<S> {
-    pub async fn new(config: &TransportConfig, socket: S) -> Result<Self, TransportError> {
+    pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
         let (rh, wh) = socket.split();
         let mut sender = BufferedSender::new(wh);
         let mut receiver = BufferedReceiver::new(rh);
 
-        Self::send_id(&mut sender, &config.identification).await?;
+        Self::send_id(&mut sender, config.identification()).await?;
         let remote_id = Self::receive_id(&mut receiver).await?;
 
         Ok(Self {
             sender,
             receiver,
             receiver_state: ReceiverState::new(),
-            local_id: config.identification.clone(),
+            local_id: config.identification().clone(),
             remote_id,
             bytes_sent: 0,
             packets_sent: 0,
@@ -39,10 +39,10 @@ impl<S: Socket> Transmitter<S> {
             packets_received: 0,
             encryption_ctx: EncryptionContext::new(),
             decryption_ctx: EncryptionContext::new(),
-            alive_timer: Delay::new(config.alive_interval),
-            alive_interval: config.alive_interval,
-            inactivity_timer: Delay::new(config.inactivity_timeout),
-            inactivity_timeout: config.inactivity_timeout,
+            alive_timer: Delay::new(config.alive_interval()),
+            alive_interval: config.alive_interval(),
+            inactivity_timer: Delay::new(config.inactivity_timeout()),
+            inactivity_timeout: config.inactivity_timeout(),
         })
     }
 

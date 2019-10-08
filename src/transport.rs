@@ -24,7 +24,6 @@ pub use self::identification::*;
 pub use self::message::*;
 pub use self::session_id::*;
 pub use self::socket::*;
-pub use crate::algorithm::*;
 
 use self::buffered_receiver::*;
 use self::buffered_sender::*;
@@ -73,7 +72,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
     ///
     /// The initial key exchange has been completed successfully when this
     /// function does not return an error.
-    pub async fn new(config: &TransportConfig, socket: S) -> Result<Self, TransportError> {
+    pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
         let mut transport = Self {
             transmitter: Transmitter::new(config, socket).await?,
             kex: <R as HasTransport>::KexMachine::new(config),

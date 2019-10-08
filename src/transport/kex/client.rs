@@ -1,7 +1,7 @@
 use super::super::config::*;
 use super::kex::*;
-use crate::algorithm::*;
 use crate::algorithm::kex::*;
+use crate::client::*;
 
 pub struct ClientKexMachine {
     pub state: ClientKexState,
@@ -50,7 +50,10 @@ impl ClientKexState {
     }
     // TODO: This needs to be extended in order to support other ECDH methods
     pub fn new_ecdh(client_init: MsgKexInit, server_init: MsgKexInit) -> Result<Self, KexError> {
-        if server_init.kex_algorithms.contains(&<Curve25519Sha256 as KexAlgorithm>::NAME.into()) {
+        if server_init
+            .kex_algorithms
+            .contains(&<Curve25519Sha256 as KexAlgorithm>::NAME.into())
+        {
             return Ok(Self::Ecdh(Ecdh {
                 sent: false,
                 client_init,
@@ -83,25 +86,25 @@ pub struct NewKeys {
 }
 
 impl KexMachine for ClientKexMachine {
-    fn new(config: &TransportConfig) -> Self {
+    fn new<C: TransportConfig>(config: &C) -> Self {
         let mut self_ = Self {
             state: ClientKexState::Delay(Delay::new(Default::default())),
-            interval_bytes: config.kex_interval_bytes,
-            interval_duration: config.kex_interval_duration,
-            next_kex_at_bytes_sent: config.kex_interval_bytes,
-            next_kex_at_bytes_received: config.kex_interval_bytes,
-            kex_algorithms: intersection(&config.kex_algorithms, &SUPPORTED_KEX_ALGORITHMS[..]),
-            mac_algorithms: intersection(&config.mac_algorithms, &SUPPORTED_MAC_ALGORITHMS[..]),
+            interval_bytes: config.kex_interval_bytes(),
+            interval_duration: config.kex_interval_duration(),
+            next_kex_at_bytes_sent: config.kex_interval_bytes(),
+            next_kex_at_bytes_received: config.kex_interval_bytes(),
+            kex_algorithms: intersection(config.kex_algorithms(), &SUPPORTED_KEX_ALGORITHMS[..]),
+            mac_algorithms: intersection(config.mac_algorithms(), &SUPPORTED_MAC_ALGORITHMS[..]),
             host_key_algorithms: intersection(
-                &config.host_key_algorithms,
+                config.host_key_algorithms(),
                 &SUPPORTED_HOST_KEY_ALGORITHMS[..],
             ),
             encryption_algorithms: intersection(
-                &config.encryption_algorithms,
-                &SUPPORTED_ENCRYPTION_ALGORITHMS[..]
+                config.encryption_algorithms(),
+                &SUPPORTED_ENCRYPTION_ALGORITHMS[..],
             ),
             compression_algorithms: intersection(
-                &config.compression_algorithms,
+                config.compression_algorithms(),
                 &SUPPORTED_COMPRESSION_ALGORITHMS[..],
             ),
             session_id: None,
@@ -230,7 +233,10 @@ impl KexMachine for ClientKexMachine {
                 match state {
                     ClientKexState::NewKeys(mut x) => {
                         log::warn!("{:?}", self.encryption_algorithms);
-                        log::warn!("{:?}", &x.server_init.encryption_algorithms_client_to_server);
+                        log::warn!(
+                            "{:?}",
+                            &x.server_init.encryption_algorithms_client_to_server
+                        );
                         let encryption_algorithm_client_to_server = common(
                             &self.encryption_algorithms,
                             &x.server_init.encryption_algorithms_client_to_server,
@@ -353,14 +359,11 @@ fn intersection(preferred: &Vec<&'static str>, supported: &[&'static str]) -> Ve
         .collect::<Vec<&'static str>>()
 }
 
-fn common(
-    client: &Vec<&'static str>,
-    server: &Vec<String>,
-) -> Option<&'static str> {
+fn common(client: &Vec<&'static str>, server: &Vec<String>) -> Option<&'static str> {
     for c in client {
         for s in server {
             if c == s {
-                return Some(*c)
+                return Some(*c);
             }
         }
     }

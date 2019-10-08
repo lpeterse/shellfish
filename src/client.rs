@@ -1,13 +1,18 @@
+mod config;
+
+pub use self::config::*;
+
 use crate::agent::Agent;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
-use crate::transport::*;
 use crate::service::*;
+use crate::transport::*;
 
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
 
 pub struct Client {
+    config: ClientConfig,
     user_name: Option<String>,
     agent: Option<Agent<Client>>,
 }
@@ -17,29 +22,29 @@ impl Client {
         &self,
         addr: A,
     ) -> Result<Connection<Self>, ClientError> {
-        let stream = TcpStream::connect(addr).await.map_err(ClientError::ConnectError)?;
-        let config = TransportConfig::default();
-        let transport: Transport<Client, TcpStream> = Transport::new(&config, stream).await?;
+        let socket = TcpStream::connect(addr)
+            .await
+            .map_err(ClientError::ConnectError)?;
+        let transport: Transport<Client, TcpStream> = Transport::new(&self.config, socket).await?;
         Ok(match self.user_name {
-            None => {
-                Connection::new(transport
+            None => Connection::new(
+                transport
                     .request_service(<Connection<Self> as Service<Self>>::NAME)
-                    .await?)
-            }
+                    .await?,
+            ),
             Some(ref user) => {
                 let transport = transport
                     .request_service(<UserAuth<Self> as Service<Self>>::NAME)
                     .await?;
-                let user_auth = UserAuth::new(transport);
-                user_auth.authenticate(
-                    user,
-                    self.agent.clone(),
-                )
-                .await?
+                UserAuth::new(transport)
+                    .authenticate(user, self.agent.clone())
+                    .await?
             }
         })
+    }
 
-        //Ok(Connection::<Self>::new(transport))
+    pub fn config(&mut self) -> &mut ClientConfig {
+        &mut self.config
     }
 
     pub fn user_name(&mut self) -> &mut Option<String> {
@@ -50,6 +55,7 @@ impl Client {
 impl Default for Client {
     fn default() -> Self {
         Self {
+            config: ClientConfig::default(),
             user_name: std::env::var("LOGNAME")
                 .or_else(|_| std::env::var("USER"))
                 .ok(),
