@@ -1,20 +1,21 @@
 use crate::algorithm::*;
 use crate::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug)]
-pub struct MsgSignRequest<'a, S: SignatureAlgorithm, D: Encode> {
-    pub key: &'a S::PublicKey,
+pub struct MsgSignRequest<'a, S: AuthenticationAlgorithm, D: Encode> {
+    pub key: &'a S::Identity,
     pub data: &'a D,
     pub flags: S::SignatureFlags,
 }
 
-impl<'a, S: SignatureAlgorithm, D: Encode> MsgSignRequest<'a, S, D> {
-    pub const MSG_NUMBER: u8 = 13;
+impl<'a, S: AuthenticationAlgorithm, D: Encode> Message for MsgSignRequest<'a, S, D> {
+    const NUMBER: u8 = 13;
 }
 
-impl<'a, S: SignatureAlgorithm, D: Encode> Encode for MsgSignRequest<'a, S, D>
+impl<'a, S: AuthenticationAlgorithm, D: Encode> Encode for MsgSignRequest<'a, S, D>
 where
-    S::PublicKey: Encode,
+    S::Identity: Encode,
     S::Signature: Encode,
 {
     fn size(&self) -> usize {
@@ -25,7 +26,7 @@ where
             + std::mem::size_of::<u32>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         Encode::encode(self.key, e);
         e.push_u32be(Encode::size(self.data) as u32);
         Encode::encode(self.data, e);
@@ -39,11 +40,10 @@ mod test {
 
     pub struct Foobar {}
 
-    impl SignatureAlgorithm for Foobar {
+    impl AuthenticationAlgorithm for Foobar {
         const NAME: &'static str = "foobar";
 
-        type PublicKey = ();
-        type PrivateKey = ();
+        type Identity = ();
         type Signature = ();
         type SignatureFlags = u32;
     }

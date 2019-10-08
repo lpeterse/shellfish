@@ -45,7 +45,7 @@ pub enum KexError {
     IoError(std::io::ErrorKind),
     DecoderError,
     ProtocolError,
-    NoCommonServerHostKeyAlgorithm,
+    NoCommonServerAuthenticationAlgorithm,
     NoCommonCompressionAlgorithm,
     NoCommonEncryptionAlgorithm,
     NoCommonKexAlgorithm,

@@ -6,6 +6,6 @@ pub use publickey::*;
 
 use crate::codec::*;
 
-pub trait Method {
+pub trait AuthMethod {
     const NAME: &'static str;
 }

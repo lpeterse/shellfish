@@ -111,14 +111,14 @@ impl<T: Encode, Q: Encode> Encode for (T, Q) {
     }
 }
 
-impl<'a, T, Q> DecodeRef<'a> for (T, Q)
+impl<T, Q> Decode for (T, Q)
 where
-    T: DecodeRef<'a>,
-    Q: DecodeRef<'a>,
+    T: Decode,
+    Q: Decode,
 {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let t = DecodeRef::decode(c)?;
-        let q = DecodeRef::decode(c)?;
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        let t = Decode::decode(c)?;
+        let q = Decode::decode(c)?;
         Some((t, q))
     }
 }
@@ -139,8 +139,8 @@ impl<T: Encode> Encode for Vec<T> {
     }
 }
 
-impl<'a, T: DecodeRef<'a>> DecodeRef<'a> for Vec<T> {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+impl<T: Decode> Decode for Vec<T> {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         // NB: Don't use `with_capacity` here as it might
         // lead to remote triggered resource exhaustion
@@ -192,6 +192,30 @@ impl<'a> DecodeRef<'a> for BigUint {
     }
 }
 
+pub struct List<T> (pub Vec<T>);
+
+impl <T> Encode for List<T> {
+    fn size(&self) -> usize {
+        panic!("FIXME")
+    }
+    fn encode<E: Encoder>(&self, _: &mut E) {
+        panic!("FIXME")
+    }
+}
+
+impl <T:Decode> Decode for List<T> {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        let len = c.take_u32be()?;
+        let bytes = c.take_bytes(len as usize)?;
+        let mut vec: Vec<T> = Vec::new();
+        let mut dec = BDecoder(bytes);
+        while let Some(s) = Decode::decode(&mut dec) {
+            vec.push(s);
+        }
+        Some(Self(vec))
+    }
+}
+
 pub enum NameList {}
 
 impl NameList {
@@ -216,19 +240,6 @@ impl NameList {
                 c.push_bytes(name);
             }
         }
-    }
-    pub fn decode<'a, T: std::convert::TryFrom<&'a [u8]>, D: Decoder<'a>>(
-        c: &mut D,
-    ) -> Option<Vec<T>> {
-        let len = c.take_u32be()?;
-        let mut vec = Vec::new();
-        if len > 0 {
-            let bytes = c.take_bytes(len as usize)?;
-            for name in bytes.split(|c| c == &(',' as u8)) {
-                vec.push(std::convert::TryFrom::try_from(name).ok()?);
-            }
-        }
-        vec.into()
     }
     pub fn decode_str<'a, D: Decoder<'a>>(c: &mut D) -> Option<Vec<&'a str>> {
         let len = c.take_u32be()?;
@@ -305,8 +316,8 @@ impl<A: Encode, B: Encode> Encode for E2<A, B> {
     }
 }
 
-impl<'a, A: DecodeRef<'a>, B: DecodeRef<'a>> DecodeRef<'a> for E2<A, B> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl<A: Decode, B: Decode> Decode for E2<A, B> {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         None.or_else(|| {
             let mut d_ = d.clone();
             let r = DecodeRef::decode(&mut d_).map(Self::A);

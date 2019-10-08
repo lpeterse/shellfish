@@ -3,7 +3,7 @@ use super::*;
 #[derive(Debug)]
 pub struct PasswordMethod(pub String);
 
-impl <'a> Method for PasswordMethod {
+impl <'a> AuthMethod for PasswordMethod {
     const NAME: &'static str = "password";
 }
 

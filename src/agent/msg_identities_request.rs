@@ -1,10 +1,11 @@
 use crate::codec::*;
+use crate::transport::Message;
 
 #[derive(Debug, PartialEq)]
 pub struct MsgIdentitiesRequest {}
 
-impl MsgIdentitiesRequest {
-    pub const MSG_NUMBER: u8 = 11;
+impl Message for MsgIdentitiesRequest {
+    const NUMBER: u8 = 11;
 }
 
 impl Encode for MsgIdentitiesRequest {
@@ -12,13 +13,13 @@ impl Encode for MsgIdentitiesRequest {
         std::mem::size_of::<u8>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
     }
 }
 
 impl Decode for MsgIdentitiesRequest {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.expect_u8(Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {}.into()
     }
 }

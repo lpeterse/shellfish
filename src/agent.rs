@@ -11,18 +11,15 @@ use self::msg_identities_request::*;
 use self::msg_sign_request::*;
 use self::msg_sign_response::*;
 
-use crate::algorithm::*;
+use crate::algorithm::authentication::*;
 use crate::client::*;
 use crate::codec::*;
-use crate::keys::PublicKey;
-use crate::role::*;
-use crate::transport::buffered_receiver::BufferedReceiver;
-use crate::transport::buffered_sender::BufferedSender;
+use crate::role::*; 
 
 use async_std::os::unix::net::UnixStream;
-use futures::io::{AsyncReadExt, ReadHalf, WriteHalf};
+use futures::io::{AsyncReadExt, AsyncWriteExt};
 use std::convert::TryFrom;
-use std::io::{Error, ErrorKind};
+use std::io::{Error};
 use std::path::{Path, PathBuf};
 
 pub struct Agent<R: Role> {
@@ -55,70 +52,33 @@ impl Agent<Client> {
     }
 
     /// Request a list of identities from the agent.
-    pub async fn identities(&self) -> Result<Vec<(PublicKey, String)>, AgentError> {
-        let (mut s, mut r) = self.connect().await?;
-        // Send request
-        let req = MsgIdentitiesRequest {};
-        let len = Encode::size(&req);
-        let mut enc = BEncoder::from(s.reserve(4 + len).await?);
-        enc.push_u32be(len as u32);
-        Encode::encode(&req, &mut enc);
-        s.flush().await?;
-        // Receive response
-        let len = r.read_u32be().await?;
-        let buf = r.read_exact(len as usize).await?;
-        let mut dec = BDecoder(buf);
-        let res: MsgIdentitiesAnswer =
-            DecodeRef::decode(&mut dec).ok_or(Error::new(ErrorKind::InvalidData, ""))?;
-        Ok(res.identities)
+    pub async fn identities(&self) -> Result<Vec<(HostIdentity, String)>, AgentError> {
+        let mut t = Transmitter::new(&self.path).await?;
+        t.send(&MsgIdentitiesRequest {}).await?;
+        t.receive::<MsgIdentitiesAnswer>().await.map(|x| x.identities)
     }
 
-    /// Sign a digest with the corresponding private key known to be owned the agent.
+    /// Sign a digest with the corresponding private key known to be owned be the agent.
     pub async fn sign<S, D>(
         &self,
-        key: &S::PublicKey,
+        identity: &S::Identity,
         data: &D,
         flags: S::SignatureFlags,
     ) -> Result<Option<S::Signature>, AgentError>
     where
-        S: SignatureAlgorithm,
-        S::PublicKey: Encode,
+        S: AuthenticationAlgorithm,
+        S::Identity: Encode,
         S::Signature: Decode,
         D: Encode,
     {
-        let (mut s, mut r) = self.connect().await?;
-        // Send request
-        let req: MsgSignRequest<S, D> = MsgSignRequest { key, data, flags };
-        let len = Encode::size(&req);
-        let mut enc = BEncoder::from(s.reserve(4 + len).await?);
-        enc.push_u32be(len as u32);
-        req.encode(&mut enc);
-        s.flush().await?;
-        // Receive response
-        let len = r.read_u32be().await?;
-        let buf = r.read_exact(len as usize).await?;
-        let mut dec = BDecoder(&buf[..]);
-        let res: E2<MsgSignResponse<S>, MsgFailure> =
-            DecodeRef::decode(&mut dec).ok_or(Error::new(ErrorKind::InvalidData, ""))?;
-        match res {
+        let msg: MsgSignRequest<S, D> = MsgSignRequest { key: identity, data, flags };
+        let mut t = Transmitter::new(&self.path).await?;
+        t.send(&msg).await?;
+        let msg: E2<MsgSignResponse<S>, MsgFailure> = t.receive().await?;
+        match msg {
             E2::A(x) => Ok(Some(x.signature)),
             E2::B(_) => Ok(None),
         }
-    }
-
-    async fn connect(
-        &self,
-    ) -> Result<
-        (
-            BufferedSender<WriteHalf<UnixStream>>,
-            BufferedReceiver<ReadHalf<UnixStream>>,
-        ),
-        Error,
-    > {
-        let (rh, wh) = UnixStream::connect(&self.path).await?.split();
-        let s = BufferedSender::new(wh);
-        let r = BufferedReceiver::new(rh);
-        Ok((s, r))
     }
 }
 
@@ -134,10 +94,53 @@ impl<R: Role> Clone for Agent<R> {
 #[derive(Debug)]
 pub enum AgentError {
     IoError(Error),
+    DecoderError
 }
 
 impl From<Error> for AgentError {
     fn from(e: Error) -> Self {
         Self::IoError(e)
+    }
+}
+
+struct Transmitter {
+    stream: UnixStream,
+}
+
+impl Transmitter {
+    pub async fn new(path: &PathBuf) -> Result<Self, AgentError> {
+        Ok(Self {
+            stream: UnixStream::connect(&path).await?,
+        })
+    }
+
+    pub async fn send<Msg: Encode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
+        let vec = BEncoder::encode(&Frame(&msg));
+        self.stream.write_all(&vec).await?;
+        self.stream.flush().await?;
+        Ok(())
+    }
+
+    pub async fn receive<Msg: Decode>(&mut self) -> Result<Msg, AgentError> {
+        let mut len: [u8;4] = [0;4];
+        self.stream.read_exact(&mut len[..]).await?;
+        let len = u32::from_be_bytes(len) as usize;
+        assert!(len <= 35000);
+        let mut vec = Vec::with_capacity(len);
+        vec.resize(len, 0);
+        self.stream.read_exact(&mut vec[..]).await?;
+        BDecoder::decode(&vec[..]).ok_or(AgentError::DecoderError)
+    }
+}
+
+struct Frame<T> (T);
+
+impl <T: Encode> Encode for Frame<T> {
+    fn size(&self) -> usize {
+        4 + self.0.size()
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u32be(self.0.size() as u32);
+        self.0.encode(e);
     }
 }

@@ -48,79 +48,9 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         &self.buffer[start..start + len]
     }
 
-    pub async fn fetch(&mut self, len: usize) -> async_std::io::Result<()> {
-        while self.window.len() < len {
-            if self.fill().await? == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "during buffer.fetch()",
-                ));
-            }
-        }
-        Ok(())
-    }
-
     async fn fill(&mut self) -> async_std::io::Result<usize> {
         let mut p = Pin::new(self);
         futures::future::poll_fn(|cx| p.as_mut().poll_fill(cx)).await
-    }
-
-    pub async fn read(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
-        if self.window.len() == 0 {
-            if self.fill().await? == 0 {
-                return Ok(&mut self.buffer[0..0]);
-            }
-        }
-        if len >= self.window.len() {
-            let r = &mut self.buffer[self.window.start..self.window.end];
-            self.window.start = 0;
-            self.window.end = 0;
-            Ok(r)
-        } else {
-            let r = &mut self.buffer[self.window.start..self.window.start + len];
-            self.window.start += len;
-            Ok(r)
-        }
-    }
-
-    pub async fn peek_exact(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
-        while self.window.len() < len {
-            if self.fill().await? == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "during buffer.peek_exact()",
-                ));
-            }
-        }
-        Ok(&mut self.buffer[self.window.start..][..len])
-    }
-
-    pub async fn read_u32be(&mut self) -> async_std::io::Result<u32> {
-        let x = self.read_exact(4).await?;
-        let mut y = [0; 4];
-        y.copy_from_slice(x);
-        Ok(u32::from_be_bytes(y))
-    }
-
-    pub async fn read_exact(&mut self, len: usize) -> async_std::io::Result<&mut [u8]> {
-        while self.window.len() < len {
-            if self.fill().await? == 0 {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::UnexpectedEof,
-                    "during buffer.read_exact()",
-                ));
-            }
-        }
-        if len >= self.window.len() {
-            let r = &mut self.buffer[self.window.start..self.window.end];
-            self.window.start = 0;
-            self.window.end = 0;
-            Ok(r)
-        } else {
-            let r = &mut self.buffer[self.window.start..self.window.start + len];
-            self.window.start += len;
-            Ok(r)
-        }
     }
 
     pub async fn read_line(&mut self, max_len: usize) -> async_std::io::Result<&[u8]> {
@@ -220,6 +150,8 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
         }
     }
 }
+
+/*
 
 #[cfg(test)]
 mod test {
@@ -398,3 +330,5 @@ mod test {
         });
     }
 }
+
+*/

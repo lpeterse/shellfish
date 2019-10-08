@@ -1,5 +1,7 @@
 use super::super::config::*;
 use super::kex::*;
+use crate::algorithm::*;
+use crate::algorithm::kex::*;
 
 pub struct ClientKexMachine {
     pub state: ClientKexState,
@@ -7,11 +9,11 @@ pub struct ClientKexMachine {
     pub interval_duration: std::time::Duration,
     pub next_kex_at_bytes_sent: u64,
     pub next_kex_at_bytes_received: u64,
-    pub kex_algorithms: Vec<KexAlgorithm>,
-    pub mac_algorithms: Vec<MacAlgorithm>,
-    pub host_key_algorithms: Vec<HostKeyAlgorithm>,
-    pub encryption_algorithms: Vec<EncryptionAlgorithm>,
-    pub compression_algorithms: Vec<CompressionAlgorithm>,
+    pub kex_algorithms: Vec<&'static str>,
+    pub mac_algorithms: Vec<&'static str>,
+    pub host_key_algorithms: Vec<&'static str>,
+    pub encryption_algorithms: Vec<&'static str>,
+    pub compression_algorithms: Vec<&'static str>,
     pub session_id: Option<SessionId>,
 }
 
@@ -28,28 +30,35 @@ impl ClientKexState {
             sent: false,
             client_init: MsgKexInit::new(
                 KexCookie::random(),
-                x.kex_algorithms.clone(),
-                x.host_key_algorithms.clone(),
-                x.encryption_algorithms.clone(),
-                x.mac_algorithms.clone(),
-                x.compression_algorithms.clone(),
+                x.kex_algorithms.iter().map(|x| Into::into(*x)).collect(),
+                x.host_key_algorithms
+                    .iter()
+                    .map(|x| Into::into(*x))
+                    .collect(),
+                x.encryption_algorithms
+                    .iter()
+                    .map(|x| Into::into(*x))
+                    .collect(),
+                x.mac_algorithms.iter().map(|x| Into::into(*x)).collect(),
+                x.compression_algorithms
+                    .iter()
+                    .map(|x| Into::into(*x))
+                    .collect(),
             ),
-            server_init
+            server_init,
         })
     }
     // TODO: This needs to be extended in order to support other ECDH methods
     pub fn new_ecdh(client_init: MsgKexInit, server_init: MsgKexInit) -> Result<Self, KexError> {
-        match common(&client_init.kex_algorithms, &server_init.kex_algorithms) {
-            Some(KexAlgorithm::Curve25519Sha256) => (),
-            Some(KexAlgorithm::Curve25519Sha256AtLibsshDotOrg) => (),
-            _ => return Err(KexError::NoCommonKexAlgorithm),
+        if server_init.kex_algorithms.contains(&<Curve25519Sha256 as KexAlgorithm>::NAME.into()) {
+            return Ok(Self::Ecdh(Ecdh {
+                sent: false,
+                client_init,
+                server_init,
+                dh_secret: X25519::new(),
+            }));
         }
-        Ok(Self::Ecdh(Ecdh {
-            sent: false,
-            client_init,
-            server_init,
-            dh_secret: X25519::new(),
-        }))
+        return Err(KexError::NoCommonKexAlgorithm);
     }
 }
 
@@ -81,19 +90,19 @@ impl KexMachine for ClientKexMachine {
             interval_duration: config.kex_interval_duration,
             next_kex_at_bytes_sent: config.kex_interval_bytes,
             next_kex_at_bytes_received: config.kex_interval_bytes,
-            kex_algorithms: intersection(&config.kex_algorithms, &KexAlgorithm::supported()),
-            mac_algorithms: intersection(&config.mac_algorithms, &MacAlgorithm::supported()),
+            kex_algorithms: intersection(&config.kex_algorithms, &SUPPORTED_KEX_ALGORITHMS[..]),
+            mac_algorithms: intersection(&config.mac_algorithms, &SUPPORTED_MAC_ALGORITHMS[..]),
             host_key_algorithms: intersection(
                 &config.host_key_algorithms,
-                &HostKeyAlgorithm::supported(),
+                &SUPPORTED_HOST_KEY_ALGORITHMS[..],
             ),
             encryption_algorithms: intersection(
                 &config.encryption_algorithms,
-                &EncryptionAlgorithm::supported(),
+                &SUPPORTED_ENCRYPTION_ALGORITHMS[..]
             ),
             compression_algorithms: intersection(
                 &config.compression_algorithms,
-                &CompressionAlgorithm::supported(),
+                &SUPPORTED_COMPRESSION_ALGORITHMS[..],
             ),
             session_id: None,
         };
@@ -146,9 +155,7 @@ impl KexMachine for ClientKexMachine {
 
     fn init_local(&mut self) {
         match self.state {
-            ClientKexState::Delay(_) => {
-                self.state = ClientKexState::new_init(self, None)
-            }
+            ClientKexState::Delay(_) => self.state = ClientKexState::new_init(self, None),
             _ => (),
         }
     }
@@ -222,44 +229,46 @@ impl KexMachine for ClientKexMachine {
                 let state = std::mem::replace(&mut self.state, state);
                 match state {
                     ClientKexState::NewKeys(mut x) => {
+                        log::warn!("{:?}", self.encryption_algorithms);
+                        log::warn!("{:?}", &x.server_init.encryption_algorithms_client_to_server);
                         let encryption_algorithm_client_to_server = common(
-                            &x.client_init.encryption_algorithms_client_to_server,
+                            &self.encryption_algorithms,
                             &x.server_init.encryption_algorithms_client_to_server,
                         )
                         .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
                         let encryption_algorithm_server_to_client = common(
-                            &x.client_init.encryption_algorithms_server_to_client,
+                            &self.encryption_algorithms,
                             &x.server_init.encryption_algorithms_server_to_client,
                         )
                         .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
                         let compression_algorithm_client_to_server = common(
-                            &x.client_init.compression_algorithms_client_to_server,
+                            &self.compression_algorithms,
                             &x.server_init.compression_algorithms_client_to_server,
                         )
                         .ok_or(KexError::NoCommonCompressionAlgorithm)?;
                         let compression_algorithm_server_to_client = common(
-                            &x.client_init.compression_algorithms_server_to_client,
+                            &self.compression_algorithms,
                             &x.server_init.compression_algorithms_server_to_client,
                         )
                         .ok_or(KexError::NoCommonCompressionAlgorithm)?;
                         let mac_algorithm_client_to_server = common(
-                            &x.client_init.mac_algorithms_client_to_server,
+                            &self.mac_algorithms,
                             &x.server_init.mac_algorithms_client_to_server,
                         );
                         let mac_algorithm_server_to_client = common(
-                            &x.client_init.mac_algorithms_server_to_client,
+                            &self.mac_algorithms,
                             &x.server_init.mac_algorithms_server_to_client,
                         );
                         t.encryption_ctx().new_keys(
                             &encryption_algorithm_client_to_server,
                             &compression_algorithm_client_to_server,
-                            &mac_algorithm_client_to_server,
+                            mac_algorithm_client_to_server,
                             &mut x.key_streams.c(),
                         );
                         t.decryption_ctx().new_keys(
                             &encryption_algorithm_server_to_client,
                             &compression_algorithm_server_to_client,
-                            &mac_algorithm_server_to_client,
+                            mac_algorithm_server_to_client,
                             &mut x.key_streams.d(),
                         );
 
@@ -333,19 +342,25 @@ impl KexMachine for ClientKexMachine {
     }
 }
 
-fn intersection<T: Clone + PartialEq>(preferred: &Vec<T>, supported: &Vec<T>) -> Vec<T> {
+fn intersection(preferred: &Vec<&'static str>, supported: &[&'static str]) -> Vec<&'static str> {
     preferred
         .iter()
-        .filter(|p| supported.contains(p))
-        .map(Clone::clone)
-        .collect::<Vec<T>>()
+        .filter_map(|p| {
+            supported
+                .iter()
+                .find_map(|s| if p == s { Some(*s) } else { None })
+        })
+        .collect::<Vec<&'static str>>()
 }
 
-fn common<T: Clone + PartialEq>(client: &Vec<T>, server: &Vec<T>) -> Option<T> {
+fn common(
+    client: &Vec<&'static str>,
+    server: &Vec<String>,
+) -> Option<&'static str> {
     for c in client {
         for s in server {
             if c == s {
-                return Some(c.clone());
+                return Some(*c)
             }
         }
     }

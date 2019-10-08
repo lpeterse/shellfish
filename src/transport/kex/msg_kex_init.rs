@@ -1,18 +1,17 @@
 use super::*;
-use crate::algorithm::*;
 use crate::codec::*;
 
 #[derive(Debug, Clone)]
 pub struct MsgKexInit {
     pub cookie: KexCookie,
-    pub kex_algorithms: Vec<KexAlgorithm>,
-    pub server_host_key_algorithms: Vec<HostKeyAlgorithm>,
-    pub encryption_algorithms_client_to_server: Vec<EncryptionAlgorithm>,
-    pub encryption_algorithms_server_to_client: Vec<EncryptionAlgorithm>,
-    pub mac_algorithms_client_to_server: Vec<MacAlgorithm>,
-    pub mac_algorithms_server_to_client: Vec<MacAlgorithm>,
-    pub compression_algorithms_client_to_server: Vec<CompressionAlgorithm>,
-    pub compression_algorithms_server_to_client: Vec<CompressionAlgorithm>,
+    pub kex_algorithms: Vec<String>,
+    pub server_host_key_algorithms: Vec<String>,
+    pub encryption_algorithms_client_to_server: Vec<String>,
+    pub encryption_algorithms_server_to_client: Vec<String>,
+    pub mac_algorithms_client_to_server: Vec<String>,
+    pub mac_algorithms_server_to_client: Vec<String>,
+    pub compression_algorithms_client_to_server: Vec<String>,
+    pub compression_algorithms_server_to_client: Vec<String>,
     pub languages_client_to_server: Vec<String>,
     pub languages_server_to_client: Vec<String>,
     pub first_packet_follows: bool,
@@ -21,11 +20,11 @@ pub struct MsgKexInit {
 impl MsgKexInit {
     pub fn new(
         cookie: KexCookie,
-        kex_algorithms: Vec<KexAlgorithm>,
-        server_host_key_algorithms: Vec<HostKeyAlgorithm>,
-        encryption_algorithms: Vec<EncryptionAlgorithm>,
-        mac_algorithms: Vec<MacAlgorithm>,
-        compression_algorithms: Vec<CompressionAlgorithm>,
+        kex_algorithms: Vec<String>,
+        server_host_key_algorithms: Vec<String>,
+        encryption_algorithms: Vec<String>,
+        mac_algorithms: Vec<String>,
+        compression_algorithms: Vec<String>,
     ) -> Self {
         Self {
             cookie: cookie,
@@ -91,14 +90,14 @@ impl Decode for MsgKexInit {
                 d.take_into(&mut x)?;
                 x
             }),
-            kex_algorithms: NameList::decode(d)?,
-            server_host_key_algorithms: NameList::decode(d)?,
-            encryption_algorithms_client_to_server: NameList::decode(d)?,
-            encryption_algorithms_server_to_client: NameList::decode(d)?,
-            mac_algorithms_client_to_server: NameList::decode(d)?,
-            mac_algorithms_server_to_client: NameList::decode(d)?,
-            compression_algorithms_client_to_server: NameList::decode(d)?,
-            compression_algorithms_server_to_client: NameList::decode(d)?,
+            kex_algorithms: NameList::decode_string(d)?,
+            server_host_key_algorithms: NameList::decode_string(d)?,
+            encryption_algorithms_client_to_server: NameList::decode_string(d)?,
+            encryption_algorithms_server_to_client: NameList::decode_string(d)?,
+            mac_algorithms_client_to_server: NameList::decode_string(d)?,
+            mac_algorithms_server_to_client: NameList::decode_string(d)?,
+            compression_algorithms_client_to_server: NameList::decode_string(d)?,
+            compression_algorithms_server_to_client: NameList::decode_string(d)?,
             languages_client_to_server: NameList::decode_string(d)?,
             languages_server_to_client: NameList::decode_string(d)?,
             first_packet_follows: d.take_u8().map(|x| x != 0)?,

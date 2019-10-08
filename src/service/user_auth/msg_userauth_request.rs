@@ -2,17 +2,17 @@ use super::method::*;
 use crate::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgUserAuthRequest<'a, M: Method> {
+pub struct MsgUserAuthRequest<'a, M: AuthMethod> {
     pub user_name: &'a str,
     pub service_name: &'a str,
     pub method: M,
 }
 
-impl<'a, M: Method> MsgUserAuthRequest<'a, M> {
+impl<'a, M: AuthMethod> MsgUserAuthRequest<'a, M> {
     pub const MSG_NUMBER: u8 = 50;
 }
 
-impl <'a, M: Method + Encode> Encode for MsgUserAuthRequest<'a, M> {
+impl <'a, M: AuthMethod + Encode> Encode for MsgUserAuthRequest<'a, M> {
     fn size(&self) -> usize {
         1 + Encode::size(&self.user_name)
             + Encode::size(&self.service_name)
@@ -28,7 +28,7 @@ impl <'a, M: Method + Encode> Encode for MsgUserAuthRequest<'a, M> {
     }
 }
 
-impl <'a, M: Method + DecodeRef<'a>> DecodeRef<'a> for MsgUserAuthRequest<'a, M> {
+impl <'a, M: AuthMethod + DecodeRef<'a>> DecodeRef<'a> for MsgUserAuthRequest<'a, M> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
         let user_name = DecodeRef::decode(d)?;

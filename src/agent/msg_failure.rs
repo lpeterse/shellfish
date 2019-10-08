@@ -1,10 +1,11 @@
 use crate::codec::*;
+use crate::transport::Message;
 
 #[derive(Debug, PartialEq)]
 pub struct MsgFailure {}
 
-impl MsgFailure {
-    pub const MSG_NUMBER: u8 = 5;
+impl Message for MsgFailure {
+    const NUMBER: u8 = 5;
 }
 
 impl Encode for MsgFailure {
@@ -12,13 +13,13 @@ impl Encode for MsgFailure {
         std::mem::size_of::<u8>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
     }
 }
 
 impl Decode for MsgFailure {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.expect_u8(Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {}.into()
     }
 }

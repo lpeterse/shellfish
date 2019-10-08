@@ -1,11 +1,9 @@
-mod compression;
-mod encryption;
-mod host_key;
-mod kex;
-mod mac;
+pub mod authentication;
+pub mod compression;
+pub mod encryption;
+pub mod kex;
 
-pub use self::compression::*;
-pub use self::encryption::*;
-pub use self::host_key::*;
-pub use self::kex::*;
-pub use self::mac::*;
+pub use self::authentication::AuthenticationAlgorithm;
+pub use self::compression::CompressionAlgorithm;
+pub use self::encryption::EncryptionAlgorithm;
+pub use self::kex::KexAlgorithm;

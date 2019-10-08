@@ -6,6 +6,7 @@ pub trait Decoder<'a>: Clone {
     fn take_eoi(&self) -> Option<()>;
     fn take_u8(&mut self) -> Option<u8>;
     fn take_u32be(&mut self) -> Option<u32>;
+    fn take_u64be(&mut self) -> Option<u64>;
     fn take_bool(&mut self) -> Option<bool> {
         self.take_u8().map(|x| x != 0)
     }
@@ -77,6 +78,17 @@ impl <'a> Decoder<'a> for BDecoder<'a> {
             |   (*self.0.get(3)? as u32);
         self.0 = &self.0[4..];
         Some(x)
+    }
+
+    fn take_u64be(self: &mut Self) -> Option<u64> {
+        if self.0.len() >= 8 {
+            let mut x: [u8;8] = [0;8];
+            x.copy_from_slice(&self.0[..8]);
+            self.0 = &self.0[8..];
+            Some(u64::from_be_bytes(x))
+        } else {
+            None
+        }
     }
 
     fn take_str(&mut self, len: usize) -> Option<&'a str> {

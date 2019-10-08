@@ -37,11 +37,12 @@ impl<'a> MsgChannelRequest2<'a> {
     const MSG_NUMBER: u8 = 98;
 }
 
+// FIXME
 impl <'a> Encode for MsgChannelRequest2<'a> {
     fn size(&self) -> usize {
         0
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
+    fn encode<E: Encoder>(&self, _: &mut E) {
     }
 }
 

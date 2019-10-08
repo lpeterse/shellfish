@@ -1,13 +1,13 @@
 use crate::codec::*;
-use crate::keys::*;
+use crate::algorithm::authentication::*;
 use super::ecdh_algorithm::*;
 use super::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgKexEcdhReply<A: EcdhAlgorithm> {
-    pub host_key: PublicKey,
+    pub host_key: HostIdentity,
     pub dh_public: A::PublicKey,
-    pub signature: Signature,
+    pub signature: HostIdentitySignature,
 }
 
 impl <A: EcdhAlgorithm> Message for MsgKexEcdhReply<A> {

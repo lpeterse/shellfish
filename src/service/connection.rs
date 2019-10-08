@@ -30,6 +30,7 @@ use crate::client::*;
 
 use futures::channel::oneshot;
 use futures::future::FutureExt;
+use async_std::net::TcpStream;
 
 pub struct Connection<R: Role> {
     phantom: std::marker::PhantomData<R>,
@@ -38,16 +39,14 @@ pub struct Connection<R: Role> {
     request_receiver: RequestReceiver,
 }
 
-impl <R: Role> Service for Connection<R> {
+impl <R: Role> Service<R> for Connection<R> {
     const NAME: &'static str = "ssh-connection";
-}
 
-impl <R: Role> Connection<R> {
-    pub fn new<T: Socket>(t: Transport<R, T>) -> Connection<R> {
+    fn new(transport: Transport<R, TcpStream>) -> Connection<R> {
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();
-        let future = ConnectionFuture::new(t, s3, r2).map(|e| {
+        let future = ConnectionFuture::new(transport, s3, r2).map(|e| {
             log::warn!("Connection died with {:?}", e);
             s1.send(e.unwrap_err()).unwrap_or(())
         });
@@ -59,6 +58,9 @@ impl <R: Role> Connection<R> {
             request_receiver: r3,
         }
     }
+}
+
+impl <R: Role> Connection<R> {
 
     pub async fn disconnect(mut self) {
         self.request_sender

@@ -1,8 +1,8 @@
 use crate::agent::Agent;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
-use crate::service::*;
 use crate::transport::*;
+use crate::service::*;
 
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;
@@ -20,27 +20,26 @@ impl Client {
         let stream = TcpStream::connect(addr).await.map_err(ClientError::ConnectError)?;
         let config = TransportConfig::default();
         let transport: Transport<Client, TcpStream> = Transport::new(&config, stream).await?;
-        let transport = match self.user_name {
+        Ok(match self.user_name {
             None => {
-                transport
-                    .request_service(<Connection<Self> as Service>::NAME)
-                    .await?
+                Connection::new(transport
+                    .request_service(<Connection<Self> as Service<Self>>::NAME)
+                    .await?)
             }
             Some(ref user) => {
                 let transport = transport
-                    .request_service(<UserAuth<Self> as Service>::NAME)
+                    .request_service(<UserAuth<Self> as Service<Self>>::NAME)
                     .await?;
-                UserAuth::<Self>::authenticate(
-                    transport,
-                    <Connection<Self> as Service>::NAME,
+                let user_auth = UserAuth::new(transport);
+                user_auth.authenticate(
                     user,
                     self.agent.clone(),
                 )
                 .await?
             }
-        };
+        })
 
-        Ok(Connection::<Self>::new(transport))
+        //Ok(Connection::<Self>::new(transport))
     }
 
     pub fn user_name(&mut self) -> &mut Option<String> {

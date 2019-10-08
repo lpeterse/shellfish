@@ -1,35 +1,35 @@
 use crate::codec::*;
-
+use crate::transport::Message;
 use crate::algorithm::*;
 
 #[derive(Debug, PartialEq)]
-pub struct MsgSignResponse<S: SignatureAlgorithm> {
+pub struct MsgSignResponse<S: AuthenticationAlgorithm> {
     pub signature: S::Signature,
 }
 
-impl <S: SignatureAlgorithm> MsgSignResponse<S> {
-    pub const MSG_NUMBER: u8 = 14;
+impl <S: AuthenticationAlgorithm> Message for MsgSignResponse<S> {
+    const NUMBER: u8 = 14;
 }
 
-impl <S: SignatureAlgorithm> Encode for MsgSignResponse<S>
+impl <S: AuthenticationAlgorithm> Encode for MsgSignResponse<S>
 where
     S::Signature: Encode
 {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.signature)
+        std::mem::size_of::<u8>() + Encode::size(&self.signature)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         Encode::encode(&self.signature, e);
     }
 }
 
-impl <S: SignatureAlgorithm> Decode for MsgSignResponse<S>
+impl <S: AuthenticationAlgorithm> Decode for MsgSignResponse<S>
 where
     S::Signature: Decode
 {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.expect_u8(Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             signature: DecodeRef::decode(d)?
         }.into()
@@ -43,11 +43,10 @@ mod test {
     #[derive(Debug, PartialEq)]
     pub struct Foobar {}
 
-    impl SignatureAlgorithm for Foobar {
+    impl AuthenticationAlgorithm for Foobar {
         const NAME: &'static str = "foobar";
 
-        type PublicKey = ();
-        type PrivateKey = ();
+        type Identity = ();
         type Signature = String;
         type SignatureFlags = u32;
     }

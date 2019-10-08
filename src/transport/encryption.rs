@@ -4,7 +4,6 @@ mod plain;
 use self::chacha20_poly1305::*;
 use self::plain::*;
 use super::*;
-use crate::algorithm::*;
 
 pub enum EncryptionContext {
     Plain(PlainEncryptionContext),
@@ -18,14 +17,14 @@ impl EncryptionContext {
 
     pub fn new_keys(
         &mut self,
-        enc: &EncryptionAlgorithm,
-        comp: &CompressionAlgorithm,
-        _mac: &Option<MacAlgorithm>,
+        enc: &'static str,
+        comp: &'static str,
+        _mac: Option<&'static str>,
         ks: &mut KeyStream,
     ) {
         match (enc, comp) {
             // chacha20-poly1305@openssh.com ignores the mac algorithm
-            (EncryptionAlgorithm::Chacha20Poly1305AtOpensshDotCom, CompressionAlgorithm::None) => {
+            ("chacha20-poly1305@openssh.com", "none") => {
                 match self {
                     // Just pass new keys to existing instance (very likely)
                     Self::Chacha20Poly1305(ctx) => ctx.new_keys(ks),
@@ -63,13 +62,5 @@ impl EncryptionContext {
             Self::Plain(ctx) => ctx.decrypt_packet(pc, buf),
             Self::Chacha20Poly1305(ctx) => ctx.decrypt_packet(pc, buf),
         }
-    }
-
-    pub fn supported_encryption_algorithms() -> &'static [EncryptionAlgorithm] {
-        &[EncryptionAlgorithm::Chacha20Poly1305AtOpensshDotCom]
-    }
-
-    pub fn supported_mac_algorithms() -> &'static [MacAlgorithm] {
-        &[]
     }
 }

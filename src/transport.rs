@@ -24,9 +24,7 @@ pub use self::identification::*;
 pub use self::message::*;
 pub use self::session_id::*;
 pub use self::socket::*;
-pub use crate::algorithm::{
-    CompressionAlgorithm, EncryptionAlgorithm, HostKeyAlgorithm, KexAlgorithm, MacAlgorithm,
-};
+pub use crate::algorithm::*;
 
 use self::buffered_receiver::*;
 use self::buffered_sender::*;

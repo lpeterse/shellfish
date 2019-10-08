@@ -1,13 +1,14 @@
+use crate::algorithm::authentication::*;
 use crate::codec::*;
-use crate::keys::*;
+use crate::transport::Message;
 
 #[derive(Debug, PartialEq)]
 pub struct MsgIdentitiesAnswer {
-    pub identities: Vec<(PublicKey, String)>,
+    pub identities: Vec<(HostIdentity, String)>,
 }
 
-impl MsgIdentitiesAnswer {
-    pub const MSG_NUMBER: u8 = 12;
+impl Message for MsgIdentitiesAnswer {
+    const NUMBER: u8 = 12;
 }
 
 impl Encode for MsgIdentitiesAnswer {
@@ -15,16 +16,16 @@ impl Encode for MsgIdentitiesAnswer {
         std::mem::size_of::<u8>() + Encode::size(&self.identities)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         Encode::encode(&self.identities, e);
     }
 }
 
 impl Decode for MsgIdentitiesAnswer {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.expect_u8(Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            identities: DecodeRef::decode(d)?,
+            identities: Decode::decode(d)?,
         }
         .into()
     }
@@ -34,7 +35,6 @@ impl Decode for MsgIdentitiesAnswer {
 mod test {
 
     use super::*;
-    use crate::algorithm::*;
     use num::BigUint;
 
     #[test]
@@ -67,7 +67,7 @@ mod test {
         let expected = Some(MsgIdentitiesAnswer {
             identities: vec![
                 (
-                    PublicKey::RsaPublicKey(SshRsaPublicKey {
+                    HostIdentity::RsaKey(SshRsaPublicKey {
                         public_e: BigUint::new(vec![65537]),
                         public_n: BigUint::new(vec![
                             1536924887, 1797284974, 3382208288, 91659320, 2738779923, 2905806383,
@@ -86,7 +86,7 @@ mod test {
                     "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so".into(),
                 ),
                 (
-                    PublicKey::Ed25519PublicKey(SshEd25519PublicKey([
+                    HostIdentity::Ed25519Key(SshEd25519PublicKey([
                         111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178,
                         182, 197, 240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63,
                     ])),

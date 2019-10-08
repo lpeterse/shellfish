@@ -2,18 +2,18 @@ use super::*;
 use crate::algorithm::*;
 
 #[derive(Debug)]
-pub struct PublicKeyMethod<S: SignatureAlgorithm> {
-    pub public_key: S::PublicKey,
+pub struct PublicKeyMethod<S: AuthenticationAlgorithm> {
+    pub public_key: S::Identity,
     pub signature: Option<S::Signature>,
 }
 
-impl<'a, S: SignatureAlgorithm> Method for PublicKeyMethod<S> {
+impl<'a, S: AuthenticationAlgorithm> AuthMethod for PublicKeyMethod<S> {
     const NAME: &'static str = "publickey";
 }
 
-impl <S: SignatureAlgorithm> Encode for PublicKeyMethod<S>
+impl <S: AuthenticationAlgorithm> Encode for PublicKeyMethod<S>
 where
-    S::PublicKey: Encode,
+    S::Identity: Encode,
     S::Signature: Encode,
 {
     fn size(&self) -> usize {
@@ -35,9 +35,9 @@ where
     }
 }
 
-impl<'a, S: SignatureAlgorithm> DecodeRef<'a> for PublicKeyMethod<S>
+impl<'a, S: AuthenticationAlgorithm> DecodeRef<'a> for PublicKeyMethod<S>
 where
-    S::PublicKey: DecodeRef<'a>,
+    S::Identity: DecodeRef<'a>,
     S::Signature: DecodeRef<'a>,
 {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {

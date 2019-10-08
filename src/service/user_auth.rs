@@ -10,91 +10,116 @@ use self::msg_success::*;
 use self::msg_userauth_request::*;
 use self::signature::*;
 
-use crate::service::Service;
 use crate::agent::*;
-use crate::algorithm::*;
+use crate::algorithm::authentication::*;
 use crate::client::*;
 use crate::codec::*;
-use crate::keys::*;
 use crate::role::*;
+use crate::service::Service;
 use crate::transport::*;
 
+use async_std::net::TcpStream;
+
+/// The `ssh-userauth` service negotiates and performs methods of user authentication between
+/// client and server.
+///
+/// The service is a short-lived proxy that is only used to lift other services into an
+/// authenticated context.
 pub struct UserAuth<R: Role> {
-    phantom: std::marker::PhantomData<R>
+    transport: Transport<R, TcpStream>,
 }
 
-impl <R: Role> Service for UserAuth<R> {
+impl<R: Role> Service<R> for UserAuth<R> {
     const NAME: &'static str = "ssh-userauth";
+
+    fn new(transport: Transport<R, TcpStream>) -> Self {
+        Self { transport }
+    }
 }
 
 impl UserAuth<Client> {
-    pub async fn authenticate<S: Socket>(
-        mut transport: Transport<Client, S>,
-        service_name: &str,
-        user_name: &str,
+    /// Request another service with user authentication.
+    pub async fn authenticate<S: Service<Client>>(
+        mut self,
+        user: &str,
         agent: Option<Agent<Client>>,
-    ) -> Result<Transport<Client, S>, UserAuthError> {
-        match agent {
-            None => (),
-            Some(a) => {
-                let identities = a.identities().await?;
-                for (key, _comment) in identities {
-                    match key {
-                        PublicKey::Ed25519PublicKey(public_key) => {
-                            let session_id = &transport.session_id().unwrap();
-                            let data: SignatureData<SshEd25519> = SignatureData {
-                                session_id,
-                                user_name,
-                                service_name,
-                                public_key: public_key.clone(),
-                            };
-                            let signature: SshEd25519Signature = match a
-                                .sign::<SshEd25519, SignatureData<SshEd25519>>(
-                                    &public_key,
-                                    &data,
-                                    Default::default(),
-                                )
-                                .await?
-                            {
-                                None => continue,
-                                Some(s) => s,
-                            };
-                            let req: MsgUserAuthRequest<PublicKeyMethod<SshEd25519>> =
-                                MsgUserAuthRequest {
-                                    user_name,
-                                    service_name,
-                                    method: PublicKeyMethod {
-                                        public_key,
-                                        signature: Some(signature),
-                                    },
-                                };
-                            transport.send(&req).await?;
-                            transport.flush().await?;
-                            transport.receive().await?;
-                            match transport.decode_ref().unwrap() {
-                                // TODO
-                                E2::A(x) => {
-                                    let _: Success = x;
-                                    transport.consume();
-                                    return Ok(transport);
-                                }
-                                E2::B(x) => {
-                                    let _: Failure = x;
-                                    let name = <PublicKeyMethod<SshEd25519> as Method>::NAME;
-                                    let b = !x.methods.contains(&name);
-                                    transport.consume();
-                                    if b {
-                                        break;
-                                    };
-                                }
-                            }
-                        }
-                        key => log::error!("Ignoring unsupported key {:?}", key),
-                    }
+    ) -> Result<S, UserAuthError> {
+        let service = <S as Service<Client>>::NAME;
+        let agent = agent.ok_or(UserAuthError::NoMoreAuthMethods)?;
+        let identities = agent.identities().await?;
+
+        for (id, comment) in identities {
+            log::debug!("Trying identity {}: {}", comment, id.algorithm());
+            let success = match id {
+                HostIdentity::Ed25519Key(x) => {
+                    (&mut self)
+                        .try_pubkey::<SshEd25519>(&agent, service, user, x)
+                        .await?
                 }
+                HostIdentity::Ed25519Cert(x) => {
+                    (&mut self)
+                        .try_pubkey::<SshEd25519Cert>(&agent, service, user, x)
+                        .await?
+                }
+                _ => false,
+            };
+            if success {
+                return Ok(<S as Service<Client>>::new(self.transport));
             }
         }
+
         Err(UserAuthError::NoMoreAuthMethods)
+    }
+
+    async fn try_pubkey<A>(
+        &mut self,
+        agent: &Agent<Client>,
+        service: &str,
+        user: &str,
+        id: A::Identity,
+    ) -> Result<bool, UserAuthError>
+    where
+        A: AuthenticationAlgorithm,
+        A::Identity: Clone + Encode,
+        A::Signature: Decode,
+    {
+        let session_id = &self.transport.session_id().unwrap();
+        let data: SignatureData<A> = SignatureData {
+            session_id,
+            user_name: user,
+            service_name: service,
+            public_key: id.clone(),
+        };
+        let signature = agent.sign::<A, _>(&id, &data, Default::default()).await?;
+        let signature = match signature {
+            None => return Ok(false),
+            Some(s) => s,
+        };
+        let msg = MsgUserAuthRequest::<PublicKeyMethod<A>> {
+            user_name: user,
+            service_name: service,
+            method: PublicKeyMethod {
+                public_key: id,
+                signature: Some(signature),
+            },
+        };
+        self.transport.send(&msg).await?;
+        self.transport.flush().await?;
+        self.transport.receive().await?;
+        match self.transport.decode() {
+            Some(x) => {
+                let _: MsgSuccess = x;
+                self.transport.consume();
+                return Ok(true);
+            }
+            None => (),
+        }
+        let _: MsgFailure = self
+            .transport
+            .decode_ref()
+            .ok_or(TransportError::DecoderError)?;
+        self.transport.consume();
+        return Ok(false);
     }
 }
 

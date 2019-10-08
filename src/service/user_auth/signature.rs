@@ -4,16 +4,16 @@ use crate::algorithm::*;
 use crate::codec::*;
 use crate::transport::SessionId;
 
-pub struct SignatureData<'a, S: SignatureAlgorithm> {
+pub struct SignatureData<'a, S: AuthenticationAlgorithm> {
     pub session_id: &'a SessionId,
     pub user_name: &'a str,
     pub service_name: &'a str,
-    pub public_key: S::PublicKey,
+    pub public_key: S::Identity,
 }
 
-impl <'a, S: SignatureAlgorithm> Encode for SignatureData<'a, S>
+impl <'a, S: AuthenticationAlgorithm> Encode for SignatureData<'a, S>
 where
-    S::PublicKey: Encode,
+    S::Identity: Encode,
     S::Signature: Encode,
 {
     fn size(&self) -> usize {
@@ -21,7 +21,7 @@ where
             + 1
             + Encode::size(&self.user_name)
             + Encode::size(&self.service_name)
-            + Encode::size(&<PublicKeyMethod<S> as Method>::NAME)
+            + Encode::size(&<PublicKeyMethod<S> as AuthMethod>::NAME)
             + 1
             + Encode::size(&S::NAME)
             + Encode::size(&self.public_key)
@@ -31,7 +31,7 @@ where
         e.push_u8(MsgUserAuthRequest::<PublicKeyMethod<S>>::MSG_NUMBER);
         Encode::encode(&self.user_name, e);
         Encode::encode(&self.service_name, e);
-        Encode::encode(&<PublicKeyMethod<S> as Method>::NAME, e);
+        Encode::encode(&<PublicKeyMethod<S> as AuthMethod>::NAME, e);
         e.push_u8(true as u8);
         Encode::encode(&S::NAME, e);
         Encode::encode(&self.public_key, e);

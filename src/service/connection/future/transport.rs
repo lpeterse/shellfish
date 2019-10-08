@@ -23,7 +23,6 @@ pub fn poll<R: Role, T: Socket>(
 ) -> Poll<Result<(), ConnectionError>> {
 
     ready!(x.transport.poll_receive(cx))?;
-    log::info!("INBOUND MESSAGE");
     match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
