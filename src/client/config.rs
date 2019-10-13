@@ -1,16 +1,14 @@
-use crate::algorithm::authentication::*;
-use crate::algorithm::compression::*;
-use crate::algorithm::encryption::*;
-use crate::algorithm::kex::*;
+use crate::algorithm::*;
 use crate::transport::*;
+use crate::service::connection::ConnectionConfig;
 
 use std::time::Duration;
 
 pub struct ClientConfig {
     /// The local identification string.
     ///
-    /// Defaults to `SSH-2.0 ${CARGO_PKG_NAME}_${CARGO_PKG_VERSION}`.
-    pub identification: Identification,
+    /// Defaults to `SSH-2.0-${CARGO_PKG_NAME}_${CARGO_PKG_VERSION}`.
+    pub identification: Identification<&'static str>,
     /// The maximum number of bytes (inbound or outbound) after which a rekeying is initiated.
     ///
     /// Defaults to 1GB (may be capped to an arbitrary value if encryption algorithm demands).
@@ -50,6 +48,10 @@ pub struct ClientConfig {
     ///
     /// Defaults to the empty list.
     pub mac_algorithms: Vec<&'static str>,
+    /// The maximum number of local channels.
+    /// 
+    /// Defaults to 256.
+    pub channel_max_count: u32,
 }
 
 impl Default for ClientConfig {
@@ -65,12 +67,13 @@ impl Default for ClientConfig {
             encryption_algorithms: SUPPORTED_ENCRYPTION_ALGORITHMS.to_vec(),
             compression_algorithms: SUPPORTED_COMPRESSION_ALGORITHMS.to_vec(),
             mac_algorithms: SUPPORTED_MAC_ALGORITHMS.to_vec(),
+            channel_max_count: 256,
         }
     }
 }
 
 impl TransportConfig for ClientConfig {
-    fn identification(&self) -> &Identification {
+    fn identification(&self) -> &Identification<&'static str> {
         &self.identification
     }
     fn kex_interval_bytes(&self) -> u64 {
@@ -102,14 +105,8 @@ impl TransportConfig for ClientConfig {
     }
 }
 
-pub(crate) const SUPPORTED_KEX_ALGORITHMS: [&'static str; 2] = [
-    <Curve25519Sha256 as KexAlgorithm>::NAME,
-    <Curve25519Sha256AtLibsshDotOrg as KexAlgorithm>::NAME,
-];
-pub(crate) const SUPPORTED_HOST_KEY_ALGORITHMS: [&'static str; 1] =
-    [<SshEd25519 as AuthenticationAlgorithm>::NAME];
-pub(crate) const SUPPORTED_MAC_ALGORITHMS: [&'static str; 0] = [];
-pub(crate) const SUPPORTED_COMPRESSION_ALGORITHMS: [&'static str; 1] =
-    [<NoCompression as CompressionAlgorithm>::NAME];
-pub(crate) const SUPPORTED_ENCRYPTION_ALGORITHMS: [&'static str; 1] =
-    [<Chacha20Poly1305AtOpensshDotCom as EncryptionAlgorithm>::NAME];
+impl ConnectionConfig for ClientConfig {
+    fn channel_max_count(&self) -> u32 {
+        self.channel_max_count
+    }
+}

@@ -1,10 +1,16 @@
 use std::ops::Range;
 
 #[derive(Debug)]
+pub struct Packet<T> {
+    padding: u8,
+    payload: T,
+}
+
+#[derive(Debug)]
 pub struct PacketLayout {
-    padding_len: usize,
-    payload_len: usize,
-    mac_len: usize,
+    pub padding_len: usize,
+    pub payload_len: usize,
+    pub mac_len: usize,
 }
 
 impl PacketLayout {

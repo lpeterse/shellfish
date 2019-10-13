@@ -1,12 +1,13 @@
-pub use super::*;
+use crate::codec::*;
+use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgChannelClose {
     pub recipient_channel: u32,
 }
 
-impl MsgChannelClose {
-    const MSG_NUMBER: u8 = 97;
+impl Message for MsgChannelClose {
+    const NUMBER: u8 = 97;
 }
 
 impl  Encode for MsgChannelClose {
@@ -14,14 +15,14 @@ impl  Encode for MsgChannelClose {
         1 + 4
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         e.push_u32be(self.recipient_channel);
     }
 }
 
 impl Decode for MsgChannelClose {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             recipient_channel: d.take_u32be()?,
         }.into()

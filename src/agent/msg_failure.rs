@@ -1,5 +1,5 @@
 use crate::codec::*;
-use crate::transport::Message;
+use crate::message::*;
 
 #[derive(Debug, PartialEq)]
 pub struct MsgFailure {}
@@ -44,16 +44,14 @@ mod test {
     #[test]
     fn test_decode_01() {
         let buf = [5];
-        let mut dec = BDecoder::from(buf.as_ref());
         let res = Some(MsgFailure {});
-        assert_eq!(res, DecodeRef::decode(&mut dec));
+        assert_eq!(res, BDecoder::decode(buf.as_ref()));
     }
 
     #[test]
     fn test_decode_02() {
         let buf = [0];
-        let mut dec = BDecoder::from(buf.as_ref());
         let res: Option<MsgFailure> = None;
-        assert_eq!(res, DecodeRef::decode(&mut dec));
+        assert_eq!(res, BDecoder::decode(buf.as_ref()));
     }
 }

@@ -19,10 +19,10 @@ pub fn poll<R: Role, T: Socket>(
             continue;
         }
         match channel.shared {
-            TypedState::Session(ref st) => {
-                let mut shared = st.lock().unwrap();
-                shared.connection_task.register(cx.waker());
-                match shared.specific.request {
+            SharedState::Session(ref st) => {
+                let mut state = st.lock().unwrap();
+                state.inner_waker.register(cx.waker());
+                match state.request {
                     RequestState::Open(ref r) => {
                         let msg = MsgChannelRequest {
                             recipient_channel: channel.remote_channel,
@@ -30,7 +30,7 @@ pub fn poll<R: Role, T: Socket>(
                             request: r,
                         };
                         ready!(x.transport.poll_send(cx, &msg))?;
-                        shared.specific.request = RequestState::Progress;
+                        state.request = RequestState::Progress;
                     }
                     _ => (),
                 }

@@ -129,7 +129,7 @@ impl Transmitter {
         let mut vec = Vec::with_capacity(len);
         vec.resize(len, 0);
         self.stream.read_exact(&mut vec[..]).await?;
-        BDecoder::decode(&vec[..]).ok_or(AgentError::DecoderError)
+        BDecoder::decode(&vec).ok_or(AgentError::DecoderError)
     }
 }
 

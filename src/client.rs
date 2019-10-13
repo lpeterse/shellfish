@@ -27,7 +27,7 @@ impl Client {
             .map_err(ClientError::ConnectError)?;
         let transport: Transport<Client, TcpStream> = Transport::new(&self.config, socket).await?;
         Ok(match self.user_name {
-            None => Connection::new(
+            None => Connection::new(&self.config,
                 transport
                     .request_service(<Connection<Self> as Service<Self>>::NAME)
                     .await?,
@@ -36,8 +36,8 @@ impl Client {
                 let transport = transport
                     .request_service(<UserAuth<Self> as Service<Self>>::NAME)
                     .await?;
-                UserAuth::new(transport)
-                    .authenticate(user, self.agent.clone())
+                UserAuth::new(&self.config, transport)
+                    .authenticate(&self.config, user, self.agent.clone())
                     .await?
             }
         })

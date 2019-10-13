@@ -1,5 +1,6 @@
 use super::*;
 use crate::codec::*;
+use crate::message::*;
 
 #[derive(Debug, Clone)]
 pub struct MsgKexInit {

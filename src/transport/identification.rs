@@ -1,50 +1,52 @@
 use crate::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Identification {
-    pub version: String,
-    pub comment: String,
+pub struct Identification<T> {
+    pub version: T,
+    pub comment: T,
 }
 
-impl Identification {
-    pub (crate) const MAX_LEN: usize = 253;
+impl<T> Identification<T> {
     const PREFIX: &'static [u8] = b"SSH-2.0-";
+    pub(crate) const MAX_LEN: usize = 253;
 
-    pub fn new(version: String, comment: String) -> Self {
+    pub const DEFAULT: Identification<&'static str> = Identification {
+        version: concat!(env!("CARGO_PKG_NAME"), "_", env!("CARGO_PKG_VERSION")),
+        comment: "",
+    };
+
+    pub fn new(version: T, comment: T) -> Self {
         Self { version, comment }
     }
 }
 
-impl Default for Identification {
+impl Default for Identification<&'static str> {
     fn default() -> Self {
-        Self {
-            version: format!("{}_{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")),
-            comment: String::default(),
-        }
+        Self::DEFAULT
     }
 }
 
-impl Encode for Identification {
+impl<T: AsRef<[u8]>> Encode for Identification<T> {
     fn size(&self) -> usize {
         Self::PREFIX.len()
-            + self.version.len()
-            + if self.comment.is_empty() {
+            + self.version.as_ref().len()
+            + if self.comment.as_ref().is_empty() {
                 0
             } else {
-                1 + self.comment.len()
+                1 + self.comment.as_ref().len()
             }
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_bytes(&Self::PREFIX);
-        e.push_bytes(&self.version.as_bytes());
-        if !self.comment.is_empty() {
+        e.push_bytes(&self.version.as_ref());
+        if !self.comment.as_ref().is_empty() {
             e.push_u8(' ' as u8);
-            e.push_bytes(&self.comment.as_bytes());
+            e.push_bytes(&self.comment.as_ref());
         }
     }
 }
 
-impl Decode for Identification {
+impl Decode for Identification<String> {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_match(&Self::PREFIX)?;
         if d.remaining() > Self::MAX_LEN {
@@ -75,13 +77,36 @@ mod test {
     use super::*;
 
     #[test]
-    fn test_encode_01() {
-        let id = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &BEncoder::encode(&id)[..]);
+    fn test_default_01() {
+        let id = BEncoder::encode(&Identification::default());
+        let id_ = concat!("SSH-2.0-", env!("CARGO_PKG_NAME"), "_", env!("CARGO_PKG_VERSION"));
+        assert_eq!(id, id_.as_bytes());
     }
 
     #[test]
+    fn test_encode_01() {
+        let id: Identification<String> = Identification::new("ssh_0.1.0".into(), "ultra".into());
+        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &BEncoder::encode(&id)[..]);
+    }
+
+    /// Test the branch where the input is longer than MAX_LEN.
+    #[test]
     fn test_decode_01() {
+        let input = concat!("SSH-2.0-ssh_0.1.0 ultraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        assert_eq!(None, BDecoder::decode::<Identification<String>>(input.as_ref()));
+    }
+
+    #[test]
+    fn test_decode_02() {
+        let id = Identification::new("ssh_0.1.0".into(), "".into());
+        assert_eq!(Some(id), BDecoder::decode(b"SSH-2.0-ssh_0.1.0"));
+    }
+
+    #[test]
+    fn test_decode_03() {
         let id = Identification::new("ssh_0.1.0".into(), "ultra".into());
         assert_eq!(Some(id), BDecoder::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
     }

@@ -3,7 +3,7 @@ use super::identification::Identification;
 use std::time::Duration;
 
 pub trait TransportConfig {
-    fn identification(&self) -> &Identification;
+    fn identification(&self) -> &Identification<&'static str>;
     fn kex_interval_bytes(&self) -> u64;
     fn kex_interval_duration(&self) -> Duration;
     fn alive_interval(&self) -> Duration;
@@ -14,4 +14,3 @@ pub trait TransportConfig {
     fn compression_algorithms(&self) -> &Vec<&'static str>;
     fn mac_algorithms(&self) -> &Vec<&'static str>;
 }
-

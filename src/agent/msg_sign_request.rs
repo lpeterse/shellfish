@@ -1,6 +1,6 @@
 use crate::algorithm::*;
 use crate::codec::*;
-use crate::transport::Message;
+use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgSignRequest<'a, S: AuthenticationAlgorithm, D: Encode> {

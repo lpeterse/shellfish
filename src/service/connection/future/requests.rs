@@ -15,16 +15,15 @@ pub fn poll<R: Role, S: Socket>(
 ) -> Poll<Result<(), ConnectionError>> {
     match ready!(x.request_receiver.poll(cx))? {
         Request::Disconnect(_) => {
-            log::debug!("Command::Disconnect");
             let msg = MsgDisconnect::new(Reason::BY_APPLICATION);
             ready!(x.transport.poll_send(cx, &msg))?;
+            log::debug!("Sent MSG_DISCONNECT");
             x.request_receiver.accept();
             x.request_receiver
                 .complete(|_: DisconnectRequest| Ok(((), ())))?;
             return Poll::Ready(Ok(()));
         }
         Request::ChannelOpen(r) => {
-            log::debug!("Command::ChannelOpenSession");
             match x.channels.free() {
                 None => {
                     // In case of local channel shortage, reject the request.
@@ -44,6 +43,7 @@ pub fn poll<R: Role, S: Socket>(
                         channel_type: (),
                     };
                     ready!(x.transport.poll_send(cx, &msg))?;
+                    log::debug!("Sent MSG_CHANNEL_OPEN");
                     x.request_receiver.accept();
                 }
             }

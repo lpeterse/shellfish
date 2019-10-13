@@ -1,4 +1,5 @@
-pub use super::*;
+use crate::codec::*;
+use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgChannelWindowAdjust {
@@ -6,8 +7,8 @@ pub struct MsgChannelWindowAdjust {
     pub bytes_to_add: u32,
 }
 
-impl MsgChannelWindowAdjust {
-    const MSG_NUMBER: u8 = 93;
+impl Message for MsgChannelWindowAdjust {
+    const NUMBER: u8 = 93;
 }
 
 impl  Encode for MsgChannelWindowAdjust {
@@ -15,7 +16,7 @@ impl  Encode for MsgChannelWindowAdjust {
         1 + 4 + 4
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         e.push_u32be(self.recipient_channel);
         e.push_u32be(self.bytes_to_add);
     }
@@ -23,7 +24,7 @@ impl  Encode for MsgChannelWindowAdjust {
 
 impl Decode for MsgChannelWindowAdjust {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         MsgChannelWindowAdjust {
             recipient_channel: d.take_u32be()?,
             bytes_to_add: d.take_u32be()?,

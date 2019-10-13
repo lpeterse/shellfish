@@ -1,29 +1,37 @@
 mod process;
 mod request;
+mod exit_status;
 
 pub use self::process::*;
 pub use self::request::*;
+pub use self::exit_status::*;
 
-use super::super::error::*;
-use super::state::*;
 use super::*;
 
 use crate::codec::*;
 use crate::ring_buffer::*;
 
 use futures::task::Poll;
+use std::sync::{Arc,Mutex};
+use futures::task::{AtomicWaker};
 
 pub struct Session {
-    pub channel: Channel<Session>,
+    state: Arc<Mutex<SessionState>>,
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
-        self.channel.lock().unwrap().terminate_as_user();
+        let mut state = self.state.lock().unwrap();
+        state.outer_error = Some(());
+        state.inner_waker.wake();
     }
 }
 
 impl Session {
+    pub(crate) fn new(state: Arc<Mutex<SessionState>>) -> Self {
+        Self { state }
+    }
+
     pub async fn exec(mut self, command: String) -> Result<Process, ConnectionError> {
         self.request(SessionRequest::ExecRequest(ExecRequest { command }))
             .await?;
@@ -45,20 +53,20 @@ impl Session {
     }
 
     async fn request(&mut self, request: SessionRequest) -> Result<(), ConnectionError> {
-        let mut channel = self.channel.lock().unwrap();
-        channel.specific.request = RequestState::Open(request);
-        channel.connection_task.wake();
-        drop(channel);
+        let mut state = self.state.lock().unwrap();
+        state.request = RequestState::Open(request);
+        state.inner_waker.wake();
+        drop(state);
         futures::future::poll_fn(|cx| {
-            let mut channel = self.channel.lock().unwrap();
-            channel.user_task.register(cx.waker());
-            match channel.specific.request {
+            let mut state = self.state.lock().unwrap();
+            state.outer_waker.register(cx.waker());
+            match state.request {
                 RequestState::Success => {
-                    channel.specific.request = RequestState::None;
+                    state.request = RequestState::None;
                     Poll::Ready(Ok(()))
                 }
                 RequestState::Failure => {
-                    channel.specific.request = RequestState::None;
+                    state.request = RequestState::None;
                     Poll::Ready(Err(ConnectionError::ChannelRequestFailure))
                 }
                 _ => Poll::Pending,
@@ -78,22 +86,62 @@ impl ChannelType for Session {
 }
 
 pub struct SessionState {
+    pub is_closed: bool,
+    pub is_local_eof: bool,
+    pub is_remote_eof: bool,
+    pub inner_waker: AtomicWaker,
+    pub inner_error: Option<ConnectionError>,
+    pub outer_waker: AtomicWaker,
+    pub outer_error: Option<()>,
     pub env: Vec<(String, String)>,
+    pub exit: Option<Exit>,
     pub stdin: RingBuffer,
     pub stdout: RingBuffer,
     pub stderr: RingBuffer,
     pub request: RequestState<SessionRequest>,
 }
 
+impl SessionState {
+    pub fn add_env(&mut self, env: (String, String)) {
+        self.env.push(env);
+        self.outer_waker.wake();
+    }
+
+    pub fn set_exit_status(&mut self, status: ExitStatus) {
+        self.exit = Some(Exit::Status(status));
+        self.outer_waker.wake();
+    }
+
+    pub fn set_exit_signal(&mut self, signal: ExitSignal) {
+        self.exit = Some(Exit::Signal(signal));
+        self.outer_waker.wake();
+    }
+}
+
 impl Default for SessionState {
     fn default() -> Self {
         Self {
+            is_closed: false,
+            is_local_eof: false,
+            is_remote_eof: false,
+            inner_waker: AtomicWaker::new(),
+            inner_error: None,
+            outer_waker: AtomicWaker::new(),
+            outer_error: None,
             env: Vec::new(),
+            exit: None,
             stdin: RingBuffer::new(8192),
             stdout: RingBuffer::new(8192),
             stderr: RingBuffer::new(8192),
             request: RequestState::None,
         }
+    }
+}
+
+impl SpecificState for SessionState {
+    fn terminate(&mut self, e: ConnectionError) {
+        self.inner_error = Some(e);
+        self.outer_waker.wake();
     }
 }
 

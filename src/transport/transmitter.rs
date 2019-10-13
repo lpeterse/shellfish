@@ -1,17 +1,18 @@
 use super::*;
+use crate::util::assume;
 
 pub struct Transmitter<T> {
     sender: BufferedSender<WriteHalf<T>>,
     receiver: BufferedReceiver<ReadHalf<T>>,
     receiver_state: ReceiverState,
-    local_id: Identification,
-    remote_id: Identification,
+    local_id: Identification<&'static str>,
+    remote_id: Identification<String>,
     bytes_sent: u64,
     packets_sent: u64,
     bytes_received: u64,
     packets_received: u64,
-    encryption_ctx: EncryptionContext,
-    decryption_ctx: EncryptionContext,
+    encryption_ctx: CipherContext,
+    decryption_ctx: CipherContext,
     alive_timer: Delay,
     alive_interval: std::time::Duration,
     inactivity_timer: Delay,
@@ -25,7 +26,7 @@ impl<S: Socket> Transmitter<S> {
         let mut receiver = BufferedReceiver::new(rh);
 
         Self::send_id(&mut sender, config.identification()).await?;
-        let remote_id = Self::receive_id(&mut receiver).await?;
+        let remote_id = Self::receive_id(&mut receiver).await?; // FIXME TIMEOUT
 
         Ok(Self {
             sender,
@@ -37,8 +38,8 @@ impl<S: Socket> Transmitter<S> {
             packets_sent: 0,
             bytes_received: 0,
             packets_received: 0,
-            encryption_ctx: EncryptionContext::new(),
-            decryption_ctx: EncryptionContext::new(),
+            encryption_ctx: CipherContext::new(),
+            decryption_ctx: CipherContext::new(),
             alive_timer: Delay::new(config.alive_interval()),
             alive_interval: config.alive_interval(),
             inactivity_timer: Delay::new(config.inactivity_timeout()),
@@ -46,11 +47,11 @@ impl<S: Socket> Transmitter<S> {
         })
     }
 
-    pub fn local_id(&self) -> &Identification  {
+    pub fn local_id(&self) -> &Identification<&'static str>  {
         &self.local_id
     }
 
-    pub fn remote_id(&self) -> &Identification {
+    pub fn remote_id(&self) -> &Identification<String> {
         &self.remote_id
     }
 
@@ -62,11 +63,11 @@ impl<S: Socket> Transmitter<S> {
         self.bytes_received
     }
 
-    pub fn encryption_ctx(&mut self) -> &mut EncryptionContext {
+    pub fn encryption_ctx(&mut self) -> &mut CipherContext {
         &mut self.encryption_ctx
     }
 
-    pub fn decryption_ctx(&mut self) -> &mut EncryptionContext {
+    pub fn decryption_ctx(&mut self) -> &mut CipherContext {
         &mut self.decryption_ctx
     }
 
@@ -96,7 +97,7 @@ impl<S: Socket> Transmitter<S> {
         Encode::encode(msg, &mut encoder);
         let pc = self.packets_sent;
         self.packets_sent += 1;
-        self.encryption_ctx.encrypt_packet(pc, layout, buffer);
+        self.encryption_ctx.encrypt(pc, layout, buffer);
         self.reset_alive_timer(cx);
         Poll::Ready(Ok(()))
     }
@@ -118,15 +119,17 @@ impl<S: Socket> Transmitter<S> {
                 .ok_or(TransportError::BadPacketLength)?;
         }
         // Case 2: The packet len but not the packet has been decrypted
-        if s.receiver_state.payload_len == 0 {
+        if s.receiver_state.packet_len == 0 {
             // Wait for the whole packet to arrive (including MAC etc)
             ready!(r.as_mut().poll_fetch(cx, s.receiver_state.buffer_len))?;
             // Try to decrypt the packet.
             let packet = &mut r.window_mut()[..s.receiver_state.buffer_len];
-            s.receiver_state.payload_len = s
+            let packet_len = s
                 .decryption_ctx
-                .decrypt_packet(s.packets_received, packet)
+                .decrypt(s.packets_received, packet)
                 .ok_or(TransportError::MessageIntegrity)?;
+
+            s.receiver_state.packet_len = packet_len;
         }
         // Case 3: The packet is complete and decrypted in buffer.
         s.reset_inactivity_timer(cx);
@@ -134,10 +137,13 @@ impl<S: Socket> Transmitter<S> {
     }
 
     pub fn decode<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
-        let payload_len = self.receiver_state.payload_len;
-        assert!(payload_len != 0);
-        let payload = &self.receiver.window()[PacketLayout::PAYLOAD_OFFSET..][..payload_len];
-        DecodeRef::decode(&mut BDecoder(payload))
+        let packet_len = self.receiver_state.packet_len;
+        assert!(packet_len != 0);
+        let packet = &self.receiver.window()[PacketLayout::PACKET_LEN_SIZE..][..packet_len];
+        let padding: usize = *packet.get(0)? as usize;
+        assume(packet_len >= 1 + padding)?;
+        let payload = &packet[1..][..packet_len - 1 - padding];
+        BDecoder::decode(payload)
     }
 
     pub fn consume(&mut self) {
@@ -151,9 +157,9 @@ impl<S: Socket> Transmitter<S> {
     /// Send the local identification string.
     async fn send_id(
         socket: &mut BufferedSender<WriteHalf<S>>,
-        id: &Identification,
+        id: &Identification<&'static str>,
     ) -> Result<(), TransportError> {
-        let mut enc = BEncoder::from(socket.reserve(Encode::size(&id) + 2).await?);
+        let mut enc = BEncoder::from(socket.reserve(Encode::size(id) + 2).await?);
         Encode::encode(&id, &mut enc);
         enc.push_u8('\r' as u8);
         enc.push_u8('\n' as u8);
@@ -164,11 +170,11 @@ impl<S: Socket> Transmitter<S> {
     /// Receive the remote identification string.
     async fn receive_id(
         socket: &mut BufferedReceiver<ReadHalf<S>>,
-    ) -> Result<Identification, TransportError> {
+    ) -> Result<Identification<String>, TransportError> {
         // Drop lines until remote SSH-2.0- version string is recognized
         loop {
-            let line = socket.read_line(Identification::MAX_LEN).await?;
-            match DecodeRef::decode(&mut BDecoder(line)) {
+            let line: &[u8] = socket.read_line(Identification::<String>::MAX_LEN).await?;
+            match Decode::decode(&mut BDecoder::from(&line)) {
                 None => (),
                 Some(id) => return Ok(id),
             }
@@ -210,18 +216,18 @@ impl<S: Socket> Transmitter<S> {
 
 struct ReceiverState {
     pub buffer_len: usize,
-    pub payload_len: usize,
+    pub packet_len: usize,
 }
 
 impl ReceiverState {
     pub fn new() -> Self {
         Self {
             buffer_len: 0,
-            payload_len: 0,
+            packet_len: 0,
         }
     }
     pub fn reset(&mut self) {
         self.buffer_len = 0;
-        self.payload_len = 0;
+        self.packet_len = 0;
     }
 }

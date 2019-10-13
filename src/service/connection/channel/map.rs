@@ -3,13 +3,13 @@ use std::slice::IterMut;
 
 pub struct ChannelMap {
     capacity: usize,
-    elements: Vec<Option<ChannelState>>,
+    elements: Vec<Option<Channel>>,
 }
 
 impl ChannelMap {
-    pub fn new(capacity: usize) -> Self {
+    pub fn new(capacity: u32) -> Self {
         ChannelMap {
-            capacity,
+            capacity: capacity as usize,
             elements: Vec::with_capacity(1),
         }
     }
@@ -24,7 +24,7 @@ impl ChannelMap {
         len
     }
 
-    pub fn get(&mut self, id: u32) -> Result<&mut ChannelState, ConnectionError> {
+    pub fn get(&mut self, id: u32) -> Result<&mut Channel, ConnectionError> {
         match self.elements.get_mut(id as usize) {
             Some(Some(t)) => Ok(t),
             _ => Err(ConnectionError::ChannelIdInvalid),
@@ -44,7 +44,7 @@ impl ChannelMap {
         None
     }
 
-    pub fn insert(&mut self, t: ChannelState) -> Result<(), ConnectionError> {
+    pub fn insert(&mut self, t: Channel) -> Result<(), ConnectionError> {
         // FIXME
         self.elements.push(Some(t));
         Ok(())
@@ -73,10 +73,10 @@ impl ChannelMap {
     }
 }
 
-pub struct ChannelMapIterator<'a>(IterMut<'a, Option<ChannelState>>);
+pub struct ChannelMapIterator<'a>(IterMut<'a, Option<Channel>>);
 
 impl<'a> Iterator for ChannelMapIterator<'a> {
-    type Item = &'a mut ChannelState;
+    type Item = &'a mut Channel;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {

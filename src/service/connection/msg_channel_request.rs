@@ -1,5 +1,6 @@
 use super::*;
 use crate::codec::*;
+use crate::message::*;
 
 #[derive(Debug)]
 pub struct MsgChannelRequest<T: ChannelRequest> {
@@ -8,8 +9,8 @@ pub struct MsgChannelRequest<T: ChannelRequest> {
     pub request: T,
 }
 
-impl<T: ChannelRequest> MsgChannelRequest<T> {
-    const MSG_NUMBER: u8 = 98;
+impl<T: ChannelRequest> Message for MsgChannelRequest<T> {
+    const NUMBER: u8 = 98;
 }
 
 impl<T: ChannelRequest + Encode> Encode for MsgChannelRequest<T> {
@@ -17,7 +18,7 @@ impl<T: ChannelRequest + Encode> Encode for MsgChannelRequest<T> {
         1 + 4 + Encode::size(&self.request.name()) + 1 + Encode::size(&self.request)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER);
+        e.push_u8(<Self as Message>::NUMBER);
         e.push_u32be(self.recipient_channel);
         Encode::encode(&self.request.name(), e);
         e.push_u8(self.want_reply as u8);
@@ -33,8 +34,8 @@ pub struct MsgChannelRequest2<'a> {
     pub specific: &'a [u8],
 }
 
-impl<'a> MsgChannelRequest2<'a> {
-    const MSG_NUMBER: u8 = 98;
+impl<'a> Message for MsgChannelRequest2<'a> {
+    const NUMBER: u8 = 98;
 }
 
 // FIXME
@@ -48,7 +49,7 @@ impl <'a> Encode for MsgChannelRequest2<'a> {
 
 impl<'a> DecodeRef<'a> for MsgChannelRequest2<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.expect_u8(Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             recipient_channel: d.take_u32be()?,
             request: DecodeRef::decode(d)?,

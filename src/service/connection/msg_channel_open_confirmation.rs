@@ -1,5 +1,6 @@
 use super::*;
 use crate::codec::*;
+use crate::message::*;
 
 pub struct MsgChannelOpenConfirmation<T: ChannelType> {
     pub recipient_channel: u32,
@@ -9,8 +10,8 @@ pub struct MsgChannelOpenConfirmation<T: ChannelType> {
     pub confirmation: T::Confirmation,
 }
 
-impl<'a, T: ChannelType> MsgChannelOpenConfirmation<T> {
-    const MSG_NUMBER: u8 = 91;
+impl<'a, T: ChannelType> Message for MsgChannelOpenConfirmation<T> {
+    const NUMBER: u8 = 91;
 }
 
 impl <T: ChannelType> Encode for MsgChannelOpenConfirmation<T> {
@@ -19,7 +20,7 @@ impl <T: ChannelType> Encode for MsgChannelOpenConfirmation<T> {
         + Encode::size(&self.confirmation)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         e.push_u32be(self.recipient_channel);
         e.push_u32be(self.sender_channel);
         e.push_u32be(self.initial_window_size);
@@ -30,7 +31,7 @@ impl <T: ChannelType> Encode for MsgChannelOpenConfirmation<T> {
 
 impl<T: ChannelType> Decode for MsgChannelOpenConfirmation<T> {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
+        d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             recipient_channel: d.take_u32be()?,
             sender_channel: d.take_u32be()?,

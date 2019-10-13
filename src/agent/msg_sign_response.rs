@@ -1,5 +1,5 @@
 use crate::codec::*;
-use crate::transport::Message;
+use crate::message::*;
 use crate::algorithm::*;
 
 #[derive(Debug, PartialEq)]

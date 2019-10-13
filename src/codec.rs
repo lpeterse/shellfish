@@ -208,7 +208,7 @@ impl <T:Decode> Decode for List<T> {
         let len = c.take_u32be()?;
         let bytes = c.take_bytes(len as usize)?;
         let mut vec: Vec<T> = Vec::new();
-        let mut dec = BDecoder(bytes);
+        let mut dec = BDecoder::from(&bytes);
         while let Some(s) = Decode::decode(&mut dec) {
             vec.push(s);
         }

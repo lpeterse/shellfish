@@ -7,48 +7,41 @@ pub trait Decoder<'a>: Clone {
     fn take_u8(&mut self) -> Option<u8>;
     fn take_u32be(&mut self) -> Option<u32>;
     fn take_u64be(&mut self) -> Option<u64>;
-    fn take_bool(&mut self) -> Option<bool> {
-        self.take_u8().map(|x| x != 0)
-    }
+    fn take_bool(&mut self) -> Option<bool>;
     fn take_bytes(&mut self, len: usize) -> Option<&'a [u8]>;
     fn take_all(&mut self) -> Option<&'a [u8]>;
     fn take_into(&mut self, buf: &mut [u8]) -> Option<()>;
     fn take_str(&mut self, len: usize) -> Option<&'a str>;
     fn take_string(&mut self, len: usize) -> Option<String>;
     fn take_while<F>(&mut self, pred: F) -> Option<&'a [u8]>
-        where F: FnMut(u8) -> bool + Sized;
+    where
+        F: FnMut(u8) -> bool + Sized;
     fn take_match<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
-    // Convenience with default implementation
-    fn expect_u8(&mut self, x: u8) -> Option<()> {
-        let self_ = self.clone();
-        let r = self.take_u8().filter(|y| *y == x).map(drop);
-        if r.is_none() {
-            *self = self_;
-        }
-        r
-    }
-    fn expect_u32be(&mut self, x: u32) -> Option<()> {
-        self.take_u32be().filter(|y| *y == x).map(drop)
-    }
-    fn expect_true(&mut self) -> Option<()> {
-        self.take_u8().filter(|x| *x != 0).map(drop)
-    }
-    fn expect_false(&mut self) -> Option<()> {
-        self.take_u8().filter(|x| *x == 0).map(drop)
-    }
+    fn expect_u8(&mut self, x: u8) -> Option<()>;
+    fn expect_u32be(&mut self, x: u32) -> Option<()>;
+    fn expect_true(&mut self) -> Option<()>;
+    fn expect_false(&mut self) -> Option<()>;
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct BDecoder<'a> (pub &'a [u8]);
+pub struct BDecoder<'a>(&'a [u8]);
 
-impl <'a> BDecoder<'a> {
+impl<'a> BDecoder<'a> {
     pub fn decode<T: DecodeRef<'a>>(x: &'a [u8]) -> Option<T> {
-        let mut dec = BDecoder(x);
-        T::decode(&mut dec)
+        let mut d = BDecoder(x);
+        let r = T::decode(&mut d)?;
+        d.take_eoi()?;
+        Some(r)
     }
 }
 
-impl <'a> Decoder<'a> for BDecoder<'a> {
+impl<'a, T: AsRef<[u8]>> From<&'a T> for BDecoder<'a> {
+    fn from(x: &'a T) -> Self {
+        Self(x.as_ref())
+    }
+}
+
+impl<'a> Decoder<'a> for BDecoder<'a> {
     fn remaining(&self) -> usize {
         self.0.len()
     }
@@ -57,12 +50,18 @@ impl <'a> Decoder<'a> for BDecoder<'a> {
         self.0.is_empty()
     }
 
-    fn take_eoi(self: &Self) -> Option<()> {
-        if self.is_eoi() { Some(()) } else { None }
+    fn take_eoi(&self) -> Option<()> {
+        if self.is_eoi() {
+            Some(())
+        } else {
+            None
+        }
     }
 
     fn take_match<T: AsRef<[u8]>>(self: &mut Self, bytes: &T) -> Option<()> {
-        self.take_bytes(bytes.as_ref().len()).filter(|x| *x == bytes.as_ref()).map(drop)
+        self.take_bytes(bytes.as_ref().len())
+            .filter(|x| *x == bytes.as_ref())
+            .map(drop)
     }
 
     fn take_u8(self: &mut Self) -> Option<u8> {
@@ -73,22 +72,28 @@ impl <'a> Decoder<'a> for BDecoder<'a> {
 
     fn take_u32be(self: &mut Self) -> Option<u32> {
         let x = (*self.0.get(0)? as u32) << 24
-            |   (*self.0.get(1)? as u32) << 16
-            |   (*self.0.get(2)? as u32) << 8
-            |   (*self.0.get(3)? as u32);
+            | (*self.0.get(1)? as u32) << 16
+            | (*self.0.get(2)? as u32) << 8
+            | (*self.0.get(3)? as u32);
         self.0 = &self.0[4..];
         Some(x)
     }
 
-    fn take_u64be(self: &mut Self) -> Option<u64> {
+    fn take_u64be(&mut self) -> Option<u64> {
         if self.0.len() >= 8 {
-            let mut x: [u8;8] = [0;8];
+            let mut x: [u8; 8] = [0; 8];
             x.copy_from_slice(&self.0[..8]);
             self.0 = &self.0[8..];
             Some(u64::from_be_bytes(x))
         } else {
             None
         }
+    }
+
+    fn take_bool(&mut self) -> Option<bool> {
+        let x = self.0.get(0)?;
+        self.0 = &self.0[1..];
+        Some(x != &0)
     }
 
     fn take_str(&mut self, len: usize) -> Option<&'a str> {
@@ -138,9 +143,9 @@ impl <'a> Decoder<'a> for BDecoder<'a> {
         Some(r)
     }
 
-    fn take_while<F>(self: &mut Self, mut pred: F) -> Option<&'a [u8]> 
-        where
-            F: FnMut(u8) -> bool + Sized
+    fn take_while<F>(self: &mut Self, mut pred: F) -> Option<&'a [u8]>
+    where
+        F: FnMut(u8) -> bool + Sized,
     {
         let mut i = 0;
         while i < self.0.len() && pred(self.0[i]) {
@@ -150,11 +155,36 @@ impl <'a> Decoder<'a> for BDecoder<'a> {
         self.0 = &self.0[i..];
         Some(r)
     }
-}
 
-impl <'a> From<&'a [u8]> for BDecoder<'a> {
-    fn from(x: &'a [u8]) -> Self {
-        Self(x)
+    fn expect_u8(&mut self, x: u8) -> Option<()> {
+        if self.0.get(0)? == &x {
+            self.0 = &self.0[1..];
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn expect_u32be(&mut self, x: u32) -> Option<()> {
+        self.take_u32be().filter(|y| *y == x).map(drop)
+    }
+
+    fn expect_true(&mut self) -> Option<()> {
+        if self.0.get(0)? != &0 {
+            self.0 = &self.0[1..];
+            Some(())
+        } else {
+            None
+        }
+    }
+
+    fn expect_false(&mut self) -> Option<()> {
+        if self.0.get(0)? == &0 {
+            self.0 = &self.0[1..];
+            Some(())
+        } else {
+            None
+        }
     }
 }
 
@@ -164,16 +194,32 @@ mod tests {
 
     #[test]
     fn test_context_remaining_01() {
-        let a = [0,1,2,3 as u8];
-        let c = BDecoder(&a);
+        let a = [0, 1, 2, 3 as u8];
+        let c = BDecoder::from(&a);
 
         assert_eq!(c.remaining(), 4);
     }
 
     #[test]
+    fn test_take_eoi_01() {
+        let a = [];
+        let c = BDecoder::from(&a);
+
+        assert_eq!(c.take_eoi(), Some(()));
+    }
+
+    #[test]
+    fn test_take_eoi_02() {
+        let a = [1];
+        let c = BDecoder::from(&a);
+
+        assert_eq!(c.take_eoi(), None);
+    }
+
+    #[test]
     fn test_context_take_u8_01() {
-        let a = [0,1,2,3 as u8];
-        let mut c = BDecoder(&a);
+        let a = [0, 1, 2, 3 as u8];
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_u8(), Some(0));
         assert_eq!(c.take_u8(), Some(1));
@@ -184,17 +230,36 @@ mod tests {
 
     #[test]
     fn test_context_take_u32be_01() {
-        let a = [1,2,3,4,5 as u8];
-        let mut c = BDecoder(&a);
+        let a = [1, 2, 3, 4, 5 as u8];
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_u32be(), Some(0x01020304));
         assert_eq!(c.take_u32be(), None);
     }
 
     #[test]
+    fn test_context_take_u64be_01() {
+        let a = [1, 2, 3, 4, 5, 6, 7, 8 as u8];
+        let mut c = BDecoder::from(&a);
+
+        assert_eq!(c.take_u64be(), Some(0x0102030405060708));
+        assert_eq!(c.take_u64be(), None);
+    }
+
+    #[test]
+    fn test_context_bool_01() {
+        let a = [0, 1 as u8];
+        let mut c = BDecoder::from(&a);
+
+        assert_eq!(c.take_bool(), Some(false));
+        assert_eq!(c.take_bool(), Some(true));
+        assert_eq!(c.take_bool(), None);
+    }
+
+    #[test]
     fn test_context_take_str_01() {
         let a = "ABCDE".as_bytes();
-        let mut c = BDecoder(&a);
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_str(3), Some("ABC"));
         assert_eq!(c.remaining(), 2);
@@ -203,7 +268,7 @@ mod tests {
     #[test]
     fn test_context_take_str_02() {
         let a = "ABCDE".as_bytes();
-        let mut c = BDecoder(&a);
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_str(5), Some("ABCDE"));
         assert_eq!(c.remaining(), 0);
@@ -212,7 +277,7 @@ mod tests {
     #[test]
     fn test_context_take_str_03() {
         let a = "ABCDE".as_bytes();
-        let mut c = BDecoder(&a);
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_str(6), None);
     }
@@ -220,7 +285,7 @@ mod tests {
     #[test]
     fn test_context_take_string_01() {
         let a = "ABCDE".as_bytes();
-        let mut c = BDecoder(&a);
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_string(3), Some(String::from("ABC")));
         assert_eq!(c.remaining(), 2);
@@ -229,7 +294,7 @@ mod tests {
     #[test]
     fn test_context_take_string_02() {
         let a = "ABCDE".as_bytes();
-        let mut c = BDecoder(&a);
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_string(5), Some(String::from("ABCDE")));
         assert_eq!(c.remaining(), 0);
@@ -238,43 +303,84 @@ mod tests {
     #[test]
     fn test_context_take_string_03() {
         let a = "ABCDE".as_bytes();
-        let mut c = BDecoder(&a);
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_string(6), None);
     }
 
     #[test]
     fn test_context_take_bytes_01() {
-        let a = [1,2,3,4,5 as u8];
-        let mut c = BDecoder(&a);
+        let a = [1, 2, 3, 4, 5 as u8];
+        let mut c = BDecoder::from(&a);
 
-        assert_eq!(c.take_bytes(3), Some(&[1,2,3 as u8][..]));
+        assert_eq!(c.take_bytes(3), Some(&[1, 2, 3 as u8][..]));
         assert_eq!(c.remaining(), 2);
     }
 
     #[test]
     fn test_context_take_bytes_02() {
-        let a = [1,2,3,4,5 as u8];
-        let mut c = BDecoder(&a);
+        let a = [1, 2, 3, 4, 5 as u8];
+        let mut c = BDecoder::from(&a);
 
-        assert_eq!(c.take_bytes(5), Some(&[1,2,3,4,5 as u8][..]));
+        assert_eq!(c.take_bytes(5), Some(&[1, 2, 3, 4, 5 as u8][..]));
         assert_eq!(c.remaining(), 0);
     }
 
     #[test]
     fn test_context_take_bytes_03() {
-        let a = [1,2,3,4,5 as u8];
-        let mut c = BDecoder(&a);
+        let a = [1, 2, 3, 4, 5 as u8];
+        let mut c = BDecoder::from(&a);
 
         assert_eq!(c.take_bytes(6), None);
     }
 
     #[test]
     fn test_context_all_01() {
-        let a = [1,2,3,4,5 as u8];
-        let mut c = BDecoder(&a);
+        let a = [1, 2, 3, 4, 5 as u8];
+        let mut c = BDecoder::from(&a);
 
-        assert_eq!(c.take_all(), Some(&[1,2,3,4,5 as u8][..]));
+        assert_eq!(c.take_all(), Some(&[1, 2, 3, 4, 5 as u8][..]));
         assert_eq!(c.remaining(), 0);
+    }
+
+    #[test]
+    fn test_context_into_01() {
+        let a = [1, 2, 3, 4, 5, 6 as u8];
+        let mut b = [0; 5];
+        let mut c = BDecoder::from(&a);
+
+        assert_eq!(Some(()), c.take_into(&mut b));
+        assert_eq!(&[1, 2, 3, 4, 5 as u8][..], b);
+        assert_eq!(c.remaining(), 1);
+    }
+
+    #[test]
+    fn test_context_into_02() {
+        let a = [1, 2, 3, 4, 5, 6 as u8];
+        let mut b = [0; 7];
+        let mut c = BDecoder::from(&a);
+
+        assert_eq!(None, c.take_into(&mut b));
+        assert_eq!(c.remaining(), 6);
+    }
+
+    #[test]
+    fn test_expect_true_01() {
+        let a = [1, 0];
+        let mut c = BDecoder::from(&a);
+
+        assert_eq!(Some(()), c.expect_true());
+        assert_eq!(None, c.expect_true());
+        assert_eq!(c.remaining(), 1);
+    }
+
+    #[test]
+    fn test_expect_false_01() {
+        let a = [0, 1];
+        let mut c = BDecoder::from(&a);
+
+        assert_eq!(Some(()), c.expect_false());
+        assert_eq!(None, c.expect_false());
+        assert_eq!(c.remaining(), 1);
     }
 }

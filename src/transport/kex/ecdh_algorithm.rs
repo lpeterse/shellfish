@@ -57,8 +57,41 @@ impl Encode for x25519_dalek::PublicKey {
 impl Decode for x25519_dalek::PublicKey {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u32be(32)?;
-        let mut buf: [u8;32] = [0;32];
+        let mut buf: [u8; 32] = [0; 32];
         d.take_into(&mut buf)?;
         x25519_dalek::PublicKey::from(buf).into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        assert_eq!("X25519", format!("{:?}", X25519 {}));
+    }
+
+    #[test]
+    fn test_code_01() {
+        let s = X25519::new();
+        let p1: <X25519 as EcdhAlgorithm>::PublicKey = <X25519 as EcdhAlgorithm>::public(&s);
+        let v = BEncoder::encode(&p1);
+        let p2: <X25519 as EcdhAlgorithm>::PublicKey = BDecoder::decode(&v[..]).unwrap();
+        assert_eq!(p1.as_bytes(), p2.as_bytes());
+    }
+
+    #[test]
+    fn test_dh_01() {
+        let s1 = X25519::new();
+        let s2 = X25519::new();
+        let p1: <X25519 as EcdhAlgorithm>::PublicKey = <X25519 as EcdhAlgorithm>::public(&s1);
+        let p2: <X25519 as EcdhAlgorithm>::PublicKey = <X25519 as EcdhAlgorithm>::public(&s2);
+        let x1 = <X25519 as EcdhAlgorithm>::diffie_hellman(s1, &p2);
+        let x2 = <X25519 as EcdhAlgorithm>::diffie_hellman(s2, &p1);
+        assert_eq!(
+            <X25519 as EcdhAlgorithm>::secret_as_ref(&x1),
+            <X25519 as EcdhAlgorithm>::secret_as_ref(&x2)
+        );
     }
 }

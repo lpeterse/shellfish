@@ -1,5 +1,6 @@
 use super::*;
 use crate::codec::*;
+use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgNewKeys {}

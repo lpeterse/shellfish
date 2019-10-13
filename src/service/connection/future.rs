@@ -21,7 +21,8 @@ pub struct ConnectionFuture<R: Role, T> {
 }
 
 impl<R: Role, T: Socket> ConnectionFuture<R,T> {
-    pub fn new(
+    pub fn new<C: ConnectionConfig>(
+        config: &C,
         transport: Transport<R,T>,
         request_sender: RequestSender,
         request_receiver: RequestReceiver,
@@ -30,7 +31,7 @@ impl<R: Role, T: Socket> ConnectionFuture<R,T> {
             transport,
             request_sender,
             request_receiver,
-            channels: ChannelMap::new(256),
+            channels: ChannelMap::new(config.channel_max_count()),
         }
     }
 

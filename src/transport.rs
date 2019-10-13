@@ -1,12 +1,11 @@
 pub(crate) mod buffered_receiver;
 pub(crate) mod buffered_sender;
 pub(crate) mod config;
-pub(crate) mod encryption;
+pub(crate) mod cipher;
 pub(crate) mod error;
 pub(crate) mod identification;
 pub(crate) mod kex;
 pub(crate) mod key_streams;
-pub(crate) mod message;
 pub(crate) mod msg_debug;
 pub(crate) mod msg_disconnect;
 pub(crate) mod msg_ignore;
@@ -21,13 +20,12 @@ pub(crate) mod transmitter;
 pub use self::config::*;
 pub use self::error::*;
 pub use self::identification::*;
-pub use self::message::*;
 pub use self::session_id::*;
 pub use self::socket::*;
 
 use self::buffered_receiver::*;
 use self::buffered_sender::*;
-use self::encryption::*;
+use self::cipher::*;
 use self::kex::*;
 use self::key_streams::*;
 use self::msg_debug::*;
@@ -179,6 +177,10 @@ impl<R: Role, S: Socket> Transport<R, S> {
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         ready!(self.poll_internal(cx))?;
         self.transmitter.poll_receive(cx)
+    }
+
+    pub fn poll_send_unimplemented(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        todo!()
     }
 
     /// Poll all internal processes like kex and timers. Returns `Poll::Ready` when all processes

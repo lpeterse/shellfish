@@ -1,5 +1,5 @@
 use crate::codec::*;
-use crate::transport::message::*;
+use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgFailure<'a> {

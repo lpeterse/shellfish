@@ -32,7 +32,7 @@ pub struct UserAuth<R: Role> {
 impl<R: Role> Service<R> for UserAuth<R> {
     const NAME: &'static str = "ssh-userauth";
 
-    fn new(transport: Transport<R, TcpStream>) -> Self {
+    fn new(_config: &R::Config, transport: Transport<R, TcpStream>) -> Self {
         Self { transport }
     }
 }
@@ -41,6 +41,7 @@ impl UserAuth<Client> {
     /// Request another service with user authentication.
     pub async fn authenticate<S: Service<Client>>(
         mut self,
+        config: &<Client as Role>::Config,
         user: &str,
         agent: Option<Agent<Client>>,
     ) -> Result<S, UserAuthError> {
@@ -64,7 +65,7 @@ impl UserAuth<Client> {
                 _ => false,
             };
             if success {
-                return Ok(<S as Service<Client>>::new(self.transport));
+                return Ok(<S as Service<Client>>::new(config, self.transport));
             }
         }
 

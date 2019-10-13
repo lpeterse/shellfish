@@ -46,19 +46,19 @@ impl<'a> AsyncRead for Stdout<'a> {
         if buf.is_empty() {
             return Poll::Ready(Ok(0));
         }
-        let mut channel = (self.0).0.channel.lock().unwrap();
+        let mut channel = (self.0).0.state.lock().unwrap();
         if channel.is_closed {
             return Poll::Ready(Ok(0));
         }
-        if !channel.specific.stdout.is_empty() {
+        if !channel.stdout.is_empty() {
             // FIXME wake if window resize possible
-            let read = channel.specific.stdout.read(buf);
+            let read = channel.stdout.read(buf);
             return Poll::Ready(Ok(read));
         }
         if channel.is_remote_eof {
             return Poll::Ready(Ok(0));
         }
-        channel.user_task.register(cx.waker());
+        channel.outer_waker.register(cx.waker());
         return Poll::Pending;
     }
 }
@@ -74,19 +74,19 @@ impl<'a> AsyncRead for Stderr<'a> {
         if buf.is_empty() {
             return Poll::Ready(Ok(0));
         }
-        let mut channel = (self.0).0.channel.lock().unwrap();
+        let mut channel = (self.0).0.state.lock().unwrap();
         if channel.is_closed {
             return Poll::Ready(Ok(0));
         }
-        if !channel.specific.stderr.is_empty() {
+        if !channel.stderr.is_empty() {
             // FIXME wake if window resize possible
-            let read = channel.specific.stderr.read(buf);
+            let read = channel.stderr.read(buf);
             return Poll::Ready(Ok(read));
         }
         if channel.is_remote_eof {
             return Poll::Ready(Ok(0));
         }
-        channel.user_task.register(cx.waker());
+        channel.outer_waker.register(cx.waker());
         return Poll::Pending;
     }
 }

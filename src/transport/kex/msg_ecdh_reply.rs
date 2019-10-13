@@ -1,7 +1,8 @@
-use crate::codec::*;
-use crate::algorithm::authentication::*;
 use super::ecdh_algorithm::*;
 use super::*;
+use crate::algorithm::authentication::*;
+use crate::codec::*;
+use crate::message::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgKexEcdhReply<A: EcdhAlgorithm> {
@@ -10,19 +11,19 @@ pub struct MsgKexEcdhReply<A: EcdhAlgorithm> {
     pub signature: HostIdentitySignature,
 }
 
-impl <A: EcdhAlgorithm> Message for MsgKexEcdhReply<A> {
+impl<A: EcdhAlgorithm> Message for MsgKexEcdhReply<A> {
     const NUMBER: u8 = 31;
 }
 
-impl <A: EcdhAlgorithm> Encode for MsgKexEcdhReply<A>
+impl<A: EcdhAlgorithm> Encode for MsgKexEcdhReply<A>
 where
     A::PublicKey: Encode,
 {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>()
-        + self.host_key.size()
-        + self.dh_public.size()
-        + self.signature.size()
+            + self.host_key.size()
+            + self.dh_public.size()
+            + self.signature.size()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(<Self as Message>::NUMBER);
@@ -32,7 +33,7 @@ where
     }
 }
 
-impl <A: EcdhAlgorithm> Decode for MsgKexEcdhReply<A>
+impl<A: EcdhAlgorithm> Decode for MsgKexEcdhReply<A>
 where
     A::PublicKey: Decode,
 {
@@ -42,6 +43,7 @@ where
             host_key: DecodeRef::decode(d)?,
             dh_public: DecodeRef::decode(d)?,
             signature: DecodeRef::decode(d)?,
-        }.into()
+        }
+        .into()
     }
 }

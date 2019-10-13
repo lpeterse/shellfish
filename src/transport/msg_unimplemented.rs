@@ -1,5 +1,5 @@
 use crate::codec::*;
-use super::message::*;
+use crate::message::*;
 
 #[derive(Copy, Clone, Debug)]
 pub struct MsgUnimplemented {

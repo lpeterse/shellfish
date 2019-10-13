@@ -1,7 +1,7 @@
 use super::super::config::*;
 use super::kex::*;
 use crate::algorithm::kex::*;
-use crate::client::*;
+use crate::algorithm::*;
 
 pub struct ClientKexMachine {
     pub state: ClientKexState,
@@ -232,11 +232,6 @@ impl KexMachine for ClientKexMachine {
                 let state = std::mem::replace(&mut self.state, state);
                 match state {
                     ClientKexState::NewKeys(mut x) => {
-                        log::warn!("{:?}", self.encryption_algorithms);
-                        log::warn!(
-                            "{:?}",
-                            &x.server_init.encryption_algorithms_client_to_server
-                        );
                         let encryption_algorithm_client_to_server = common(
                             &self.encryption_algorithms,
                             &x.server_init.encryption_algorithms_client_to_server,
@@ -265,18 +260,18 @@ impl KexMachine for ClientKexMachine {
                             &self.mac_algorithms,
                             &x.server_init.mac_algorithms_server_to_client,
                         );
-                        t.encryption_ctx().new_keys(
+                        t.encryption_ctx().update(
                             &encryption_algorithm_client_to_server,
                             &compression_algorithm_client_to_server,
                             mac_algorithm_client_to_server,
                             &mut x.key_streams.c(),
-                        );
-                        t.decryption_ctx().new_keys(
+                        ).ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+                        t.decryption_ctx().update(
                             &encryption_algorithm_server_to_client,
                             &compression_algorithm_server_to_client,
                             mac_algorithm_server_to_client,
                             &mut x.key_streams.d(),
-                        );
+                        ).ok_or(KexError::NoCommonEncryptionAlgorithm)?;
 
                         self.next_kex_at_bytes_sent = t.bytes_sent() + self.interval_bytes;
                         self.next_kex_at_bytes_received = t.bytes_received() + self.interval_bytes;

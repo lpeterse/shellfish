@@ -1,4 +1,5 @@
 use crate::codec::*;
+use crate::message::*;
 
 use std::fmt;
 
@@ -31,8 +32,8 @@ impl fmt::Display for ChannelOpenFailureReason {
     }
 }
 
-impl<'a> MsgChannelOpenFailure {
-    const MSG_NUMBER: u8 = 92;
+impl<'a> Message for MsgChannelOpenFailure {
+    const NUMBER: u8 = 92;
 }
 
 impl Encode for MsgChannelOpenFailure {
@@ -40,7 +41,7 @@ impl Encode for MsgChannelOpenFailure {
         1 + 4 + 4 + Encode::size(&self.description) + Encode::size(&self.language)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(Self::MSG_NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER as u8);
         e.push_u32be(self.recipient_channel);
         e.push_u32be(self.reason.0);
         Encode::encode(&self.description, e);
@@ -50,7 +51,7 @@ impl Encode for MsgChannelOpenFailure {
 
 impl<'a> DecodeRef<'a> for MsgChannelOpenFailure {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| *x == Self::MSG_NUMBER)?;
+        d.expect_u8(Self::NUMBER)?;
         Self {
             recipient_channel: d.take_u32be()?,
             reason: ChannelOpenFailureReason(d.take_u32be()?),
