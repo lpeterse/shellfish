@@ -31,3 +31,31 @@ impl Decode for MsgChannelWindowAdjust {
         }.into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgChannelWindowAdjust { recipient_channel: 23, bytes_to_add: 47 };
+        assert_eq!(
+            "MsgChannelWindowAdjust { recipient_channel: 23, bytes_to_add: 47 }",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgChannelWindowAdjust { recipient_channel: 23, bytes_to_add: 47 };
+        assert_eq!(&[93, 0, 0, 0, 23, 0, 0, 0, 47][..], &BEncoder::encode(&msg)[..]);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 9] = [93, 0, 0, 0, 23, 0, 0, 0, 47];
+        let msg: MsgChannelWindowAdjust = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!(msg.recipient_channel, 23);
+        assert_eq!(msg.bytes_to_add, 47);
+    }
+}

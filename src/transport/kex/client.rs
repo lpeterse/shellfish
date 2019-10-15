@@ -49,7 +49,7 @@ impl ClientKexState {
         })
     }
     // TODO: This needs to be extended in order to support other ECDH methods
-    pub fn new_ecdh(client_init: MsgKexInit, server_init: MsgKexInit) -> Result<Self, KexError> {
+    pub fn new_ecdh(client_init: MsgKexInit, server_init: MsgKexInit) -> Result<Self, TransportError> {
         if server_init
             .kex_algorithms
             .contains(&<Curve25519Sha256 as KexAlgorithm>::NAME.into())
@@ -61,7 +61,7 @@ impl ClientKexState {
                 dh_secret: X25519::new(),
             }));
         }
-        return Err(KexError::NoCommonKexAlgorithm);
+        return Err(TransportError::NoCommonKexAlgorithm);
     }
 }
 
@@ -133,7 +133,7 @@ impl KexMachine for ClientKexMachine {
         &mut self,
         cx: &mut Context,
         t: &mut Transmitter<T>,
-    ) -> Result<bool, KexError> {
+    ) -> Result<bool, TransportError> {
         match &mut self.state {
             ClientKexState::Delay(timer) => match timer.poll_unpin(cx) {
                 Poll::Pending => {
@@ -163,7 +163,7 @@ impl KexMachine for ClientKexMachine {
         }
     }
 
-    fn init_remote(&mut self, server_init: MsgKexInit) -> Result<(), KexError> {
+    fn init_remote(&mut self, server_init: MsgKexInit) -> Result<(), TransportError> {
         match &mut self.state {
             ClientKexState::Delay(_) => {
                 self.state = ClientKexState::new_init(self, Some(server_init));
@@ -175,12 +175,12 @@ impl KexMachine for ClientKexMachine {
                     self.state = ClientKexState::new_ecdh(init.client_init.clone(), server_init)?;
                 }
             }
-            _ => return Err(KexError::ProtocolError),
+            _ => return Err(TransportError::ProtocolError),
         }
         Ok(())
     }
 
-    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError> {
+    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), TransportError> {
         match t.decode() {
             Some(msg) => {
                 log::debug!("Received MSG_ECDH_REPLY");
@@ -236,22 +236,22 @@ impl KexMachine for ClientKexMachine {
                             &self.encryption_algorithms,
                             &x.server_init.encryption_algorithms_client_to_server,
                         )
-                        .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+                        .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                         let encryption_algorithm_server_to_client = common(
                             &self.encryption_algorithms,
                             &x.server_init.encryption_algorithms_server_to_client,
                         )
-                        .ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+                        .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                         let compression_algorithm_client_to_server = common(
                             &self.compression_algorithms,
                             &x.server_init.compression_algorithms_client_to_server,
                         )
-                        .ok_or(KexError::NoCommonCompressionAlgorithm)?;
+                        .ok_or(TransportError::NoCommonCompressionAlgorithm)?;
                         let compression_algorithm_server_to_client = common(
                             &self.compression_algorithms,
                             &x.server_init.compression_algorithms_server_to_client,
                         )
-                        .ok_or(KexError::NoCommonCompressionAlgorithm)?;
+                        .ok_or(TransportError::NoCommonCompressionAlgorithm)?;
                         let mac_algorithm_client_to_server = common(
                             &self.mac_algorithms,
                             &x.server_init.mac_algorithms_client_to_server,
@@ -265,13 +265,13 @@ impl KexMachine for ClientKexMachine {
                             &compression_algorithm_client_to_server,
                             mac_algorithm_client_to_server,
                             &mut x.key_streams.c(),
-                        ).ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+                        ).ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                         t.decryption_ctx().update(
                             &encryption_algorithm_server_to_client,
                             &compression_algorithm_server_to_client,
                             mac_algorithm_server_to_client,
                             &mut x.key_streams.d(),
-                        ).ok_or(KexError::NoCommonEncryptionAlgorithm)?;
+                        ).ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
 
                         self.next_kex_at_bytes_sent = t.bytes_sent() + self.interval_bytes;
                         self.next_kex_at_bytes_received = t.bytes_received() + self.interval_bytes;
@@ -284,7 +284,7 @@ impl KexMachine for ClientKexMachine {
             }
             None => (),
         }
-        return Err(KexError::ProtocolError);
+        return Err(TransportError::ProtocolError);
     }
 
     fn poll_flush<T: Socket>(
@@ -315,7 +315,7 @@ impl KexMachine for ClientKexMachine {
                 ClientKexState::Ecdh(x) => {
                     if !x.sent {
                         let msg: MsgKexEcdhInit<X25519> =
-                            MsgKexEcdhInit::new(X25519::public(&x.dh_secret));
+                            MsgKexEcdhInit { dh_public: X25519::public(&x.dh_secret) };
                         ready!(t.poll_send(cx, &msg))?;
                         x.sent = true;
                         break;
@@ -324,7 +324,7 @@ impl KexMachine for ClientKexMachine {
                 }
                 ClientKexState::NewKeys(x) => {
                     if !x.sent {
-                        let msg = MsgNewKeys::new();
+                        let msg = MsgNewKeys {};
                         ready!(t.poll_send(cx, &msg))?;
                         x.sent = true;
                         break;

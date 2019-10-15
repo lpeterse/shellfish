@@ -24,7 +24,7 @@ pub use self::config::*;
 
 use super::*;
 use self::future::ConnectionFuture;
-use self::msg_channel_open_failure::ChannelOpenFailureReason;
+use self::msg_channel_open_failure::Reason;
 use self::request::*;
 
 use crate::client::*;

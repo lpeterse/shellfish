@@ -35,3 +35,42 @@ impl<'a> DecodeRef<'a> for MsgIgnore<'a> {
         .into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgIgnore { data: &b"data"[..] };
+        assert_eq!(
+            "MsgIgnore { data: [100, 97, 116, 97] }",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgIgnore::new();
+        assert_eq!(
+            &[2, 0, 0, 0, 0][..],
+            &BEncoder::encode(&msg)[..]
+        );
+    }
+
+    #[test]
+    fn test_encode_02() {
+        let msg = MsgIgnore { data: &b"data"[..] };
+        assert_eq!(
+            &[2, 0, 0, 0, 4, 100, 97, 116, 97][..],
+            &BEncoder::encode(&msg)[..]
+        );
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 9] = [2, 0, 0, 0, 4, 100, 97, 116, 97];
+        let msg: MsgIgnore = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!(&b"data"[..], msg.data);
+    }
+}

@@ -1,7 +1,7 @@
 pub(crate) mod buffered_receiver;
 pub(crate) mod buffered_sender;
-pub(crate) mod config;
 pub(crate) mod cipher;
+pub(crate) mod config;
 pub(crate) mod error;
 pub(crate) mod identification;
 pub(crate) mod kex;
@@ -179,8 +179,14 @@ impl<R: Role, S: Socket> Transport<R, S> {
         self.transmitter.poll_receive(cx)
     }
 
-    pub fn poll_send_unimplemented(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        todo!()
+    pub fn poll_send_unimplemented(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<(), TransportError>> {
+        let msg = MsgUnimplemented {
+            packet_number: self.transmitter.packets_received() as u32,
+        };
+        self.poll_send(cx, &msg)
     }
 
     /// Poll all internal processes like kex and timers. Returns `Poll::Ready` when all processes

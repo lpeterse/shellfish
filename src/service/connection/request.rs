@@ -47,9 +47,9 @@ pub struct ChannelOpenRequest {
     pub max_packet_size: u32,
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ChannelOpenFailure {
-    pub reason: ChannelOpenFailureReason,
+    pub reason: Reason,
 }
 
 impl IsRequest for ChannelOpenRequest {

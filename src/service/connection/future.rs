@@ -17,7 +17,7 @@ pub struct ConnectionFuture<R: Role, T> {
     pub transport: Transport<R,T>,
     pub request_sender: RequestSender,
     pub request_receiver: RequestReceiver,
-    pub channels: ChannelMap,
+    pub channels: ChannelMap<Channel>,
 }
 
 impl<R: Role, T: Socket> ConnectionFuture<R,T> {
@@ -38,7 +38,8 @@ impl<R: Role, T: Socket> ConnectionFuture<R,T> {
     fn terminate(&mut self, e: ConnectionError) -> ConnectionError {
         //self.request_sender.terminate(e); // FIXME
         self.request_receiver.terminate(e);
-        self.channels.terminate(e);
+        //self.channels.terminate(e);
+        todo!();
         e
     }
 

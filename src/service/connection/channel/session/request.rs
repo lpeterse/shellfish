@@ -167,4 +167,3 @@ impl Encode for SubsystemRequest {
         // FIXME
     }
 }
-

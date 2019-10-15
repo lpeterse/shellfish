@@ -23,3 +23,29 @@ impl Decode for MsgRequestFailure {
         Self.into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgRequestFailure;
+        assert_eq!(
+            "MsgRequestFailure",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgRequestFailure;
+        assert_eq!(&[82][..], &BEncoder::encode(&msg)[..]);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 1] = [82];
+        let _: MsgRequestFailure = BDecoder::decode(&buf[..]).unwrap();
+    }
+}

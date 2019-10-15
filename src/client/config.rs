@@ -110,3 +110,24 @@ impl ConnectionConfig for ClientConfig {
         self.channel_max_count
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_default_01() {
+        let c = ClientConfig::default();
+        assert_eq!(c.identification(), &Identification::default());
+        assert_eq!(c.kex_interval_bytes(), 1024 * 1024 * 1024);
+        assert_eq!(c.kex_interval_duration(), Duration::from_secs(3600));
+        assert_eq!(c.alive_interval(), Duration::from_secs(300));
+        assert_eq!(c.inactivity_timeout(), Duration::from_secs(3600));
+        assert_eq!(c.kex_algorithms(), &SUPPORTED_KEX_ALGORITHMS.to_vec());
+        assert_eq!(c.host_key_algorithms(), &SUPPORTED_HOST_KEY_ALGORITHMS.to_vec());
+        assert_eq!(c.encryption_algorithms(), &SUPPORTED_ENCRYPTION_ALGORITHMS.to_vec());
+        assert_eq!(c.compression_algorithms(), &SUPPORTED_COMPRESSION_ALGORITHMS.to_vec());
+        assert_eq!(c.mac_algorithms(), &SUPPORTED_MAC_ALGORITHMS.to_vec());
+        assert_eq!(c.channel_max_count(), 256);
+    }
+}

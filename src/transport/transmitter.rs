@@ -59,8 +59,16 @@ impl<S: Socket> Transmitter<S> {
         self.bytes_sent
     }
 
+    pub fn packets_sent(&self) -> u64 {
+        self.packets_sent
+    }
+
     pub fn bytes_received(&self) -> u64 {
         self.bytes_received
+    }
+
+    pub fn packets_received(&self) -> u64 {
+        self.packets_received
     }
 
     pub fn encryption_ctx(&mut self) -> &mut CipherContext {

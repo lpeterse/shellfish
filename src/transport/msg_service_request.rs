@@ -24,3 +24,33 @@ impl<'a> DecodeRef<'a> for MsgServiceRequest<'a> {
         Self(DecodeRef::decode(d)?).into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgServiceRequest(&"service");
+        assert_eq!(
+            "MsgServiceRequest(\"service\")",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgServiceRequest(&"service");
+        assert_eq!(
+            &[5, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101][..],
+            &BEncoder::encode(&msg)[..]
+        );
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 12] = [5, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101];
+        let msg: MsgServiceRequest = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!("service", msg.0);
+    }
+}

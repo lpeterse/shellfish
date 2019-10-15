@@ -2,15 +2,21 @@ use super::*;
 
 use crate::transport::msg_disconnect::Reason;
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TransportError {
     IoError(std::io::ErrorKind),
-    KexError(KexError),
     DecoderError,
+    ProtocolError,
     BadPacketLength,
+    InvalidSignature,
     MessageIntegrity,
     MessageUnexpected,
     MessageUnimplemented,
+    NoCommonServerAuthenticationAlgorithm,
+    NoCommonCompressionAlgorithm,
+    NoCommonEncryptionAlgorithm,
+    NoCommonKexAlgorithm,
+    NoCommonMacAlgorith,
     DisconnectByUs(Reason),
     DisconnectByPeer(Reason),
     InactivityTimeout,
@@ -22,24 +28,9 @@ impl From<std::io::Error> for TransportError {
     }
 }
 
-impl From<KexError> for TransportError {
-    fn from(e: KexError) -> Self {
-        Self::KexError(e)
-    }
-}
-
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn test_from_kex_error_01() {
-        let x: TransportError = KexError::InvalidSignature.into();
-        match x {
-            TransportError::KexError(KexError::InvalidSignature) => (),
-            _ => panic!(""),
-        }
-    }
 
     #[test]
     fn test_from_io_error_01() {

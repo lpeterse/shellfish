@@ -32,3 +32,66 @@ impl<'a> DecodeRef<'a> for MsgFailure<'a> {
         .into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgFailure {
+            methods: vec!["password", "publickey"],
+            partial_success: true,
+        };
+        assert_eq!(
+            "MsgFailure { methods: [\"password\", \"publickey\"], partial_success: true }",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgFailure {
+            methods: vec!["password", "publickey"],
+            partial_success: true,
+        };
+        assert_eq!(
+            &[
+                51, 0, 0, 0, 18, 112, 97, 115, 115, 119, 111, 114, 100, 44, 112, 117, 98, 108, 105,
+                99, 107, 101, 121, 1
+            ][..],
+            &BEncoder::encode(&msg)[..]
+        );
+    }
+
+    #[test]
+    fn test_encode_02() {
+        let msg = MsgFailure {
+            methods: vec![],
+            partial_success: false,
+        };
+        assert_eq!(
+            &[51, 0, 0, 0, 0, 0][..],
+            &BEncoder::encode(&msg)[..]
+        );
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 24] = [
+            51, 0, 0, 0, 18, 112, 97, 115, 115, 119, 111, 114, 100, 44, 112, 117, 98, 108, 105, 99,
+            107, 101, 121, 1,
+        ];
+        let msg: MsgFailure = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!(msg.methods, vec!["password", "publickey"]);
+        assert_eq!(msg.partial_success, true);
+    }
+
+    #[test]
+    fn test_decode_02() {
+        let buf: [u8; 6] = [51, 0, 0, 0, 0, 0];
+        let msg: MsgFailure = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!(msg.methods.is_empty(), true);
+        assert_eq!(msg.partial_success, false);
+    }
+}

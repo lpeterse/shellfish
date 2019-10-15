@@ -1,7 +1,7 @@
 use rand_core::RngCore;
 use rand_os::OsRng;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct KexCookie(pub [u8; 16]);
 
 impl KexCookie {

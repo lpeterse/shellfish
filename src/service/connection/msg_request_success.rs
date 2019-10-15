@@ -10,7 +10,7 @@ impl<'a> Message for MsgRequestSuccess<'a> {
     const NUMBER: u8 = 81;
 }
 
-impl <'a> Encode for MsgRequestSuccess<'a> {
+impl<'a> Encode for MsgRequestSuccess<'a> {
     fn size(&self) -> usize {
         1 + self.data.len()
     }
@@ -25,6 +25,34 @@ impl<'a> DecodeRef<'a> for MsgRequestSuccess<'a> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             data: d.take_all()?,
-        }.into()
+        }
+        .into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgRequestSuccess { data: &b"data"[..] };
+        assert_eq!(
+            "MsgRequestSuccess { data: [100, 97, 116, 97] }",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_02() {
+        let msg = MsgRequestSuccess { data: &b"data"[..] };
+        assert_eq!(&[81, 100, 97, 116, 97][..], &BEncoder::encode(&msg)[..]);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 5] = [81, 100, 97, 116, 97];
+        let msg: MsgRequestSuccess = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!(&b"data"[..], msg.data);
     }
 }

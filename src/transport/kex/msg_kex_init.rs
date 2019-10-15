@@ -2,7 +2,7 @@ use super::*;
 use crate::codec::*;
 use crate::message::*;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MsgKexInit {
     pub cookie: KexCookie,
     pub kex_algorithms: Vec<String>,
@@ -105,5 +105,90 @@ impl Decode for MsgKexInit {
         };
         d.take_u32be()?;
         r.into()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_new_01() {
+        let msg1 = MsgKexInit::new(
+            KexCookie([0; 16]),
+            vec!["kex".into()],
+            vec!["hk".into()],
+            vec!["enc1".into()],
+            vec!["mac1".into()],
+            vec!["comp1".into()],
+        );
+        let msg2 = MsgKexInit {
+            cookie: KexCookie([0; 16]),
+            kex_algorithms: vec!["kex".into()],
+            server_host_key_algorithms: vec!["hk".into()],
+            encryption_algorithms_client_to_server: vec!["enc1".into()],
+            encryption_algorithms_server_to_client: vec!["enc1".into()],
+            mac_algorithms_client_to_server: vec!["mac1".into()],
+            mac_algorithms_server_to_client: vec!["mac1".into()],
+            compression_algorithms_client_to_server: vec!["comp1".into()],
+            compression_algorithms_server_to_client: vec!["comp1".into()],
+            languages_client_to_server: vec![],
+            languages_server_to_client: vec![],
+            first_packet_follows: false,
+        };
+        assert_eq!(msg1, msg2);
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgKexInit {
+            cookie: KexCookie([0; 16]),
+            kex_algorithms: vec!["kex".into()],
+            server_host_key_algorithms: vec!["hk".into()],
+            encryption_algorithms_client_to_server: vec!["enc1".into()],
+            encryption_algorithms_server_to_client: vec!["enc2".into()],
+            mac_algorithms_client_to_server: vec!["mac1".into()],
+            mac_algorithms_server_to_client: vec!["mac2".into()],
+            compression_algorithms_client_to_server: vec!["comp1".into()],
+            compression_algorithms_server_to_client: vec!["comp2".into()],
+            languages_client_to_server: vec!["lang1".into()],
+            languages_server_to_client: vec!["lang2".into(), "lang3".into()],
+            first_packet_follows: false,
+        };
+        let expected: [u8; 109] = [
+            20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 107, 101, 120, 0, 0, 0,
+            2, 104, 107, 0, 0, 0, 4, 101, 110, 99, 49, 0, 0, 0, 4, 101, 110, 99, 50, 0, 0, 0, 4,
+            109, 97, 99, 49, 0, 0, 0, 4, 109, 97, 99, 50, 0, 0, 0, 5, 99, 111, 109, 112, 49, 0, 0,
+            0, 5, 99, 111, 109, 112, 50, 0, 0, 0, 5, 108, 97, 110, 103, 49, 0, 0, 0, 11, 108, 97,
+            110, 103, 50, 44, 108, 97, 110, 103, 51, 0, 0, 0, 0, 0,
+        ];
+        let actual = BEncoder::encode(&msg);
+        assert_eq!(&expected[..], &actual[..]);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let msg = MsgKexInit {
+            cookie: KexCookie([0; 16]),
+            kex_algorithms: vec!["kex".into()],
+            server_host_key_algorithms: vec!["hk".into()],
+            encryption_algorithms_client_to_server: vec!["enc1".into()],
+            encryption_algorithms_server_to_client: vec!["enc2".into()],
+            mac_algorithms_client_to_server: vec!["mac1".into()],
+            mac_algorithms_server_to_client: vec!["mac2".into()],
+            compression_algorithms_client_to_server: vec!["comp1".into()],
+            compression_algorithms_server_to_client: vec!["comp2".into()],
+            languages_client_to_server: vec!["lang1".into()],
+            languages_server_to_client: vec!["lang2".into(), "lang3".into()],
+            first_packet_follows: false,
+        };
+        let bin: [u8; 109] = [
+            20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 107, 101, 120, 0, 0, 0,
+            2, 104, 107, 0, 0, 0, 4, 101, 110, 99, 49, 0, 0, 0, 4, 101, 110, 99, 50, 0, 0, 0, 4,
+            109, 97, 99, 49, 0, 0, 0, 4, 109, 97, 99, 50, 0, 0, 0, 5, 99, 111, 109, 112, 49, 0, 0,
+            0, 5, 99, 111, 109, 112, 50, 0, 0, 0, 5, 108, 97, 110, 103, 49, 0, 0, 0, 11, 108, 97,
+            110, 103, 50, 44, 108, 97, 110, 103, 51, 0, 0, 0, 0, 0,
+        ];
+        assert_eq!(msg, BDecoder::decode(&bin[..]).unwrap());
     }
 }

@@ -152,7 +152,7 @@ pub fn poll<R: Role, T: Socket>(
                 let session: Session = Session::new(shared);
                 Ok((Ok(session), state))
             })?;
-            x.channels.insert(state)?;
+            x.channels.insert(msg.recipient_channel, state);
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }

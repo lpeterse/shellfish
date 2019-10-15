@@ -1,16 +1,14 @@
-mod type_;
-mod session;
-mod other;
 mod map;
+mod session;
+mod type_;
 
 use super::error::*;
 
-pub use self::type_::*;
-pub use self::session::*;
-pub use self::other::*;
 pub use self::map::*;
+pub use self::session::*;
+pub use self::type_::*;
 
-use std::sync::{Arc,Mutex};
+use std::sync::{Arc, Mutex};
 
 pub struct Channel {
     pub is_closing: bool,
@@ -35,7 +33,7 @@ impl Channel {
 }
 
 pub enum SharedState {
-    Session(Arc<Mutex<SessionState>>)
+    Session(Arc<Mutex<SessionState>>),
 }
 
 pub trait SpecificState {
@@ -43,9 +41,9 @@ pub trait SpecificState {
 }
 
 impl Channel {
-    pub fn terminate(self, e: ConnectionError) {
-        match self.shared {
-            SharedState::Session(x) => x.lock().unwrap().terminate(e)
+    pub fn terminate(&mut self, e: ConnectionError) {
+        match &mut self.shared {
+            SharedState::Session(x) => x.lock().unwrap().terminate(e),
         }
     }
 }

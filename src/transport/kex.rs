@@ -23,38 +23,19 @@ use super::*;
 pub trait KexMachine {
     fn new<C: TransportConfig>(config: &C) -> Self;
     fn init_local(&mut self);
-    fn init_remote(&mut self, msg: MsgKexInit) -> Result<(), KexError>;
+    fn init_remote(&mut self, msg: MsgKexInit) -> Result<(), TransportError>;
     fn is_init_sent(&self) -> bool;
     fn is_init_received(&self) -> bool;
     fn is_in_progress<T: Socket>(
         &mut self,
         cx: &mut Context,
         t: &mut Transmitter<T>,
-    ) -> Result<bool, KexError>;
-    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), KexError>;
+    ) -> Result<bool, TransportError>;
+    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), TransportError>;
     fn poll_flush<T: Socket>(
         &mut self,
         cx: &mut Context,
         t: &mut Transmitter<T>,
     ) -> Poll<Result<(), TransportError>>;
     fn session_id(&self) -> &Option<SessionId>;
-}
-
-#[derive(Copy, Clone, Debug)]
-pub enum KexError {
-    IoError(std::io::ErrorKind),
-    DecoderError,
-    ProtocolError,
-    NoCommonServerAuthenticationAlgorithm,
-    NoCommonCompressionAlgorithm,
-    NoCommonEncryptionAlgorithm,
-    NoCommonKexAlgorithm,
-    NoCommonMacAlgorith,
-    InvalidSignature,
-}
-
-impl From<std::io::Error> for KexError {
-    fn from(e: std::io::Error) -> Self {
-        Self::IoError(e.kind())
-    }
 }

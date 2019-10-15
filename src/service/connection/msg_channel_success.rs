@@ -28,3 +28,30 @@ impl Decode for MsgChannelSuccess {
         }.into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgChannelSuccess { recipient_channel: 23 };
+        assert_eq!(
+            "MsgChannelSuccess { recipient_channel: 23 }",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgChannelSuccess { recipient_channel: 23 };
+        assert_eq!(&[99,0,0,0,23][..], &BEncoder::encode(&msg)[..]);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 5] = [99,0,0,0,23];
+        let msg: MsgChannelSuccess = BDecoder::decode(&buf[..]).unwrap();
+        assert_eq!(msg.recipient_channel, 23);
+    }
+}

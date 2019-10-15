@@ -1,7 +1,8 @@
 use super::{
-    ChannelOpenFailure, ChannelOpenFailureReason, ChannelOpenRequest, ConnectionError,
+    ChannelOpenFailure, ChannelOpenRequest, ConnectionError,
     ConnectionFuture, DisconnectRequest, MsgChannelOpen, Request, Session,
 };
+use super::super::msg_channel_open_failure;
 use crate::transport::msg_disconnect::*;
 use crate::transport::Socket;
 use crate::role::*;
@@ -24,13 +25,13 @@ pub fn poll<R: Role, S: Socket>(
             return Poll::Ready(Ok(()));
         }
         Request::ChannelOpen(r) => {
-            match x.channels.free() {
+            match x.channels.alloc() {
                 None => {
                     // In case of local channel shortage, reject the request.
                     x.request_receiver.accept();
                     x.request_receiver.complete(|_: ChannelOpenRequest| {
                         let failure = ChannelOpenFailure {
-                            reason: ChannelOpenFailureReason::RESOURCE_SHORTAGE,
+                            reason: msg_channel_open_failure::Reason::RESOURCE_SHORTAGE,
                         };
                         Ok((Err(failure), ()))
                     })?;

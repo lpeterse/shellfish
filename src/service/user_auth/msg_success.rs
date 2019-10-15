@@ -23,3 +23,29 @@ impl Decode for MsgSuccess {
         Self {}.into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_debug_01() {
+        let msg = MsgSuccess {};
+        assert_eq!(
+            "MsgSuccess",
+            format!("{:?}", msg)
+        );
+    }
+
+    #[test]
+    fn test_encode_01() {
+        let msg = MsgSuccess {};
+        assert_eq!(&[52][..], &BEncoder::encode(&msg)[..]);
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let buf: [u8; 1] = [52];
+        let _: MsgSuccess = BDecoder::decode(&buf[..]).unwrap();
+    }
+}
