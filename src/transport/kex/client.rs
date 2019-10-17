@@ -150,11 +150,10 @@ impl KexMachine for ClientKexMachine {
                         Ok(false)
                     }
                 }
-                Poll::Ready(Ok(())) => {
+                Poll::Ready(()) => {
                     self.init_local();
                     Ok(true)
                 }
-                Poll::Ready(Err(e)) => Err(e.into()),
             },
             _ => Ok(true),
         }

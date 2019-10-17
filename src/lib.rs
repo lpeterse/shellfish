@@ -1,6 +1,3 @@
-#![feature(process_exitcode_placeholder)]
-#![feature(todo_macro)]
-
 pub mod algorithm;
 pub mod agent;
 pub mod client;

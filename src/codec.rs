@@ -1,7 +1,7 @@
 mod decoder;
 mod encoder;
 
-use num::BigUint;
+use num_bigint::BigUint;
 use std::ops::Deref;
 
 pub use self::decoder::*;

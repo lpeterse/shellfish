@@ -1,6 +1,6 @@
 use super::*;
 use crate::codec::*;
-use num::BigUint;
+use num_bigint::BigUint;
 
 pub struct SshRsa {}
 

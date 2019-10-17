@@ -5,19 +5,20 @@ authors = ["Lars Petersen <info@lars-petersen.net>"]
 edition = "2018"
 
 [dependencies]
-log = "0.4.0"
-env_logger = "0.6.2"
-async-std = "0.99.8"
-futures-preview = { version = "0.3.0-alpha.18", features = ["async-await", "nightly"] }
-futures-util-preview = "0.3.0-alpha.18"
-futures-timer = "0.4.0"
-num = "0.2.0"
+log = "0.4.8"
+env_logger = "0.7.1"
+async-std = "0.99.10"
+futures-preview = { version = "0.3.0-alpha.19", features = ["async-await"] }
+futures-util-preview = "0.3.0-alpha.19"
+futures-timer = "1.0.2"
+num-bigint = "0.2.3"
 x25519-dalek = "0.5.2"
 rand_core = "0.4.2"
 rand_os = "0.1.1"
 sha2 = "0.8.0"
 chacha20 = { version = "0.2.1", features = ["legacy"] }
-poly1305 = "0.3.0"
+poly1305 = "0.5.1"
+generic-array = "0.12.3"
 
 [profile.release]
 lto = true

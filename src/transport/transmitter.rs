@@ -1,6 +1,8 @@
 use super::*;
 use crate::util::assume;
 
+use std::ops::Add;
+
 pub struct Transmitter<T> {
     sender: BufferedSender<WriteHalf<T>>,
     receiver: BufferedReceiver<ReadHalf<T>>,
@@ -190,7 +192,8 @@ impl<S: Socket> Transmitter<S> {
     }
 
     fn reset_alive_timer(&mut self, cx: &mut Context) {
-        self.alive_timer.reset(self.alive_interval);
+        let time = std::time::Instant::now().add(self.alive_interval);
+        self.alive_timer.reset(time);
         match self.alive_timer.poll_unpin(cx) {
             Poll::Pending => (),
             _ => panic!("alive_timer fired immediately")
@@ -198,26 +201,27 @@ impl<S: Socket> Transmitter<S> {
     }
 
     fn reset_inactivity_timer(&mut self, cx: &mut Context) {
-        self.inactivity_timer.reset(self.inactivity_timeout);
+        let time = std::time::Instant::now().add(self.inactivity_timeout);
+        self.inactivity_timer.reset(time);
         match self.inactivity_timer.poll_unpin(cx) {
             Poll::Pending => (),
             _ => panic!("inactivity_timer fired immediately")
         }
     }
 
+    // TODO
     pub fn check_keep_alive_required(&mut self, cx: &mut Context) -> Result<bool, TransportError> {
         match self.alive_timer.poll_unpin(cx) {
             Poll::Pending => Ok(false),
-            Poll::Ready(Ok(())) => Ok(true),
-            Poll::Ready(Err(e)) => Err(e.into()),
+            Poll::Ready(()) => Ok(true),
         }
     }
 
+    // TODO
     pub fn check_inactivity_timeout(&mut self, cx: &mut Context) -> Result<(), TransportError> {
         match self.inactivity_timer.poll_unpin(cx) {
+            Poll::Ready(()) => Err(TransportError::InactivityTimeout),
             Poll::Pending => Ok(()),
-            Poll::Ready(Ok(())) => Err(TransportError::InactivityTimeout),
-            Poll::Ready(Err(e)) => Err(e.into()),
         }
     }
 }

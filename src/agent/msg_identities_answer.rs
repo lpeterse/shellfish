@@ -34,7 +34,7 @@ impl Decode for MsgIdentitiesAnswer {
 #[cfg(test)]
 mod test {
     use super::*;
-    use num::BigUint;
+    use num_bigint::BigUint;
 
     #[test]
     fn test_msg_identities_answer_encode_01() {

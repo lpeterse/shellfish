@@ -4,7 +4,8 @@ use crate::util::assume;
 
 use chacha20::stream_cipher::{NewStreamCipher, SyncStreamCipher};
 use chacha20::ChaCha20Legacy;
-use poly1305::subtle::ConstantTimeEq;
+use generic_array::GenericArray;
+use poly1305::universal_hash::UniversalHash;
 use poly1305::Poly1305;
 
 pub struct Chacha20Poly1305Context {
@@ -37,7 +38,7 @@ impl Chacha20Poly1305Context {
         chacha.apply_keystream(&mut buf[..PacketLayout::PACKET_LEN_SIZE]);
         // Compute Poly1305 key and create instance from the first 32 bytes of K2
         let mut chacha = ChaCha20Legacy::new_var(&self.k2, &nonce).unwrap();
-        let mut poly_key: [u8; 32] = [0; 32];
+        let mut poly_key: GenericArray<u8, <Poly1305 as UniversalHash>::KeySize> = [0; 32].into();
         chacha.apply_keystream(&mut poly_key);
         let mut poly = Poly1305::new(&poly_key);
         // Consume the rest of the 1st chacha block
@@ -49,9 +50,9 @@ impl Chacha20Poly1305Context {
         // Compute and set the Poly1305 auth tag
         let integrity_start = 0;
         let integrity_end = cipher_end;
-        poly.input(&buf[integrity_start..integrity_end]);
+        poly.update(&buf[integrity_start..integrity_end]);
         let mac = &mut buf[integrity_end..];
-        mac.copy_from_slice(poly.result().as_ref());
+        mac.copy_from_slice(poly.result().into_bytes().as_ref());
     }
 
     pub fn decrypt(&self, pc: u64, buf: &mut [u8]) -> Option<usize> {
@@ -60,19 +61,21 @@ impl Chacha20Poly1305Context {
         let nonce: [u8; 8] = pc.to_be_bytes();
         // Compute Poly1305 key and create instance from the first 32 bytes of K2
         let mut chacha = ChaCha20Legacy::new_var(&self.k2, &nonce).unwrap();
-        let mut poly_key: [u8; 32] = [0; 32];
+        let mut poly_key: GenericArray<u8, <Poly1305 as UniversalHash>::KeySize> = [0; 32].into();
         chacha.apply_keystream(&mut poly_key);
         let mut poly = Poly1305::new(&poly_key);
         // Consume rest of 1st chacha block
         chacha.apply_keystream(&mut poly_key);
         // Compute and validate Poly1305 auth tag
-        poly.input(&buf[..buf_len - Self::MAC_LEN]);
-        let tag_computed = poly.result();
-        let tag_received = &mut buf[buf_len - Self::MAC_LEN..];
-        assume(tag_computed.as_ref().ct_eq(tag_received).unwrap_u8() == 1)?;
+        poly.update(&buf[..buf_len - Self::MAC_LEN]);
+        let tag: &GenericArray<u8, <Poly1305 as UniversalHash>::BlockSize> =
+            GenericArray::from_slice(&buf[buf_len - Self::MAC_LEN..]);
+        // Check message integrity
+        poly.verify(&tag).ok()?;
+        // Decrypt and return packet
         let packet = &mut buf[PacketLayout::PACKET_LEN_SIZE..buf_len - Self::MAC_LEN];
         chacha.apply_keystream(packet);
-        Some(buf.len() - PacketLayout::PACKET_LEN_SIZE - Self::MAC_LEN) // Message is authentic
+        Some(buf.len() - PacketLayout::PACKET_LEN_SIZE - Self::MAC_LEN)
     }
 
     pub fn decrypt_len(&self, pc: u64, mut len: [u8; 4]) -> Option<usize> {
@@ -246,13 +249,13 @@ mod test {
         let key = [
             2, 36, 186, 199, 156, 219, 160, 59, 58, 72, 185, 13, 36, 91, 46, 55, 10, 206, 108, 143,
             250, 250, 227, 41, 164, 26, 13, 4, 248, 136, 67, 35,
-        ];
+        ].into();
         let msg = [1, 2, 3, 4, 5, 6, 7, 8];
         let tag = [
             5, 144, 82, 159, 246, 206, 249, 18, 184, 150, 179, 37, 193, 39, 161, 138,
         ];
         let mut poly = Poly1305::new(&key);
-        poly.input(&msg);
-        assert_eq!(&tag, poly.result().as_ref());
+        poly.update(&msg);
+        assert_eq!(&tag, poly.result().into_bytes().as_ref());
     }
 }

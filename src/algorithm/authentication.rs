@@ -122,7 +122,7 @@ impl<'a> DecodeRef<'a> for HostSignature {
 #[cfg(test)]
 mod test {
     use super::*;
-    use num::BigUint;
+    use num_bigint::BigUint;
 
     fn example_ed25519_key() -> SshEd25519PublicKey {
         SshEd25519PublicKey([3; 32])
