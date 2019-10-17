@@ -82,7 +82,7 @@ impl UserAuth<Client> {
     where
         A: AuthenticationAlgorithm,
         A::Identity: Clone + Encode,
-        A::Signature: Decode,
+        A::Signature: Encode + Decode,
     {
         let session_id = &self.transport.session_id().unwrap();
         let data: SignatureData<A> = SignatureData {

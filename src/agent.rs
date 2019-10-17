@@ -68,7 +68,7 @@ impl Agent<Client> {
     where
         S: AuthenticationAlgorithm,
         S::Identity: Encode,
-        S::Signature: Decode,
+        S::Signature: Encode + Decode,
         D: Encode,
     {
         let msg: MsgSignRequest<S, D> = MsgSignRequest { key: identity, data, flags };

@@ -5,19 +5,21 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgKexEcdhReply<A: EcdhAlgorithm> {
-    pub host_key: HostIdentity,
+pub struct MsgKexEcdhReply<A: EcdhAlgorithm, HI> {
+    pub host_key: HI,
     pub dh_public: A::PublicKey,
-    pub signature: HostIdentitySignature,
+    pub signature: HostSignature,
 }
 
-impl<A: EcdhAlgorithm> Message for MsgKexEcdhReply<A> {
+impl<A: EcdhAlgorithm, HI> Message for MsgKexEcdhReply<A, HI> {
     const NUMBER: u8 = 31;
 }
 
-impl<A: EcdhAlgorithm> Encode for MsgKexEcdhReply<A>
+impl<A, HI> Encode for MsgKexEcdhReply<A, HI>
 where
+    A: EcdhAlgorithm,
     A::PublicKey: Encode,
+    HI: Encode,
 {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>()
@@ -33,9 +35,11 @@ where
     }
 }
 
-impl<A: EcdhAlgorithm> Decode for MsgKexEcdhReply<A>
+impl<A: EcdhAlgorithm, HI> Decode for MsgKexEcdhReply<A, HI>
 where
+    A: EcdhAlgorithm,
     A::PublicKey: Decode,
+    HI: Decode,
 {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;

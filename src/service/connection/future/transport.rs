@@ -31,8 +31,8 @@ pub fn poll<R: Role, T: Socket>(
             let _: MsgChannelData = msg;
             log::debug!("Received MSG_CHANNEL_DATA ({} bytes)", msg.data.len());
             let channel = x.channels.get(msg.recipient_channel)?;
-            channel.decrease_local_window_size(msg.data.len())?;
-            match channel.shared {
+            channel.decrease_local_window_size(msg.data.len() as u32)?;
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     let written = state.stdout.write(msg.data);
@@ -54,8 +54,8 @@ pub fn poll<R: Role, T: Socket>(
                 msg.data.len()
             );
             let channel = x.channels.get(msg.recipient_channel)?;
-            channel.decrease_local_window_size(msg.data.len())?;
-            match channel.shared {
+            channel.decrease_local_window_size(msg.data.len() as u32)?;
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     let written = state.stderr.write(msg.data);
@@ -74,7 +74,7 @@ pub fn poll<R: Role, T: Socket>(
             let _: MsgChannelWindowAdjust = msg;
             log::debug!("Received MSG_CHANNEL_WINDOW_ADJUST");
             let channel = x.channels.get(msg.recipient_channel)?;
-            channel.remote_window_size += msg.bytes_to_add;
+            channel.increase_remote_window_size(msg.bytes_to_add)?;
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }
@@ -86,7 +86,7 @@ pub fn poll<R: Role, T: Socket>(
             let _: MsgChannelEof = msg;
             log::debug!("Received MSG_CHANNEL_EOF");
             let channel = x.channels.get(msg.recipient_channel)?;
-            match channel.shared {
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     state.is_remote_eof = true;
@@ -104,12 +104,12 @@ pub fn poll<R: Role, T: Socket>(
             let _: MsgChannelClose = msg;
             log::debug!("Received MSG_CHANNEL_CLOSE");
             let channel = x.channels.get(msg.recipient_channel)?;
-            match channel.shared {
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     if !state.is_closed {
                         let msg = MsgChannelClose {
-                            recipient_channel: channel.remote_channel,
+                            recipient_channel: channel.remote_channel(),
                         };
                         ready!(x.transport.poll_send(cx, &msg))?;
                         state.is_closed = true;
@@ -117,7 +117,7 @@ pub fn poll<R: Role, T: Socket>(
                     }
                 }
             }
-            x.channels.remove(msg.recipient_channel);
+            x.channels.remove(msg.recipient_channel)?;
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }
@@ -139,20 +139,19 @@ pub fn poll<R: Role, T: Socket>(
             log::debug!("Received MSG_CHANNEL_OPEN_CONFIRMATION");
             let state = x.request_receiver.complete(|r: ChannelOpenRequest| {
                 let shared = Arc::new(Mutex::new(Default::default()));
-                let state = Channel {
-                    is_closing: false,
-                    local_channel: msg.recipient_channel,
-                    local_window_size: r.initial_window_size,
-                    local_max_packet_size: r.max_packet_size,
-                    remote_channel: msg.sender_channel,
-                    remote_window_size: msg.initial_window_size,
-                    remote_max_packet_size: msg.maximum_packet_size,
-                    shared: SharedState::Session(shared.clone()),
-                };
+                let state = Channel::new(
+                    msg.recipient_channel,
+                    r.initial_window_size,
+                    r.max_packet_size,
+                    msg.sender_channel,
+                    msg.initial_window_size,
+                    msg.maximum_packet_size,
+                    SharedState::Session(shared.clone()),
+                );
                 let session: Session = Session::new(shared);
                 Ok((Ok(session), state))
             })?;
-            x.channels.insert(msg.recipient_channel, state);
+            x.channels.insert(msg.recipient_channel, state)?;
             x.transport.consume();
             return Poll::Ready(Ok(()));
         }
@@ -175,10 +174,10 @@ pub fn poll<R: Role, T: Socket>(
     match x.transport.decode_ref() {
         None => (),
         Some(msg) => {
-            let _: MsgChannelRequest2 = msg;
+            let _: MsgChannelRequest<&[u8]> = msg;
             log::debug!("Received MSG_CHANNEL_REQUEST: {}", msg.request);
             let channel = x.channels.get(msg.recipient_channel)?;
-            match channel.shared {
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     match msg.request {
@@ -200,7 +199,7 @@ pub fn poll<R: Role, T: Socket>(
                         _ => {
                             if msg.want_reply {
                                 let msg = MsgChannelFailure {
-                                    recipient_channel: channel.remote_channel,
+                                    recipient_channel: channel.remote_channel(),
                                 };
                                 ready!(x.transport.poll_send(cx, &msg))?;
                                 log::debug!("Sent MSG_CHANNEL_FAILURE");
@@ -220,7 +219,7 @@ pub fn poll<R: Role, T: Socket>(
             log::debug!("Received MSG_CHANNEL_SUCCESS");
             let _: MsgChannelSuccess = msg;
             let channel = x.channels.get(msg.recipient_channel)?;
-            match channel.shared {
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     state.request.success()?;
@@ -238,7 +237,7 @@ pub fn poll<R: Role, T: Socket>(
             let _: MsgChannelFailure = msg;
             log::debug!("Received MSG_CHANNEL_FAILURE");
             let channel = x.channels.get(msg.recipient_channel)?;
-            match channel.shared {
+            match channel.shared() {
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     state.request.failure()?;

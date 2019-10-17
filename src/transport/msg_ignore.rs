@@ -18,11 +18,11 @@ impl<'a> Message for MsgIgnore<'a> {
 
 impl<'a> Encode for MsgIgnore<'a> {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.data)
+        1 + Encode::size(self.data)
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(&self.data, c);
+        Encode::encode(self.data, c);
     }
 }
 

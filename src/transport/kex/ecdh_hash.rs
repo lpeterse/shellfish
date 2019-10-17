@@ -21,24 +21,17 @@ impl<'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
     pub fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u32be(Encode::size(self.client_identification) as u32);
         Encode::encode(self.client_identification, e);
-
         e.push_u32be(Encode::size(self.server_identification) as u32);
         Encode::encode(self.server_identification, e);
-
         e.push_u32be(Encode::size(self.client_kex_init) as u32);
         Encode::encode(self.client_kex_init, e);
-
         e.push_u32be(Encode::size(self.server_kex_init) as u32);
         Encode::encode(self.server_kex_init, e);
-
         Encode::encode(self.server_host_key, e);
-
         e.push_u32be(A::public_as_ref(self.dh_client_key).len() as u32);
         e.push_bytes(&A::public_as_ref(self.dh_client_key));
-
         e.push_u32be(A::public_as_ref(self.dh_server_key).len() as u32);
         e.push_bytes(&A::public_as_ref(self.dh_server_key));
-
         Encode::encode(&MPInt(self.dh_secret), e);
     }
 

@@ -2,8 +2,8 @@ use crate::codec::*;
 use std::ops::Deref;
 
 pub trait ChannelType {
-    type Open: Decode;
-    type Confirmation: Decode;
+    type Open: Encode + Decode;
+    type Confirmation: Encode + Decode;
     type Request: ChannelRequest + Encode;
     type SpecificState: Default;
 

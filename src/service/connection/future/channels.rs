@@ -15,19 +15,20 @@ pub fn poll<R: Role, T: Socket>(
         // We're expecting the peer's close message any moment..
         // The channel remove logic is located in the disconnect
         // message handler.
-        if channel.is_closing {
+        if channel.is_closing() {
             continue;
         }
-        match channel.shared {
+        match channel.shared() {
             SharedState::Session(ref st) => {
                 let mut state = st.lock().unwrap();
                 state.inner_waker.register(cx.waker());
                 match state.request {
                     RequestState::Open(ref r) => {
                         let msg = MsgChannelRequest {
-                            recipient_channel: channel.remote_channel,
+                            recipient_channel: channel.remote_channel(),
+                            request: r.name(),
                             want_reply: true,
-                            request: r,
+                            specific: r,
                         };
                         ready!(x.transport.poll_send(cx, &msg))?;
                         state.request = RequestState::Progress;

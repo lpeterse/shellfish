@@ -1,5 +1,6 @@
 use super::super::config::*;
 use super::kex::*;
+use crate::algorithm::authentication::*;
 use crate::algorithm::kex::*;
 use crate::algorithm::*;
 
@@ -49,7 +50,10 @@ impl ClientKexState {
         })
     }
     // TODO: This needs to be extended in order to support other ECDH methods
-    pub fn new_ecdh(client_init: MsgKexInit, server_init: MsgKexInit) -> Result<Self, TransportError> {
+    pub fn new_ecdh(
+        client_init: MsgKexInit,
+        server_init: MsgKexInit,
+    ) -> Result<Self, TransportError> {
         if server_init
             .kex_algorithms
             .contains(&<Curve25519Sha256 as KexAlgorithm>::NAME.into())
@@ -186,7 +190,7 @@ impl KexMachine for ClientKexMachine {
                 log::debug!("Received MSG_ECDH_REPLY");
                 match &mut self.state {
                     ClientKexState::Ecdh(ecdh) => {
-                        let reply: MsgKexEcdhReply<X25519> = msg;
+                        let reply: MsgKexEcdhReply<X25519, HostIdentity> = msg;
                         // Compute the DH shared secret (create a new placeholder while
                         // the actual secret get consumed in the operation).
                         let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
@@ -260,18 +264,22 @@ impl KexMachine for ClientKexMachine {
                             &self.mac_algorithms,
                             &x.server_init.mac_algorithms_server_to_client,
                         );
-                        t.encryption_ctx().update(
-                            &encryption_algorithm_client_to_server,
-                            &compression_algorithm_client_to_server,
-                            mac_algorithm_client_to_server,
-                            &mut x.key_streams.c(),
-                        ).ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-                        t.decryption_ctx().update(
-                            &encryption_algorithm_server_to_client,
-                            &compression_algorithm_server_to_client,
-                            mac_algorithm_server_to_client,
-                            &mut x.key_streams.d(),
-                        ).ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+                        t.encryption_ctx()
+                            .update(
+                                &encryption_algorithm_client_to_server,
+                                &compression_algorithm_client_to_server,
+                                mac_algorithm_client_to_server,
+                                &mut x.key_streams.c(),
+                            )
+                            .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+                        t.decryption_ctx()
+                            .update(
+                                &encryption_algorithm_server_to_client,
+                                &compression_algorithm_server_to_client,
+                                mac_algorithm_server_to_client,
+                                &mut x.key_streams.d(),
+                            )
+                            .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
 
                         self.next_kex_at_bytes_sent = t.bytes_sent() + self.interval_bytes;
                         self.next_kex_at_bytes_received = t.bytes_received() + self.interval_bytes;
@@ -314,8 +322,9 @@ impl KexMachine for ClientKexMachine {
                 }
                 ClientKexState::Ecdh(x) => {
                     if !x.sent {
-                        let msg: MsgKexEcdhInit<X25519> =
-                            MsgKexEcdhInit { dh_public: X25519::public(&x.dh_secret) };
+                        let msg: MsgKexEcdhInit<X25519> = MsgKexEcdhInit {
+                            dh_public: X25519::public(&x.dh_secret),
+                        };
                         ready!(t.poll_send(cx, &msg))?;
                         x.sent = true;
                         break;

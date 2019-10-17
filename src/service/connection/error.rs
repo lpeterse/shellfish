@@ -10,7 +10,8 @@ pub enum ConnectionError {
     ChannelRequestFailure,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
-    ChannelWindowSizeUnderrun,
+    ChannelWindowSizeUnderflow,
+    ChannelWindowSizeOverflow,
     RequestSenderDropped,
     RequestReceiverDropped,
     RequestUnexpectedResponse,
@@ -78,8 +79,12 @@ mod test {
             format!("{:?}", ConnectionError::ChannelSuccessUnexpected)
         );
         assert_eq!(
-            "ChannelWindowSizeUnderrun",
-            format!("{:?}", ConnectionError::ChannelWindowSizeUnderrun)
+            "ChannelWindowSizeUnderflow",
+            format!("{:?}", ConnectionError::ChannelWindowSizeUnderflow)
+        );
+        assert_eq!(
+            "ChannelWindowSizeOverflow",
+            format!("{:?}", ConnectionError::ChannelWindowSizeOverflow)
         );
         assert_eq!(
             "RequestSenderDropped",

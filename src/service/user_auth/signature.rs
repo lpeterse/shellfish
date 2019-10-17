@@ -2,6 +2,7 @@ use super::method::*;
 use super::msg_userauth_request::*;
 use crate::algorithm::*;
 use crate::codec::*;
+use crate::message::*;
 use crate::transport::SessionId;
 
 pub struct SignatureData<'a, S: AuthenticationAlgorithm> {
@@ -11,7 +12,7 @@ pub struct SignatureData<'a, S: AuthenticationAlgorithm> {
     pub public_key: S::Identity,
 }
 
-impl <'a, S: AuthenticationAlgorithm> Encode for SignatureData<'a, S>
+impl<'a, S: AuthenticationAlgorithm> Encode for SignatureData<'a, S>
 where
     S::Identity: Encode,
     S::Signature: Encode,
@@ -28,7 +29,7 @@ where
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         Encode::encode(&self.session_id, e);
-        e.push_u8(MsgUserAuthRequest::<PublicKeyMethod<S>>::MSG_NUMBER);
+        e.push_u8(<MsgUserAuthRequest<PublicKeyMethod<S>> as Message>::NUMBER);
         Encode::encode(&self.user_name, e);
         Encode::encode(&self.service_name, e);
         Encode::encode(&<PublicKeyMethod<S> as AuthMethod>::NAME, e);
@@ -38,29 +39,28 @@ where
     }
 }
 
-/*
-impl<'a, S: SignatureAlgorithm> DecodeRef<'a> for SignatureData<'a, S>
-where
-    S::PublicKey: DecodeRef<'a>,
-    S::Signature: DecodeRef<'a>,
-{
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        let session_id = DecodeRef::decode(d)?;
-        d.take_u8()
-            .filter(|x| *x == MsgUserAuthRequest::<PublicKeyMethod<S>>::MSG_NUMBER)?;
-        let user_name = DecodeRef::decode(d)?;
-        let service_name = DecodeRef::decode(d)?;
-        let _: &str = DecodeRef::decode(d).filter(|x| *x == <PublicKeyMethod<S> as Method>::NAME)?;
-        d.take_u8().filter(|x| *x != 0)?;
-        let _: &str = DecodeRef::decode(d).filter(|x| *x == S::NAME)?;
-        let public_key = DecodeRef::decode(d)?;
-        Self {
-            session_id,
-            user_name,
-            service_name,
-            public_key,
-        }
-        .into()
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::algorithm::authentication::*;
+
+    #[test]
+    fn test_encode_01() {
+        let x: SignatureData<SshEd25519> = SignatureData {
+            session_id: &SessionId::new([1; 32]),
+            user_name: "user",
+            service_name: "service",
+            public_key: SshEd25519PublicKey([2; 32]),
+        };
+        let actual = BEncoder::encode(&x);
+        let expected = [
+            0, 0, 0, 32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
+            1, 1, 1, 1, 1, 1, 1, 50, 0, 0, 0, 4, 117, 115, 101, 114, 0, 0, 0, 7, 115, 101, 114,
+            118, 105, 99, 101, 0, 0, 0, 9, 112, 117, 98, 108, 105, 99, 107, 101, 121, 1, 0, 0, 0,
+            11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 51, 0, 0, 0, 11, 115,
+            115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 32, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+            2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2,
+        ];
+        assert_eq!(&actual[..], &expected[..]);
     }
 }
-*/

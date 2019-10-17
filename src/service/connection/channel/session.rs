@@ -1,19 +1,19 @@
+mod exit;
 mod process;
 mod request;
-mod exit_status;
 
+pub use self::exit::*;
 pub use self::process::*;
 pub use self::request::*;
-pub use self::exit_status::*;
 
 use super::*;
 
 use crate::codec::*;
 use crate::ring_buffer::*;
 
+use futures::task::AtomicWaker;
 use futures::task::Poll;
-use std::sync::{Arc,Mutex};
-use futures::task::{AtomicWaker};
+use std::sync::{Arc, Mutex};
 
 pub struct Session {
     state: Arc<Mutex<SessionState>>,

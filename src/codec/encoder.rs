@@ -4,6 +4,7 @@ use sha2::Digest;
 pub trait Encoder {
     fn push_u8(&mut self, x: u8);
     fn push_u32be(&mut self, x: u32);
+    fn push_u64be(&mut self, x: u64);
     fn push_bytes<T: AsRef<[u8]>>(&mut self, x: &T);
 }
 
@@ -12,6 +13,9 @@ impl<D: Digest> Encoder for D {
         self.input([x])
     }
     fn push_u32be(&mut self, x: u32) {
+        self.input(x.to_be_bytes())
+    }
+    fn push_u64be(&mut self, x: u64) {
         self.input(x.to_be_bytes())
     }
     fn push_bytes<T: AsRef<[u8]>>(&mut self, x: &T) {
@@ -50,6 +54,18 @@ impl<'a> Encoder for BEncoder<'a> {
         self.buf[self.pos + 2] = (x >> 8) as u8;
         self.buf[self.pos + 3] = (x >> 0) as u8;
         self.pos += 4;
+    }
+
+    fn push_u64be(self: &mut Self, x: u64) {
+        self.buf[self.pos + 0] = (x >> 56) as u8;
+        self.buf[self.pos + 1] = (x >> 48) as u8;
+        self.buf[self.pos + 2] = (x >> 40) as u8;
+        self.buf[self.pos + 3] = (x >> 32) as u8;
+        self.buf[self.pos + 4] = (x >> 24) as u8;
+        self.buf[self.pos + 5] = (x >> 16) as u8;
+        self.buf[self.pos + 6] = (x >> 8) as u8;
+        self.buf[self.pos + 7] = (x >> 0) as u8;
+        self.pos += 8;
     }
 
     fn push_bytes<T: AsRef<[u8]>>(self: &mut Self, x: &T) {
@@ -92,6 +108,15 @@ mod test {
         enc.push_u32be(0x01020304);
         enc.push_u32be(0x05060708);
         assert_eq!([1, 2, 3, 4, 5, 6, 7, 8], buf);
+    }
+
+    #[test]
+    fn test_bencoder_push_u64be() {
+        let mut buf = [0; 16];
+        let mut enc = BEncoder::from(&mut buf[..]);
+        enc.push_u64be(0x0102030405060708);
+        enc.push_u64be(0x0909090909090909);
+        assert_eq!([1, 2, 3, 4, 5, 6, 7, 8, 9, 9, 9, 9, 9, 9, 9, 9], buf);
     }
 
     #[test]

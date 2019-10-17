@@ -36,27 +36,55 @@ impl AuthenticationAlgorithm for SshEd25519Cert {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SshEd25519Certificate {
-    nonce: [u8; 32],
-    pk: SshEd25519PublicKey,
-    serial: u64,
-    type_: u32,
-    key_id: String,
-    valid_principals: Vec<String>,
-    valid_after: u64,
-    valid_before: u64,
-    critical_options: Vec<(String, String)>,
-    extensions: Vec<(String, String)>,
-    reserved: Vec<u8>,
-    signature_key: SshEd25519PublicKey,
-    signature: SshEd25519Signature,
+    pub nonce: [u8; 32],
+    pub pk: SshEd25519PublicKey,
+    pub serial: u64,
+    pub type_: u32,
+    pub key_id: String,
+    pub valid_principals: Vec<String>,
+    pub valid_after: u64,
+    pub valid_before: u64,
+    pub critical_options: Vec<(String, String)>,
+    pub extensions: Vec<(String, String)>,
+    pub reserved: Vec<u8>,
+    pub signature_key: SshEd25519PublicKey,
+    pub signature: SshEd25519Signature,
 }
 
 impl Encode for SshEd25519Certificate {
     fn size(&self) -> usize {
-        panic!("FIXME")
+        let mut n: usize = 0;
+        n += 4;
+        n += Encode::size(&<SshEd25519Cert as AuthenticationAlgorithm>::NAME);
+        n += Encode::size(&self.nonce[..]);
+        n += Encode::size(&self.pk.0[..]);
+        n += 8 + 4;
+        n += Encode::size(&self.key_id);
+        n += Encode::size(&ListRef(&self.valid_principals));
+        n += 8 + 8;
+        n += Encode::size(&ListRef(&self.critical_options));
+        n += Encode::size(&ListRef(&self.extensions));
+        n += Encode::size(&self.reserved[..]);
+        n += Encode::size(&self.signature_key);
+        n += Encode::size(&self.signature);
+        n
     }
-    fn encode<E: Encoder>(&self, _: &mut E) {
-        panic!("FIXME")
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        Encode::encode(&((Encode::size(self) - 4) as u32), e);
+        Encode::encode(&<SshEd25519Cert as AuthenticationAlgorithm>::NAME, e);
+        Encode::encode(&self.nonce[..], e);
+        Encode::encode(&self.pk.0[..], e);
+        Encode::encode(&self.serial, e);
+        Encode::encode(&self.type_, e);
+        Encode::encode(&self.key_id, e);
+        Encode::encode(&ListRef(&self.valid_principals), e);
+        Encode::encode(&self.valid_after, e);
+        Encode::encode(&self.valid_before, e);
+        Encode::encode(&ListRef(&self.critical_options), e);
+        Encode::encode(&ListRef(&self.extensions), e);
+        Encode::encode(&self.reserved[..], e);
+        Encode::encode(&self.signature_key, e);
+        Encode::encode(&self.signature, e);
     }
 }
 
@@ -109,6 +137,33 @@ impl Decode for SshEd25519Certificate {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    fn example_ed25519_key() -> SshEd25519PublicKey {
+        SshEd25519PublicKey([3; 32])
+    }
+
+    fn example_ed25519_cert() -> SshEd25519Certificate {
+        SshEd25519Certificate {
+            nonce: [1; 32],
+            pk: example_ed25519_key(),
+            serial: 1234,
+            type_: 1,
+            key_id: "KEY_ID".into(),
+            valid_principals: vec!["VALID_PRINCIPALS".into(), "MORE".into()],
+            valid_after: u64::min_value(),
+            valid_before: u64::max_value(),
+            critical_options: vec![("OPTION1".into(), "".into()), ("OPTION2".into(), "".into())],
+            extensions: vec![("EXT1".into(), "".into()), ("EXT2".into(), "".into())],
+            reserved: vec![],
+            signature_key: example_ed25519_key(),
+            signature: SshEd25519Signature([5; 64]),
+        }
+    }
+
+    #[test]
+    fn test_debug_01() {
+        assert_eq!(format!("{:?}", example_ed25519_cert()), "SshEd25519Certificate { nonce: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], pk: SshEd25519PublicKey([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]), serial: 1234, type_: 1, key_id: \"KEY_ID\", valid_principals: [\"VALID_PRINCIPALS\", \"MORE\"], valid_after: 0, valid_before: 18446744073709551615, critical_options: [(\"OPTION1\", \"\"), (\"OPTION2\", \"\")], extensions: [(\"EXT1\", \"\"), (\"EXT2\", \"\")], reserved: [], signature_key: SshEd25519PublicKey([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]), signature: Ed25519Signature([5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5]) }");
+    }
 
     #[test]
     fn test_decode_01() {

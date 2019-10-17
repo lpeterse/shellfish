@@ -14,18 +14,18 @@ mod msg_channel_request;
 mod msg_channel_success;
 mod msg_channel_window_adjust;
 mod msg_global_request;
-mod msg_request_success;
 mod msg_request_failure;
+mod msg_request_success;
 mod request;
 
 pub use self::channel::*;
-pub use self::error::*;
 pub use self::config::*;
+pub use self::error::*;
 
-use super::*;
 use self::future::ConnectionFuture;
 use self::msg_channel_open_failure::Reason;
 use self::request::*;
+use super::*;
 
 use crate::client::*;
 use crate::codec::*;
@@ -34,18 +34,20 @@ use crate::transport::*;
 
 use async_std::net::TcpStream;
 use futures::channel::oneshot;
-use futures::future::FutureExt;
+use futures::future::{Future, FutureExt};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 pub struct Connection<R: Role> {
     phantom: std::marker::PhantomData<R>,
-    error: oneshot::Receiver<ConnectionError>,
     request_sender: RequestSender,
     request_receiver: RequestReceiver,
+    result: oneshot::Receiver<Result<(), ConnectionError>>,
 }
 
 impl<R: Role> Service<R> for Connection<R>
 where
-    R::Config: ConnectionConfig
+    R::Config: ConnectionConfig,
 {
     const NAME: &'static str = "ssh-connection";
 
@@ -53,16 +55,14 @@ where
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();
-        let future = ConnectionFuture::new(config, transport, s3, r2).map(|e| {
-            log::warn!("Connection died with {:?}", e);
-            s1.send(e.unwrap_err()).unwrap_or(())
-        });
-        async_std::task::spawn(future);
+        async_std::task::spawn(
+            ConnectionFuture::new(config, transport, s3, r2).map(|r| s1.send(r).unwrap_or(())),
+        );
         Connection {
             phantom: std::marker::PhantomData,
-            error: r1,
             request_sender: s2,
             request_receiver: r3,
+            result: r1,
         }
     }
 }
@@ -86,5 +86,17 @@ impl Connection<Client> {
                 max_packet_size: 1024,
             })
             .await
+    }
+}
+
+impl<R: Role> Future for Connection<R> {
+    type Output = Result<(), ConnectionError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let x = Pin::into_inner(self);
+        Pin::new(&mut x.result).poll(cx).map(|r| match r {
+            Err(_) => Err(ConnectionError::Terminated),
+            Ok(r) => r,
+        })
     }
 }

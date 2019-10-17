@@ -12,11 +12,11 @@ pub trait Encode {
     fn encode<E: Encoder>(&self, c: &mut E);
 }
 
-pub trait Decode: Encode + Sized {
+pub trait Decode: Sized {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>;
 }
 
-pub trait DecodeRef<'a>: Encode + Sized {
+pub trait DecodeRef<'a>: Sized {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self>;
 }
 
@@ -47,6 +47,36 @@ impl Encode for () {
 impl Decode for () {
     fn decode<'a, D: Decoder<'a>>(_: &mut D) -> Option<Self> {
         Some(())
+    }
+}
+
+impl Encode for u32 {
+    fn size(&self) -> usize {
+        4
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u32be(*self)
+    }
+}
+
+impl Decode for u32 {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.take_u32be()
+    }
+}
+
+impl Encode for u64 {
+    fn size(&self) -> usize {
+        8
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u64be(*self)
+    }
+}
+
+impl Decode for u64 {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        d.take_u64be()
     }
 }
 
@@ -84,13 +114,13 @@ impl<'a> DecodeRef<'a> for &'a str {
     }
 }
 
-impl Encode for &[u8] {
+impl Encode for [u8] {
     fn size(&self) -> usize {
         4 + self.len()
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u32be(self.len() as u32);
-        c.push_bytes(self);
+        c.push_bytes(&self);
     }
 }
 
@@ -192,18 +222,21 @@ impl<'a> DecodeRef<'a> for BigUint {
     }
 }
 
-pub struct List<T> (pub Vec<T>);
+pub struct ListRef<'a, T>(pub &'a Vec<T>);
 
-impl <T> Encode for List<T> {
+impl<'a, T: Encode> Encode for ListRef<'a, T> {
     fn size(&self) -> usize {
-        panic!("FIXME")
+        4 + self.0.iter().map(Encode::size).sum::<usize>()
     }
-    fn encode<E: Encoder>(&self, _: &mut E) {
-        panic!("FIXME")
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        Encode::encode(&(self.0.iter().map(Encode::size).sum::<usize>() as u32), e);
+        self.0.iter().for_each(|x| Encode::encode(x, e));
     }
 }
 
-impl <T:Decode> Decode for List<T> {
+pub struct List<T>(pub Vec<T>);
+
+impl<T: Decode> Decode for List<T> {
     fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         let bytes = c.take_bytes(len as usize)?;
