@@ -1,11 +1,13 @@
 use super::super::config::*;
 use super::kex::*;
+use crate::util::*;
 use crate::algorithm::authentication::*;
 use crate::algorithm::kex::*;
 use crate::algorithm::*;
 
-pub struct ClientKexMachine {
+pub struct ClientKexMachine<V: HostKeyVerifier = Box<dyn HostKeyVerifier>> {
     pub state: ClientKexState,
+    pub verifier: V,
     pub interval_bytes: u64,
     pub interval_duration: std::time::Duration,
     pub next_kex_at_bytes_sent: u64,
@@ -93,6 +95,7 @@ impl KexMachine for ClientKexMachine {
     fn new<C: TransportConfig>(config: &C) -> Self {
         let mut self_ = Self {
             state: ClientKexState::Delay(Delay::new(Default::default())),
+            verifier: Box::new(IgnorantVerifier {}),
             interval_bytes: config.kex_interval_bytes(),
             interval_duration: config.kex_interval_duration(),
             next_kex_at_bytes_sent: config.kex_interval_bytes(),
@@ -189,7 +192,7 @@ impl KexMachine for ClientKexMachine {
                 log::debug!("Received MSG_ECDH_REPLY");
                 match &mut self.state {
                     ClientKexState::Ecdh(ecdh) => {
-                        let reply: MsgKexEcdhReply<X25519, HostIdentity> = msg;
+                        let reply: MsgKexEcdhReply<X25519> = msg;
                         // Compute the DH shared secret (create a new placeholder while
                         // the actual secret get consumed in the operation).
                         let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
@@ -207,6 +210,10 @@ impl KexMachine for ClientKexMachine {
                             dh_secret: X25519::secret_as_ref(&k),
                         }
                         .sha256();
+                        // Verify the host key signature
+                        reply.signature.verify(&reply.host_key, &h[..])?;
+                        // Verify the host key
+                        assume(self.verifier.verify(&reply.host_key)).ok_or(TransportError::HostKeyUnverifiable)?;
                         // The session id is only computed during first kex and constant afterwards.
                         self.state = ClientKexState::NewKeys(NewKeys {
                             sent: false,

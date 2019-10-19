@@ -49,7 +49,7 @@ impl<S: Socket> Transmitter<S> {
         })
     }
 
-    pub fn local_id(&self) -> &Identification<&'static str>  {
+    pub fn local_id(&self) -> &Identification<&'static str> {
         &self.local_id
     }
 
@@ -101,13 +101,11 @@ impl<S: Socket> Transmitter<S> {
         cx: &mut Context,
         msg: &Msg,
     ) -> Poll<Result<(), TransportError>> {
-        let layout = self.encryption_ctx.buffer_layout(Encode::size(msg));
-        let buffer = ready!(self.sender.poll_reserve(cx, layout.buffer_len()))?;
-        let mut encoder = BEncoder::from(&mut buffer[layout.payload_range()]);
-        Encode::encode(msg, &mut encoder);
-        let pc = self.packets_sent;
+        let packet = self.encryption_ctx.packet(msg);
+        let buffer: &mut [u8] = ready!(self.sender.poll_reserve(cx, packet.size()))?;
+        packet.encode(&mut BEncoder::from(&mut buffer[..]));
+        self.encryption_ctx.encrypt(self.packets_sent, buffer);
         self.packets_sent += 1;
-        self.encryption_ctx.encrypt(pc, layout, buffer);
         self.reset_alive_timer(cx);
         Poll::Ready(Ok(()))
     }
@@ -119,13 +117,14 @@ impl<S: Socket> Transmitter<S> {
         if s.receiver_state.buffer_len == 0 {
             // Receive at least 8 bytes instead of the required 4
             // in order to impede traffic analysis (as recommended by RFC).
-            ready!(r.as_mut().poll_fetch(cx, 2 * PacketLayout::PACKET_LEN_SIZE))?;
+            ready!(r.as_mut().poll_fetch(cx, 2 * 4))?;
             // Decrypt the buffer len. Leave the original packet len field encrypted
             // as it is required for in encrypted form for message intergrity check.
             let mut len = [0; 4];
-            len.copy_from_slice(&r.window()[..PacketLayout::PACKET_LEN_SIZE]);
+            len.copy_from_slice(&r.window()[..4]);
             s.receiver_state.buffer_len = s
-                .decryption_ctx.decrypt_len(s.packets_received, len)
+                .decryption_ctx
+                .decrypt_len(s.packets_received, len)
                 .ok_or(TransportError::BadPacketLength)?;
         }
         // Case 2: The packet len but not the packet has been decrypted
@@ -143,13 +142,13 @@ impl<S: Socket> Transmitter<S> {
         }
         // Case 3: The packet is complete and decrypted in buffer.
         s.reset_inactivity_timer(cx);
-        return Poll::Ready(Ok(()))
+        return Poll::Ready(Ok(()));
     }
 
     pub fn decode<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
         let packet_len = self.receiver_state.packet_len;
         assert!(packet_len != 0);
-        let packet = &self.receiver.window()[PacketLayout::PACKET_LEN_SIZE..][..packet_len];
+        let packet = &self.receiver.window()[4..][..packet_len];
         let padding: usize = *packet.get(0)? as usize;
         assume(packet_len >= 1 + padding)?;
         let payload = &packet[1..][..packet_len - 1 - padding];
@@ -196,7 +195,7 @@ impl<S: Socket> Transmitter<S> {
         self.alive_timer.reset(time);
         match self.alive_timer.poll_unpin(cx) {
             Poll::Pending => (),
-            _ => panic!("alive_timer fired immediately")
+            _ => panic!("alive_timer fired immediately"),
         }
     }
 
@@ -205,7 +204,7 @@ impl<S: Socket> Transmitter<S> {
         self.inactivity_timer.reset(time);
         match self.inactivity_timer.poll_unpin(cx) {
             Poll::Pending => (),
-            _ => panic!("inactivity_timer fired immediately")
+            _ => panic!("inactivity_timer fired immediately"),
         }
     }
 
@@ -231,7 +230,7 @@ struct ReceiverState {
     pub packet_len: usize,
 }
 
-impl ReceiverState {
+impl ReceiverState { 
     pub fn new() -> Self {
         Self {
             buffer_len: 0,

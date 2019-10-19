@@ -98,6 +98,20 @@ pub enum HostSignature {
     Ed25519Signature(<SshEd25519 as AuthenticationAlgorithm>::Signature),
 }
 
+impl HostSignature {
+    pub fn verify(&self, sig: &HostIdentity, data: &[u8]) -> Result<(), SignatureError> {
+        match (self, sig) {
+            (Self::Ed25519Signature(s), HostIdentity::Ed25519Key(i)) => {
+                use ed25519_dalek::{PublicKey, Signature};
+                let key = PublicKey::from_bytes(&i.0[..]).map_err(|_| SignatureError {})?;
+                let sig = Signature::from_bytes(&s.0[..]).map_err(|_| SignatureError {})?;
+                key.verify(data, &sig).map_err(|_| SignatureError {})
+            }
+            _ => Err(SignatureError {}),
+        }
+    }
+}
+
 impl Encode for HostSignature {
     fn size(&self) -> usize {
         match self {
@@ -118,6 +132,9 @@ impl<'a> DecodeRef<'a> for HostSignature {
         Some(Self::Ed25519Signature(DecodeRef::decode(d)?))
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+pub struct SignatureError {}
 
 #[cfg(test)]
 mod test {

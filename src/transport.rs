@@ -12,16 +12,18 @@ pub(crate) mod msg_ignore;
 pub(crate) mod msg_service_accept;
 pub(crate) mod msg_service_request;
 pub(crate) mod msg_unimplemented;
-pub(crate) mod packet_layout;
+pub(crate) mod packet;
 pub(crate) mod session_id;
 pub(crate) mod socket;
 pub(crate) mod transmitter;
+pub(crate) mod host_key_verification;
 
 pub use self::config::*;
 pub use self::error::*;
 pub use self::identification::*;
 pub use self::session_id::*;
 pub use self::socket::*;
+pub use self::host_key_verification::*;
 
 use self::buffered_receiver::*;
 use self::buffered_sender::*;
@@ -34,7 +36,7 @@ use self::msg_ignore::*;
 use self::msg_service_accept::*;
 use self::msg_service_request::*;
 use self::msg_unimplemented::*;
-use self::packet_layout::*;
+use self::packet::*;
 
 use crate::client::Client;
 use crate::codec::*;
