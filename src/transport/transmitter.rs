@@ -208,20 +208,29 @@ impl<S: Socket> Transmitter<S> {
         }
     }
 
-    // TODO
-    pub fn check_keep_alive_required(&mut self, cx: &mut Context) -> Result<bool, TransportError> {
+    /// Send a keep alive message when determined to be required.
+    /// Like above, the call registers the timer for wakeup. The alive timer is reset
+    /// automatically when the message has been sent successfully.
+    pub fn poll_keepalive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         match self.alive_timer.poll_unpin(cx) {
-            Poll::Pending => Ok(false),
-            Poll::Ready(()) => Ok(true),
+            Poll::Pending => (),
+            Poll::Ready(()) => {
+                ready!(self.poll_send(cx, &MsgIgnore::new()))?;
+                log::debug!("Sent MSG_IGNORE (as keep-alive)");
+                ready!(self.poll_flush(cx))?;
+            }
         }
+        Poll::Ready(Ok(()))
     }
 
-    // TODO
-    pub fn check_inactivity_timeout(&mut self, cx: &mut Context) -> Result<(), TransportError> {
+    /// The inactivity check causes an error in case of timeout and falls through else.
+    /// Calling it also registers the timer for wakeup (consider this when reordering code).
+    pub fn poll_inactivity(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         match self.inactivity_timer.poll_unpin(cx) {
-            Poll::Ready(()) => Err(TransportError::InactivityTimeout),
-            Poll::Pending => Ok(()),
+            Poll::Pending => (),
+            Poll::Ready(()) => Err(TransportError::InactivityTimeout)?,
         }
+        Poll::Ready(Ok(()))
     }
 }
 

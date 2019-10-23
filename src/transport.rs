@@ -2,13 +2,21 @@ pub(crate) mod buffered_receiver;
 pub(crate) mod buffered_sender;
 pub(crate) mod cipher;
 pub(crate) mod config;
+pub(crate) mod cookie;
+pub(crate) mod ecdh_algorithm;
+pub(crate) mod ecdh_hash;
 pub(crate) mod error;
+pub(crate) mod host_key_verification;
 pub(crate) mod identification;
 pub(crate) mod kex;
 pub(crate) mod key_streams;
 pub(crate) mod msg_debug;
 pub(crate) mod msg_disconnect;
+pub(crate) mod msg_ecdh_init;
+pub(crate) mod msg_ecdh_reply;
 pub(crate) mod msg_ignore;
+pub(crate) mod msg_kex_init;
+pub(crate) mod msg_new_keys;
 pub(crate) mod msg_service_accept;
 pub(crate) mod msg_service_request;
 pub(crate) mod msg_unimplemented;
@@ -16,14 +24,13 @@ pub(crate) mod packet;
 pub(crate) mod session_id;
 pub(crate) mod socket;
 pub(crate) mod transmitter;
-pub(crate) mod host_key_verification;
 
 pub use self::config::*;
 pub use self::error::*;
+pub use self::host_key_verification::*;
 pub use self::identification::*;
 pub use self::session_id::*;
 pub use self::socket::*;
-pub use self::host_key_verification::*;
 
 use self::buffered_receiver::*;
 use self::buffered_sender::*;
@@ -73,10 +80,9 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// The initial key exchange has been completed successfully when this
     /// function does not return an error.
     pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
-        let mut transport = Self {
-            transmitter: Transmitter::new(config, socket).await?,
-            kex: <R as HasTransport>::KexMachine::new(config),
-        };
+        let transmitter = Transmitter::new(config, socket).await?;
+        let kex = <R as HasTransport>::KexMachine::new(config, transmitter.remote_id().clone());
+        let mut transport = Self { transmitter, kex };
         transport.rekey().await?;
         Ok(transport)
     }
@@ -96,8 +102,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
 
     /// Initiate a rekeying and wait for it to complete.
     pub async fn rekey(&mut self) -> Result<(), TransportError> {
-        self.kex.init_local();
-        poll_fn(|cx| self.poll_internal(cx)).await
+        self.kex.init();
+        Ok(())
     }
 
     /// Send a message.
@@ -121,6 +127,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
     pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
         let msg = MsgServiceRequest(service_name);
         self.send(&msg).await?;
+        log::debug!("Sent MSG_SERVICE_REQUEST");
         self.flush().await?;
         self.receive().await?;
         let _: MsgServiceAccept<'_> = self.decode_ref().ok_or(TransportError::MessageUnexpected)?;
@@ -151,7 +158,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
 
     /// Try to flush all pending operations and output buffers.
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        ready!(self.poll_internal(cx))?;
+        ready!(self.transmitter.poll_inactivity(cx))?;
         self.transmitter.poll_flush(cx)
     }
 
@@ -161,24 +168,164 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// be interrupted or if the output buffer is too full and must be flushed first.
     ///
     /// NB: Polling drives the internal processes to completion.
-    pub fn poll_send<Msg: Encode>(
+    pub fn poll_send<M: Encode>(
         &mut self,
         cx: &mut Context,
-        msg: &Msg,
+        msg: &M,
     ) -> Poll<Result<(), TransportError>> {
-        ready!(self.poll_internal(cx))?;
-        self.transmitter.poll_send(cx, msg)
+        ready!(self.transmitter.poll_keepalive(cx))?;
+        ready!(self.transmitter.poll_inactivity(cx))?;
+        loop {
+            ready!(self.poll_kex(cx))?;
+            if self.kex.is_sending_critical() {
+                ready!(self.transmitter.poll_receive(cx))?;
+                if self.consume_transport_message()? {
+                    continue;
+                } else if self.kex.is_receiving_critical() {
+                    return self.poll_send_unimplemented(cx);
+                } else {
+                    return Poll::Pending;
+                }
+            }
+            return self.transmitter.poll_send(cx, &msg);
+        }
     }
 
     /// Try to receive a message.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
-    /// be interrupted or if now message is available for now.
+    /// be interrupted or if no message is available for now.
     ///
     /// NB: Polling drives the internal processes to completion.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        ready!(self.poll_internal(cx))?;
-        self.transmitter.poll_receive(cx)
+        ready!(self.transmitter.poll_keepalive(cx))?;
+        ready!(self.transmitter.poll_inactivity(cx))?;
+        loop {
+            ready!(self.poll_kex(cx))?;
+            ready!(self.transmitter.poll_receive(cx))?;
+            if self.consume_transport_message()? {
+                continue;
+            } else if self.kex.is_receiving_critical() {
+                return self.poll_send_unimplemented(cx);
+            } else {
+                return Poll::Ready(Ok(()));
+            }
+        }
+    }
+
+    fn poll_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        let k = &mut self.kex;
+        let t = &mut self.transmitter;
+        k.poll(cx, t.bytes_sent(), t.bytes_received(), |cx, x| {
+            match x {
+                KexOutput::Init(msg) => {
+                    ready!(t.poll_send(cx, &msg))?;
+                    log::debug!("Sent MSG_KEX_INIT");
+                }
+                KexOutput::EcdhInit(msg) => {
+                    ready!(t.poll_send(cx, &msg))?;
+                    log::debug!("Sent MSG_ECDH_INIT");
+                }
+                KexOutput::EcdhReply(msg) => {
+                    ready!(t.poll_send(cx, &msg))?;
+                    log::debug!("Sent MSG_ECDH_REPLY");
+                }
+                KexOutput::NewKeys(c) => {
+                    ready!(t.poll_send(cx, &MsgNewKeys {}))?;
+                    log::debug!("Sent MSG_NEWKEYS");
+                    t.encryption_ctx()
+                        .update(
+                            c.encryption_algorithm,
+                            c.compression_algorithm,
+                            c.mac_algorithm,
+                            &mut c.key_streams.clone().c(),
+                        )
+                        .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+                }
+            }
+            t.poll_flush(cx)
+        })
+    }
+
+    fn consume_transport_message(&mut self) -> Result<bool, TransportError> {
+        // Try to interpret as MSG_DISCONNECT. If successful, convert it into an error and let
+        // the callee handle the termination.
+        match self.decode_ref() {
+            Some(x) => {
+                let _: MsgDisconnect = x;
+                log::debug!("Received MSG_DISCONNECT");
+                Err(TransportError::DisconnectByPeer(x.reason))?;
+            }
+            None => (),
+        }
+        // Try to interpret as MSG_IGNORE. If successful, the message is (as the name suggests)
+        // just ignored. Ignore messages may be introduced any time to impede traffic analysis
+        // and for keep alive.
+        match self.decode_ref() {
+            Some(x) => {
+                let _: MsgIgnore = x;
+                log::debug!("Received MSG_IGNORE");
+                self.consume();
+                return Ok(true);
+            }
+            None => (),
+        }
+        // Try to interpret as MSG_UNIMPLEMENTED. If successful, convert this into an error.
+        match self.decode() {
+            Some(x) => {
+                let _: MsgUnimplemented = x;
+                log::debug!("Received MSG_UNIMPLEMENTED");
+                Err(TransportError::MessageUnimplemented)?;
+            }
+            None => (),
+        }
+        // Try to interpret as MSG_DEBUG. If successful, log as debug and continue.
+        match self.decode_ref() {
+            Some(x) => {
+                let _: MsgDebug = x;
+                log::debug!("Received MSG_DEBUG: {:?}", x.message);
+                self.consume();
+                return Ok(true);
+            }
+            None => (),
+        }
+        // Try to interpret as MSG_KEX_INIT. If successful, pass it to the kex handler.
+        // Unless the protocol is violated, kex is in progress afterwards (if not already).
+        match self.decode() {
+            Some(msg) => {
+                log::debug!("Received MSG_KEX_INIT");
+                self.kex.push_init(msg)?;
+                self.consume();
+                return Ok(true);
+            }
+            None => (),
+        }
+        match self.decode() {
+            Some(msg) => {
+                log::debug!("Received MSG_ECDH_REPLY");
+                self.kex.push_ecdh_reply(msg)?;
+                self.consume();
+                return Ok(true);
+            }
+            None => (),
+        }
+        match self.decode() {
+            Some(msg) => {
+                log::debug!("Received MSG_NEWKEYS");
+                let _: MsgNewKeys = msg;
+                let mut config = self.kex.push_new_keys()?;
+                self.transmitter.decryption_ctx().update(
+                    config.encryption_algorithm,
+                    config.compression_algorithm,
+                    config.mac_algorithm,
+                    &mut config.key_streams.d(),
+                );
+                self.consume();
+                return Ok(true);
+            }
+            None => (),
+        }
+        Ok(false)
     }
 
     pub fn poll_send_unimplemented(
@@ -188,91 +335,9 @@ impl<R: Role, S: Socket> Transport<R, S> {
         let msg = MsgUnimplemented {
             packet_number: self.transmitter.packets_received() as u32,
         };
-        self.poll_send(cx, &msg)
-    }
-
-    /// Poll all internal processes like kex and timers. Returns `Poll::Ready` when all processes
-    /// are completed (kex is complete and timers have not yet fired).
-    fn poll_internal(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        loop {
-            // The inactivity check causes an exception in case of timeout and falls through else.
-            // Calling it also registers the timer for wakeup (consider this when reordering code).
-            self.transmitter.check_inactivity_timeout(cx)?;
-            // Send a keep alive message when determined to be required.
-            // Like above, the call registers the timer for wakeup. The alive timer is reset
-            // automatically when the message has been sent successfully.
-            if self.transmitter.check_keep_alive_required(cx)? {
-                ready!(self.transmitter.poll_send(cx, &MsgIgnore::new()))?;
-                log::debug!("Sent MSG_IGNORE (as keep-alive)");
-                ready!(self.transmitter.poll_flush(cx))?;
-            }
-            if self.kex.is_in_progress(cx, &mut self.transmitter)? {
-                ready!(self.kex.poll_flush(cx, &mut self.transmitter))?;
-                ready!(self.transmitter.poll_receive(cx))?;
-                // Try to interpret as MSG_DISCONNECT. If successful, convert it into an error and let
-                // the callee handle the termination.
-                match self.decode_ref() {
-                    Some(x) => {
-                        let _: MsgDisconnect = x;
-                        log::debug!("Received MSG_DISCONNECT");
-                        return Poll::Ready(Err(TransportError::DisconnectByPeer(x.reason)));
-                    }
-                    None => (),
-                }
-                // Try to interpret as MSG_IGNORE. If successful, the message is (as the name suggests)
-                // just ignored. Ignore messages may be introduced any time to impede traffic analysis
-                // and for keep alive.
-                match self.decode_ref() {
-                    Some(x) => {
-                        let _: MsgIgnore = x;
-                        log::debug!("Received MSG_IGNORE");
-                        self.consume();
-                        continue;
-                    }
-                    None => (),
-                }
-                // Try to interpret as MSG_UNIMPLEMENTED. If successful, convert this into an error.
-                match self.decode() {
-                    Some(x) => {
-                        let _: MsgUnimplemented = x;
-                        log::debug!("Received MSG_UNIMPLEMENTED");
-                        return Poll::Ready(Err(TransportError::MessageUnimplemented));
-                    }
-                    None => (),
-                }
-                // Try to interpret as MSG_DEBUG. If successful, log as debug and continue.
-                match self.decode_ref() {
-                    Some(x) => {
-                        let _: MsgDebug = x;
-                        log::debug!("Received MSG_DEBUG: {:?}", x.message);
-                        self.consume();
-                        continue;
-                    }
-                    None => (),
-                }
-                // Try to interpret as MSG_KEX_INIT. If successful, pass it to the kex handler.
-                // Unless the protocol is violated, kex is in progress afterwards (if not already).
-                match self.decode() {
-                    Some(msg) => {
-                        log::debug!("Received MSG_KEX_INIT");
-                        self.kex.init_remote(msg)?;
-                        self.consume();
-                        continue;
-                    }
-                    None => (),
-                }
-                // After remote sent a MSG_KEX_INIT packet no other packets than those handled above
-                // and kex-related packets are allowed. We therefor route all packets to the kex
-                // handler. The kex handler is supposed to cause an exception on unrecognized packets.
-                if self.kex.is_init_received() {
-                    self.kex.consume(&mut self.transmitter)?;
-                    continue;
-                }
-                // Kex is in progress, but the KEX_INIT packet from remote has not been received yet
-                // which means that other packets may arrive before.
-            }
-            return Poll::Ready(Ok(()));
-        }
+        let _ = self.transmitter.poll_send(cx, &msg);
+        let _ = self.transmitter.poll_flush(cx);
+        return Poll::Ready(Err(TransportError::MessageUnexpected));
     }
 }
 

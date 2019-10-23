@@ -1,6 +1,6 @@
 use sha2::{Digest, Sha256};
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum KeyStreams {
     KeyStreamsSha256(KeyStreamsSha256),
 }
@@ -23,6 +23,7 @@ impl KeyStreams {
     }
 }
 
+#[derive(Clone)]
 pub struct KeyStreamsSha256 {
     h: Vec<u8>,
     k: Vec<u8>,

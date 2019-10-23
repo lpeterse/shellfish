@@ -1,30 +1,42 @@
 use super::super::config::*;
 use super::kex::*;
-use crate::util::*;
-use crate::algorithm::authentication::*;
 use crate::algorithm::kex::*;
 use crate::algorithm::*;
+use crate::util::*;
+
+use std::time::Duration;
 
 pub struct ClientKexMachine<V: HostKeyVerifier = Box<dyn HostKeyVerifier>> {
-    pub state: ClientKexState,
-    pub verifier: V,
-    pub interval_bytes: u64,
-    pub interval_duration: std::time::Duration,
-    pub next_kex_at_bytes_sent: u64,
-    pub next_kex_at_bytes_received: u64,
-    pub kex_algorithms: Vec<&'static str>,
-    pub mac_algorithms: Vec<&'static str>,
-    pub host_key_algorithms: Vec<&'static str>,
-    pub encryption_algorithms: Vec<&'static str>,
-    pub compression_algorithms: Vec<&'static str>,
-    pub session_id: Option<SessionId>,
+    state: ClientKexState,
+    verifier: V,
+    local_id: Identification<&'static str>,
+    remote_id: Identification<String>,
+    interval_bytes: u64,
+    interval_duration: Duration,
+    next_kex_at_timeout: Delay,
+    next_kex_at_bytes_sent: u64,
+    next_kex_at_bytes_received: u64,
+    kex_algorithms: Vec<&'static str>,
+    mac_algorithms: Vec<&'static str>,
+    host_key_algorithms: Vec<&'static str>,
+    encryption_algorithms: Vec<&'static str>,
+    compression_algorithms: Vec<&'static str>,
+    session_id: Option<SessionId>,
+}
+
+impl ClientKexMachine {
+    fn reset(&mut self) {
+        self.state = ClientKexState::Wait;
+    }
 }
 
 pub enum ClientKexState {
-    Delay(Delay),
+    Wait,
     Init(Init),
-    Ecdh(Ecdh<X25519>),
-    NewKeys(NewKeys),
+    EcdhInit(Ecdh<X25519>),
+    NewKeys((EncryptionConfig, DecryptionConfig)),
+    NewKeysSent(DecryptionConfig),
+    NewKeysReceived(EncryptionConfig),
 }
 
 impl ClientKexState {
@@ -60,7 +72,7 @@ impl ClientKexState {
             .kex_algorithms
             .contains(&<Curve25519Sha256 as KexAlgorithm>::NAME.into())
         {
-            return Ok(Self::Ecdh(Ecdh {
+            return Ok(Self::EcdhInit(Ecdh {
                 sent: false,
                 client_init,
                 server_init,
@@ -72,32 +84,28 @@ impl ClientKexState {
 }
 
 pub struct Init {
-    pub sent: bool,
-    pub client_init: MsgKexInit,
-    pub server_init: Option<MsgKexInit>,
+    sent: bool,
+    client_init: MsgKexInit,
+    server_init: Option<MsgKexInit>,
 }
 
 pub struct Ecdh<A: EcdhAlgorithm> {
-    pub sent: bool,
-    pub client_init: MsgKexInit,
-    pub server_init: MsgKexInit,
-    pub dh_secret: A::EphemeralSecret,
-}
-
-pub struct NewKeys {
-    pub sent: bool,
-    pub client_init: MsgKexInit,
-    pub server_init: MsgKexInit,
-    pub key_streams: KeyStreams,
+    sent: bool,
+    client_init: MsgKexInit,
+    server_init: MsgKexInit,
+    dh_secret: A::EphemeralSecret,
 }
 
 impl KexMachine for ClientKexMachine {
-    fn new<C: TransportConfig>(config: &C) -> Self {
+    fn new<C: TransportConfig>(config: &C, remote_id: Identification<String>) -> Self {
         let mut self_ = Self {
-            state: ClientKexState::Delay(Delay::new(Default::default())),
+            state: ClientKexState::Wait,
             verifier: Box::new(IgnorantVerifier {}),
+            local_id: config.identification().clone(),
+            remote_id,
             interval_bytes: config.kex_interval_bytes(),
             interval_duration: config.kex_interval_duration(),
+            next_kex_at_timeout: Delay::new(config.kex_interval_duration()),
             next_kex_at_bytes_sent: config.kex_interval_bytes(),
             next_kex_at_bytes_received: config.kex_interval_bytes(),
             kex_algorithms: intersection(config.kex_algorithms(), &SUPPORTED_KEX_ALGORITHMS[..]),
@@ -116,62 +124,45 @@ impl KexMachine for ClientKexMachine {
             ),
             session_id: None,
         };
-        self_.init_local();
+        self_.init();
         self_
     }
 
-    fn is_init_sent(&self) -> bool {
+    fn is_active(&self) -> bool {
         match self.state {
-            ClientKexState::Delay(_) => false,
+            ClientKexState::Wait => false,
+            _ => true,
+        }
+    }
+
+    //FIXME
+    fn is_sending_critical(&self) -> bool {
+        match self.state {
+            ClientKexState::Wait => false,
             ClientKexState::Init(ref x) => x.sent,
             _ => true,
         }
     }
 
-    fn is_init_received(&self) -> bool {
+    //FIXME
+    fn is_receiving_critical(&self) -> bool {
         match self.state {
-            ClientKexState::Delay(_) => false,
+            ClientKexState::Wait => false,
             ClientKexState::Init(ref x) => x.server_init.is_some(),
             _ => true,
         }
     }
 
-    fn is_in_progress<T: Socket>(
-        &mut self,
-        cx: &mut Context,
-        t: &mut Transmitter<T>,
-    ) -> Result<bool, TransportError> {
-        match &mut self.state {
-            ClientKexState::Delay(timer) => match timer.poll_unpin(cx) {
-                Poll::Pending => {
-                    if t.bytes_sent() >= self.next_kex_at_bytes_sent
-                        || t.bytes_received() >= self.next_kex_at_bytes_received
-                    {
-                        self.init_local();
-                        Ok(true)
-                    } else {
-                        Ok(false)
-                    }
-                }
-                Poll::Ready(()) => {
-                    self.init_local();
-                    Ok(true)
-                }
-            },
-            _ => Ok(true),
-        }
-    }
-
-    fn init_local(&mut self) {
+    fn init(&mut self) {
         match self.state {
-            ClientKexState::Delay(_) => self.state = ClientKexState::new_init(self, None),
+            ClientKexState::Wait => self.state = ClientKexState::new_init(self, None),
             _ => (),
         }
     }
 
-    fn init_remote(&mut self, server_init: MsgKexInit) -> Result<(), TransportError> {
+    fn push_init(&mut self, server_init: MsgKexInit) -> Result<(), TransportError> {
         match &mut self.state {
-            ClientKexState::Delay(_) => {
+            ClientKexState::Wait => {
                 self.state = ClientKexState::new_init(self, Some(server_init));
             }
             ClientKexState::Init(init) => {
@@ -186,132 +177,98 @@ impl KexMachine for ClientKexMachine {
         Ok(())
     }
 
-    fn consume<T: Socket>(&mut self, t: &mut Transmitter<T>) -> Result<(), TransportError> {
-        match t.decode() {
-            Some(msg) => {
-                log::debug!("Received MSG_ECDH_REPLY");
-                match &mut self.state {
-                    ClientKexState::Ecdh(ecdh) => {
-                        let reply: MsgKexEcdhReply<X25519> = msg;
-                        // Compute the DH shared secret (create a new placeholder while
-                        // the actual secret get consumed in the operation).
-                        let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
-                        let dh_public = X25519::public(&dh_secret);
-                        let k = X25519::diffie_hellman(dh_secret, &reply.dh_public);
-                        // Compute the exchange hash over the data exchanged so far.
-                        let h: [u8; 32] = KexEcdhHash::<X25519> {
-                            client_identification: &t.local_id(),
-                            server_identification: &t.remote_id(),
-                            client_kex_init: &ecdh.client_init,
-                            server_kex_init: &ecdh.server_init,
-                            server_host_key: &reply.host_key,
-                            dh_client_key: &dh_public,
-                            dh_server_key: &reply.dh_public,
-                            dh_secret: X25519::secret_as_ref(&k),
-                        }
-                        .sha256();
-                        // Verify the host key signature
-                        reply.signature.verify(&reply.host_key, &h[..])?;
-                        // Verify the host key
-                        assume(self.verifier.verify(&reply.host_key)).ok_or(TransportError::HostKeyUnverifiable)?;
-                        // The session id is only computed during first kex and constant afterwards.
-                        self.state = ClientKexState::NewKeys(NewKeys {
-                            sent: false,
-                            client_init: ecdh.client_init.clone(),
-                            server_init: ecdh.server_init.clone(),
-                            key_streams: KeyStreams::new_sha256(
-                                X25519::secret_as_ref(&k),
-                                &h,
-                                self.session_id.get_or_insert_with(|| SessionId::new(h)),
-                            ),
-                        });
-
-                        t.consume();
-                        return Ok(());
-                    }
-                    _ => (),
-                }
-            }
-            None => (),
-        }
-        match t.decode() {
-            Some(msg) => {
-                let _: MsgNewKeys = msg;
-                log::debug!("Received MSG_NEW_KEYS");
-                let state = ClientKexState::Delay(Delay::new(self.interval_duration));
-                let state = std::mem::replace(&mut self.state, state);
-                match state {
-                    ClientKexState::NewKeys(mut x) => {
-                        let encryption_algorithm_client_to_server = common(
-                            &self.encryption_algorithms,
-                            &x.server_init.encryption_algorithms_client_to_server,
-                        )
-                        .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-                        let encryption_algorithm_server_to_client = common(
-                            &self.encryption_algorithms,
-                            &x.server_init.encryption_algorithms_server_to_client,
-                        )
-                        .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-                        let compression_algorithm_client_to_server = common(
-                            &self.compression_algorithms,
-                            &x.server_init.compression_algorithms_client_to_server,
-                        )
-                        .ok_or(TransportError::NoCommonCompressionAlgorithm)?;
-                        let compression_algorithm_server_to_client = common(
-                            &self.compression_algorithms,
-                            &x.server_init.compression_algorithms_server_to_client,
-                        )
-                        .ok_or(TransportError::NoCommonCompressionAlgorithm)?;
-                        let mac_algorithm_client_to_server = common(
-                            &self.mac_algorithms,
-                            &x.server_init.mac_algorithms_client_to_server,
-                        );
-                        let mac_algorithm_server_to_client = common(
-                            &self.mac_algorithms,
-                            &x.server_init.mac_algorithms_server_to_client,
-                        );
-                        t.encryption_ctx()
-                            .update(
-                                &encryption_algorithm_client_to_server,
-                                &compression_algorithm_client_to_server,
-                                mac_algorithm_client_to_server,
-                                &mut x.key_streams.c(),
-                            )
-                            .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-                        t.decryption_ctx()
-                            .update(
-                                &encryption_algorithm_server_to_client,
-                                &compression_algorithm_server_to_client,
-                                mac_algorithm_server_to_client,
-                                &mut x.key_streams.d(),
-                            )
-                            .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-
-                        self.next_kex_at_bytes_sent = t.bytes_sent() + self.interval_bytes;
-                        self.next_kex_at_bytes_received = t.bytes_received() + self.interval_bytes;
-
-                        t.consume();
-                        return Ok(());
-                    }
-                    _ => (),
-                }
-            }
-            None => (),
-        }
-        return Err(TransportError::ProtocolError);
+    fn push_ecdh_init(&mut self, _: MsgKexEcdhInit<X25519>) -> Result<(), TransportError> {
+        // Client shall not receive this message
+        self.state = ClientKexState::Wait;
+        Err(TransportError::ProtocolError)
     }
 
-    fn poll_flush<T: Socket>(
+    fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
+        match std::mem::replace(&mut self.state, ClientKexState::Wait) {
+            ClientKexState::EcdhInit(mut ecdh) => {
+                // Compute the DH shared secret (create a new placeholder while
+                // the actual secret get consumed in the operation).
+                let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
+                let dh_public = X25519::public(&dh_secret);
+                let k = X25519::diffie_hellman(dh_secret, &msg.dh_public);
+                // Compute the exchange hash over the data exchanged so far.
+                let h: [u8; 32] = KexEcdhHash::<X25519> {
+                    client_identification: &self.local_id,
+                    server_identification: &self.remote_id,
+                    client_kex_init: &ecdh.client_init,
+                    server_kex_init: &ecdh.server_init,
+                    server_host_key: &msg.host_key,
+                    dh_client_key: &dh_public,
+                    dh_server_key: &msg.dh_public,
+                    dh_secret: X25519::secret_as_ref(&k),
+                }
+                .sha256();
+                // Verify the host key signature
+                msg.signature.verify(&msg.host_key, &h[..])?;
+                // Verify the host key
+                assume(self.verifier.verify(&msg.host_key))
+                    .ok_or(TransportError::HostKeyUnverifiable)?;
+                // The session id is only computed during first kex and constant afterwards.
+                let session_id = self.session_id.get_or_insert_with(|| SessionId::new(h));
+                let keys1 = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &session_id);
+                let keys2 = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &session_id);
+                let enc = CipherConfig::new_client_to_server(
+                    &self.encryption_algorithms,
+                    &self.compression_algorithms,
+                    &self.mac_algorithms,
+                    &ecdh.server_init,
+                    keys1,
+                )?;
+                let dec = CipherConfig::new_server_to_client(
+                    &self.encryption_algorithms,
+                    &self.compression_algorithms,
+                    &self.mac_algorithms,
+                    &ecdh.server_init,
+                    keys2,
+                )?;
+                self.state = ClientKexState::NewKeys((enc, dec));
+                Ok(())
+            }
+            _ => Err(TransportError::ProtocolError),
+        }
+    }
+
+    fn push_new_keys(&mut self) -> Result<CipherConfig, TransportError> {
+        match std::mem::replace(&mut self.state, ClientKexState::Wait) {
+            ClientKexState::NewKeys((enc_config, dec_config)) => {
+                self.state = ClientKexState::NewKeysReceived(enc_config);
+                Ok(dec_config)
+            }
+            ClientKexState::NewKeysSent(dec_config) => {
+                self.reset();
+                Ok(dec_config)
+            }
+            _ => Err(TransportError::ProtocolError),
+        }
+    }
+
+    /*fn poll_init(&mut self, cx: &mut Context, bytes_sent: u64, bytes_received: u64) -> Poll<()> {
+        Poll::Ready(())
+        /*ClientKexState::Delay(x) => {
+            ready!(x.poll_unpin(cx));
+            self.init();
+            return Poll::Ready(Ok(()));
+        }*/
+    }*/
+
+    fn poll<F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>>>(
         &mut self,
         cx: &mut Context,
-        t: &mut Transmitter<T>,
+        bytes_sent: u64,
+        bytes_received: u64,
+        mut f: F,
     ) -> Poll<Result<(), TransportError>> {
         loop {
             match &mut self.state {
-                ClientKexState::Delay(_) => return Poll::Ready(Ok(())),
+                ClientKexState::Wait => (),
                 ClientKexState::Init(x) => {
                     if !x.sent {
-                        ready!(t.poll_send(cx, &x.client_init))?;
+                        ready!(f(cx, &KexOutput::Init(x.client_init.clone())))?;
                         x.sent = true;
                         match &x.server_init {
                             None => (),
@@ -320,62 +277,38 @@ impl KexMachine for ClientKexMachine {
                                     x.client_init.clone(),
                                     server_init.clone(),
                                 )?;
-                                continue;
                             }
                         }
+                        continue;
                     }
-                    return Poll::Ready(Ok(()));
                 }
-                ClientKexState::Ecdh(x) => {
+                ClientKexState::EcdhInit(x) => {
                     if !x.sent {
                         let msg: MsgKexEcdhInit<X25519> = MsgKexEcdhInit {
                             dh_public: X25519::public(&x.dh_secret),
                         };
-                        ready!(t.poll_send(cx, &msg))?;
+                        ready!(f(cx, &KexOutput::EcdhInit(msg)))?;
                         x.sent = true;
-                        break;
+                        continue;
                     }
-                    return Poll::Ready(Ok(()));
                 }
-                ClientKexState::NewKeys(x) => {
-                    if !x.sent {
-                        let msg = MsgNewKeys {};
-                        ready!(t.poll_send(cx, &msg))?;
-                        x.sent = true;
-                        break;
-                    }
-                    return Poll::Ready(Ok(()));
+                ClientKexState::NewKeys((enc_config, dec_config)) => {
+                    ready!(f(cx, &KexOutput::NewKeys(enc_config.clone())))?;
+                    self.state = ClientKexState::NewKeysSent(dec_config.clone());
+                    continue;
                 }
+                ClientKexState::NewKeysReceived(enc_config) => {
+                    ready!(f(cx, &KexOutput::NewKeys(enc_config.clone())))?;
+                    self.reset();
+                    continue;
+                }
+                ClientKexState::NewKeysSent(_) => (),
             }
+            return Poll::Ready(Ok(()));
         }
-        ready!(t.poll_flush(cx))?;
-        Poll::Ready(Ok(()))
     }
 
-    // Panics when called before first kex has completed.
     fn session_id(&self) -> &Option<SessionId> {
         &self.session_id
     }
-}
-
-fn intersection(preferred: &Vec<&'static str>, supported: &[&'static str]) -> Vec<&'static str> {
-    preferred
-        .iter()
-        .filter_map(|p| {
-            supported
-                .iter()
-                .find_map(|s| if p == s { Some(*s) } else { None })
-        })
-        .collect::<Vec<&'static str>>()
-}
-
-fn common(client: &Vec<&'static str>, server: &Vec<String>) -> Option<&'static str> {
-    for c in client {
-        for s in server {
-            if c == s {
-                return Some(*c);
-            }
-        }
-    }
-    None
 }
