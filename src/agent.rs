@@ -1,3 +1,4 @@
+mod error;
 mod frame;
 mod msg_failure;
 mod msg_identities_answer;
@@ -7,6 +8,7 @@ mod msg_sign_response;
 mod msg_success;
 mod transmitter;
 
+pub use self::error::*;
 use self::frame::*;
 use self::msg_failure::*;
 use self::msg_identities_answer::*;
@@ -19,9 +21,9 @@ use crate::algorithm::authentication::*;
 use crate::codec::*;
 
 use std::convert::TryFrom;
-use std::io::Error;
 use std::path::{Path, PathBuf};
 
+/// An interface to the local `ssh-agent`.
 #[derive(Clone)]
 pub struct Agent {
     path: PathBuf,
@@ -29,9 +31,7 @@ pub struct Agent {
 
 impl Agent {
     const SSH_AUTH_SOCK: &'static str = "SSH_AUTH_SOCK";
-}
 
-impl Agent {
     /// Create a new agent client by path designating the unix domain socket.
     pub fn new(path: &Path) -> Self {
         Self { path: path.into() }
@@ -82,18 +82,5 @@ impl Agent {
             E2::A(x) => Ok(Some(x.signature)),
             E2::B(_) => Ok(None),
         }
-    }
-}
-
-#[derive(Debug)]
-pub enum AgentError {
-    IoError(Error),
-    FrameError,
-    DecoderError,
-}
-
-impl From<Error> for AgentError {
-    fn from(e: Error) -> Self {
-        Self::IoError(e)
     }
 }
