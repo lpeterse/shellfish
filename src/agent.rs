@@ -88,6 +88,7 @@ impl Agent {
 #[derive(Debug)]
 pub enum AgentError {
     IoError(Error),
+    FrameError,
     DecoderError,
 }
 
