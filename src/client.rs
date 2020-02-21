@@ -14,7 +14,7 @@ use async_std::net::ToSocketAddrs;
 pub struct Client {
     config: ClientConfig,
     user_name: Option<String>,
-    agent: Option<Agent<Client>>,
+    agent: Option<Agent>,
 }
 
 impl Client {

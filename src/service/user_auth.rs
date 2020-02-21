@@ -43,7 +43,7 @@ impl UserAuth<Client> {
         mut self,
         config: &<Client as Role>::Config,
         user: &str,
-        agent: Option<Agent<Client>>,
+        agent: Option<Agent>,
     ) -> Result<S, UserAuthError> {
         let service = <S as Service<Client>>::NAME;
         let agent = agent.ok_or(UserAuthError::NoMoreAuthMethods)?;
@@ -74,7 +74,7 @@ impl UserAuth<Client> {
 
     async fn try_pubkey<A>(
         &mut self,
-        agent: &Agent<Client>,
+        agent: &Agent,
         service: &str,
         user: &str,
         id: A::Identity,
