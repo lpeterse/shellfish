@@ -1,8 +1,6 @@
 use super::*;
 use crate::util::assume;
 
-use std::ops::Add;
-
 pub struct Transmitter<T> {
     sender: BufferedSender<WriteHalf<T>>,
     receiver: BufferedReceiver<ReadHalf<T>>,
@@ -81,12 +79,6 @@ impl<S: Socket> Transmitter<S> {
         &mut self.decryption_ctx
     }
 
-    /// Flush the transport.
-    pub async fn flush(&mut self) -> Result<(), TransportError> {
-        Ok(self.sender.flush().await?)
-    }
-
-    /// Check whether the transport is flushed.
     pub fn flushed(&self) -> bool {
         self.sender.flushed()
     }
@@ -191,8 +183,7 @@ impl<S: Socket> Transmitter<S> {
     }
 
     fn reset_alive_timer(&mut self, cx: &mut Context) {
-        let time = std::time::Instant::now().add(self.alive_interval);
-        self.alive_timer.reset(time);
+        self.alive_timer.reset(self.alive_interval);
         match self.alive_timer.poll_unpin(cx) {
             Poll::Pending => (),
             _ => panic!("alive_timer fired immediately"),
@@ -200,8 +191,7 @@ impl<S: Socket> Transmitter<S> {
     }
 
     fn reset_inactivity_timer(&mut self, cx: &mut Context) {
-        let time = std::time::Instant::now().add(self.inactivity_timeout);
-        self.inactivity_timer.reset(time);
+        self.inactivity_timer.reset(self.inactivity_timeout);
         match self.inactivity_timer.poll_unpin(cx) {
             Poll::Pending => (),
             _ => panic!("inactivity_timer fired immediately"),

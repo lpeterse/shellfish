@@ -14,12 +14,12 @@ use self::msg_sign_response::*;
 use crate::algorithm::authentication::*;
 use crate::client::*;
 use crate::codec::*;
-use crate::role::*; 
+use crate::role::*;
 
 use async_std::os::unix::net::UnixStream;
 use futures::io::{AsyncReadExt, AsyncWriteExt};
 use std::convert::TryFrom;
-use std::io::{Error};
+use std::io::Error;
 use std::path::{Path, PathBuf};
 
 pub struct Agent<R: Role> {
@@ -32,7 +32,7 @@ impl<R: Role> Agent<R> {
 }
 
 impl Agent<Client> {
-    /// Create a new agent instance by path.
+    /// Create a new agent client by path designating the unix domain socket.
     pub fn new(path: &Path) -> Self {
         Self {
             phantom: std::marker::PhantomData,
@@ -40,8 +40,7 @@ impl Agent<Client> {
         }
     }
 
-    /// Create a new agent instance with the value
-    /// of `SSH_AUTH_SOCK` as path.
+    /// Create a new agent client with the value of `SSH_AUTH_SOCK` as path.
     pub fn new_env() -> Option<Self> {
         let s = std::env::var_os(Self::SSH_AUTH_SOCK)?;
         Self {
@@ -55,10 +54,14 @@ impl Agent<Client> {
     pub async fn identities(&self) -> Result<Vec<(HostIdentity, String)>, AgentError> {
         let mut t = Transmitter::new(&self.path).await?;
         t.send(&MsgIdentitiesRequest {}).await?;
-        t.receive::<MsgIdentitiesAnswer>().await.map(|x| x.identities)
+        t.receive::<MsgIdentitiesAnswer>()
+            .await
+            .map(|x| x.identities)
     }
 
     /// Sign a digest with the corresponding private key known to be owned be the agent.
+    /// 
+    /// Returns `Ok(None)` in case the agent refused to sign.
     pub async fn sign<S, D>(
         &self,
         identity: &S::Identity,
@@ -71,7 +74,11 @@ impl Agent<Client> {
         S::Signature: Encode + Decode,
         D: Encode,
     {
-        let msg: MsgSignRequest<S, D> = MsgSignRequest { key: identity, data, flags };
+        let msg: MsgSignRequest<S, D> = MsgSignRequest {
+            key: identity,
+            data,
+            flags,
+        };
         let mut t = Transmitter::new(&self.path).await?;
         t.send(&msg).await?;
         let msg: E2<MsgSignResponse<S>, MsgFailure> = t.receive().await?;
@@ -94,7 +101,7 @@ impl<R: Role> Clone for Agent<R> {
 #[derive(Debug)]
 pub enum AgentError {
     IoError(Error),
-    DecoderError
+    DecoderError,
 }
 
 impl From<Error> for AgentError {
@@ -108,6 +115,8 @@ struct Transmitter {
 }
 
 impl Transmitter {
+    const MAX_PACKET_LEN: usize = 35000;
+
     pub async fn new(path: &PathBuf) -> Result<Self, AgentError> {
         Ok(Self {
             stream: UnixStream::connect(&path).await?,
@@ -122,10 +131,10 @@ impl Transmitter {
     }
 
     pub async fn receive<Msg: Decode>(&mut self) -> Result<Msg, AgentError> {
-        let mut len: [u8;4] = [0;4];
+        let mut len: [u8; 4] = [0; 4];
         self.stream.read_exact(&mut len[..]).await?;
         let len = u32::from_be_bytes(len) as usize;
-        assert!(len <= 35000);
+        assert!(len <= Self::MAX_PACKET_LEN);
         let mut vec = Vec::with_capacity(len);
         vec.resize(len, 0);
         self.stream.read_exact(&mut vec[..]).await?;
@@ -133,9 +142,9 @@ impl Transmitter {
     }
 }
 
-struct Frame<T> (T);
+struct Frame<T>(T);
 
-impl <T: Encode> Encode for Frame<T> {
+impl<T: Encode> Encode for Frame<T> {
     fn size(&self) -> usize {
         4 + self.0.size()
     }

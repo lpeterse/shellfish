@@ -167,7 +167,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if the output buffer is too full and must be flushed first.
     ///
-    /// NB: Polling drives the internal processes to completion.
+    /// NB: Polling drives kex to completion.
     pub fn poll_send<M: Encode>(
         &mut self,
         cx: &mut Context,
@@ -181,10 +181,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 ready!(self.transmitter.poll_receive(cx))?;
                 if self.consume_transport_message()? {
                     continue;
-                } else if self.kex.is_receiving_critical() {
-                    return self.poll_send_unimplemented(cx);
                 } else {
-                    return Poll::Pending;
+                    return self.poll_send_unimplemented(cx);
                 }
             }
             return self.transmitter.poll_send(cx, &msg);
@@ -196,7 +194,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if no message is available for now.
     ///
-    /// NB: Polling drives the internal processes to completion.
+    /// NB: Polling drives kex to completion.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         ready!(self.transmitter.poll_keepalive(cx))?;
         ready!(self.transmitter.poll_inactivity(cx))?;
@@ -243,7 +241,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
                         .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 }
             }
-            t.poll_flush(cx)
+            t.poll_flush(cx) // TODO
         })
     }
 

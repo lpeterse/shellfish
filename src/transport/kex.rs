@@ -25,7 +25,6 @@ pub trait KexMachine {
     fn push_ecdh_init(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError>;
     fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError>;
     fn push_new_keys(&mut self) -> Result<CipherConfig, TransportError>;
-    //fn poll_init(&mut self, cx: &mut Context, bytes_sent: u64, bytes_received: u64) -> Poll<()>;
     fn poll<F>(
         &mut self,
         cx: &mut Context,
@@ -121,4 +120,53 @@ pub fn common(client: &Vec<&'static str>, server: &Vec<String>) -> Option<&'stat
         }
     }
     None
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_intersection_01() {
+        let xs = vec![];
+        let ys = [];
+        let zs: Vec<&'static str> = vec![];
+        assert_eq!(intersection(&xs, &ys), zs)
+    }
+
+    #[test]
+    fn test_intersection_02() {
+        let xs = vec!["a", "b", "c"];
+        let ys = ["k", "c", "t", "a"];
+        let zs: Vec<&'static str> = vec!["a", "c"];
+        assert_eq!(intersection(&xs, &ys), zs)
+    }
+
+    #[test]
+    fn test_common_01() {
+        let xs = vec![];
+        let ys = vec![];
+        assert_eq!(common(&xs, &ys), None)
+    }
+
+    #[test]
+    fn test_common_02() {
+        let xs = vec!["abc"];
+        let ys = vec!["def".into()];
+        assert_eq!(common(&xs, &ys), None)
+    }
+
+    #[test]
+    fn test_common_03() {
+        let xs = vec!["abc"];
+        let ys = vec!["abc".into()];
+        assert_eq!(common(&xs, &ys), Some("abc"))
+    }
+
+    #[test]
+    fn test_common_04() {
+        let xs = vec!["abc", "def"];
+        let ys = vec!["def".into(), "abc".into()];
+        assert_eq!(common(&xs, &ys), Some("abc"))
+    }
 }

@@ -1,8 +1,8 @@
 use crate::codec::*;
-use rand_os::OsRng;
+use rand::rngs::OsRng;
 
 pub trait EcdhAlgorithm {
-    type PublicKey: Copy;
+    type PublicKey;
     type EphemeralSecret;
     type SharedSecret;
 
@@ -23,8 +23,7 @@ impl EcdhAlgorithm for X25519 {
     type SharedSecret = x25519_dalek::SharedSecret;
 
     fn new() -> Self::EphemeralSecret {
-        let mut csprng: OsRng = OsRng::new().unwrap();
-        x25519_dalek::EphemeralSecret::new(&mut csprng)
+        x25519_dalek::EphemeralSecret::new(&mut OsRng::default())
     }
 
     fn public(s: &Self::EphemeralSecret) -> Self::PublicKey {

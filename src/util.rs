@@ -1,4 +1,4 @@
-
+/// Takes a `bool` and converts it `Option<()>` to be used as early return point with `?`.
 pub fn assume(x: bool) -> Option<()> {
     if x {
         Some(())
