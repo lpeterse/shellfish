@@ -2,7 +2,7 @@
 
 cov:
 	rm -rf target
-	cargo kcov --all --open -- \
+	RUST_TEST_THREADS=1 cargo kcov --all --open -- \
 		--verify \
 		--exclude-pattern=${HOME}/.cargo,/usr/lib \
 		--exclude-region='#[cfg(test)]:#[cfg(testkcovstopmarker)]'

@@ -1,6 +1,6 @@
 use rssh::client::*;
 use rssh::service::connection::*;
-use futures::io::AsyncReadExt;
+use async_std::io::ReadExt;
 
 use env_logger;
 

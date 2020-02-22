@@ -8,8 +8,7 @@ pub struct UnknownIdentity {
 
 impl Encode for UnknownIdentity {
     fn size(&self) -> usize {
-        Encode::size(&self.algo)
-        + Encode::size(&self.data[..])
+        Encode::size(&self.algo) + Encode::size(&self.data[..])
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         Encode::encode(&self.algo, e);
@@ -22,6 +21,7 @@ impl Decode for UnknownIdentity {
         Self {
             algo: Decode::decode(d)?,
             data: DecodeRef::decode(d).map(|x: &'a [u8]| Vec::from(x))?,
-        }.into()
+        }
+        .into()
     }
 }

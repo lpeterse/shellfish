@@ -1,5 +1,6 @@
 use super::*;
 use crate::codec::*;
+
 use num_bigint::BigUint;
 
 pub struct SshRsa {}
@@ -35,7 +36,8 @@ impl Encode for SshRsaPublicKey {
 impl<'a> DecodeRef<'a> for SshRsaPublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let _len = c.take_u32be()?; // TODO: use
-        let _: &str = DecodeRef::decode(c).filter(|x| *x == <SshRsa as AuthenticationAlgorithm>::NAME)?;
+        let _: &str =
+            DecodeRef::decode(c).filter(|x| *x == <SshRsa as AuthenticationAlgorithm>::NAME)?;
         let e = DecodeRef::decode(c)?;
         let n = DecodeRef::decode(c)?;
         Some(SshRsaPublicKey {
@@ -48,7 +50,7 @@ impl<'a> DecodeRef<'a> for SshRsaPublicKey {
 #[derive(Copy, Clone, Debug)]
 pub struct SshRsaSignatureFlags {
     // SSH_AGENT_RSA_SHA2_256
-    // SSH_AGENT_RSA_SHA2_512
+// SSH_AGENT_RSA_SHA2_512
 }
 
 impl Default for SshRsaSignatureFlags {

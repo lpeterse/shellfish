@@ -1,8 +1,9 @@
 use super::*;
 use crate::util::*;
 
+use async_std::io::prelude::WriteExt;
+use async_std::io::{ReadExt, Write};
 use async_std::os::unix::net::UnixStream;
-use futures::io::{AsyncReadExt, AsyncWriteExt};
 
 pub struct Transmitter {
     stream: UnixStream,
@@ -20,7 +21,7 @@ impl Transmitter {
     pub async fn send<Msg: Encode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
         let vec = BEncoder::encode(&Frame::new(&msg));
         self.stream.write_all(&vec).await?;
-        self.stream.flush().await?;
+        //self.stream.flush().await?;
         Ok(())
     }
 
@@ -40,6 +41,7 @@ impl Transmitter {
 mod test {
     use super::*;
 
+    use async_std::io::ReadExt;
     use async_std::os::unix::net::UnixListener;
 
     fn random_path() -> PathBuf {
@@ -90,8 +92,8 @@ mod test {
         let x: Result<(), AgentError> = futures::executor::block_on(async move {
             let l = UnixListener::bind(&path_).await?;
             let mut t = Transmitter::new(&path_).await?;
-            t.send(&String::from("data")).await?;
             let (mut s, _) = l.accept().await?;
+            t.send(&String::from("data")).await?;
             let expected: [u8; 12] = [0, 0, 0, 8, 0, 0, 0, 4, 100, 97, 116, 97];
             let mut actual: [u8; 12] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
             s.read(&mut actual).await?;
