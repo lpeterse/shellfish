@@ -1,4 +1,7 @@
 use super::DecodeRef;
+use crate::util::*;
+
+use std::convert::TryInto;
 
 pub trait Decoder<'a>: Clone {
     fn remaining(&self) -> usize;
@@ -16,17 +19,24 @@ pub trait Decoder<'a>: Clone {
     fn take_while<F>(&mut self, pred: F) -> Option<&'a [u8]>
     where
         F: FnMut(u8) -> bool + Sized;
-    fn take_match<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
     fn expect_u8(&mut self, x: u8) -> Option<()>;
     fn expect_u32be(&mut self, x: u32) -> Option<()>;
     fn expect_true(&mut self) -> Option<()>;
     fn expect_false(&mut self) -> Option<()>;
+    fn expect_bytes<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
 }
 
+/// The `BDecoder` is just a shrinking slice of input.
+/// 
+/// The state of the decoder is undefined after it failed unless a specific decoder function states
+/// something else (no backtracking by default).
 #[derive(Copy, Clone, Debug)]
 pub struct BDecoder<'a>(&'a [u8]);
 
 impl<'a> BDecoder<'a> {
+    /// Try to decode the given input as `T`.
+    ///
+    /// All bytes of input must be consumed or the decoding will fail.
     pub fn decode<T: DecodeRef<'a>>(x: &'a [u8]) -> Option<T> {
         let mut d = BDecoder(x);
         let r = T::decode(&mut d)?;
@@ -51,118 +61,87 @@ impl<'a> Decoder<'a> for BDecoder<'a> {
     }
 
     fn take_eoi(&self) -> Option<()> {
-        if self.is_eoi() {
-            Some(())
-        } else {
-            None
-        }
-    }
-
-    fn take_match<T: AsRef<[u8]>>(self: &mut Self, bytes: &T) -> Option<()> {
-        self.take_bytes(bytes.as_ref().len())
-            .filter(|x| *x == bytes.as_ref())
-            .map(drop)
+        assume(self.is_eoi())
     }
 
     fn take_u8(self: &mut Self) -> Option<u8> {
-        let (head, tail) = self.0.split_first()?;
+        let (n, tail) = self.0.split_first()?;
         self.0 = tail;
-        Some(*head)
+        Some(*n)
     }
 
     fn take_u32be(self: &mut Self) -> Option<u32> {
-        let x = (*self.0.get(0)? as u32) << 24
-            | (*self.0.get(1)? as u32) << 16
-            | (*self.0.get(2)? as u32) << 8
-            | (*self.0.get(3)? as u32);
-        self.0 = &self.0[4..];
-        Some(x)
+        assume(self.remaining() >= 4)?;
+        let (head, tail) = self.0.split_at(4);
+        let n = u32::from_be_bytes(head.try_into().ok()?);
+        self.0 = tail;
+        Some(n)
     }
 
     fn take_u64be(&mut self) -> Option<u64> {
-        if self.0.len() >= 8 {
-            let mut x: [u8; 8] = [0; 8];
-            x.copy_from_slice(&self.0[..8]);
-            self.0 = &self.0[8..];
-            Some(u64::from_be_bytes(x))
-        } else {
-            None
-        }
+        assume(self.remaining() >= 8)?;
+        let (head, tail) = self.0.split_at(8);
+        let n = u64::from_be_bytes(head.try_into().ok()?);
+        self.0 = tail;
+        Some(n)
     }
 
     fn take_bool(&mut self) -> Option<bool> {
-        let x = self.0.get(0)?;
-        self.0 = &self.0[1..];
-        Some(x != &0)
+        self.take_u8().map(|n| n != 0)
     }
 
     fn take_str(&mut self, len: usize) -> Option<&'a str> {
-        if self.0.len() < len {
-            None
-        } else {
-            let (head, tail) = self.0.split_at(len);
-            self.0 = tail;
-            std::str::from_utf8(head).ok()
-        }
+        assume(self.remaining() >= len)?;
+        let (head, tail) = self.0.split_at(len);
+        let s = std::str::from_utf8(head).ok()?;
+        self.0 = tail;
+        Some(s)
     }
 
     fn take_string(self: &mut Self, len: usize) -> Option<String> {
-        if self.0.len() < len {
-            None
-        } else {
-            let (head, tail) = self.0.split_at(len);
-            self.0 = tail;
-            String::from_utf8(Vec::from(head)).ok()
-        }
+        assume(self.remaining() >= len)?;
+        let (head, tail) = self.0.split_at(len);
+        let s = String::from_utf8(Vec::from(head)).ok()?;
+        self.0 = tail;
+        Some(s)
     }
 
     fn take_bytes(self: &mut Self, len: usize) -> Option<&'a [u8]> {
-        if self.0.len() < len {
-            None
-        } else {
-            let r = &self.0[0..len];
-            self.0 = &self.0[len..];
-            Some(r)
-        }
+        assume(self.remaining() >= len)?;
+        let (s, tail) = self.0.split_at(len);
+        self.0 = tail;
+        Some(s)
     }
 
     fn take_into(self: &mut Self, dst: &mut [u8]) -> Option<()> {
-        let len = dst.len();
-        if self.0.len() < len {
-            None
-        } else {
-            dst.copy_from_slice(&self.0[..len]);
-            self.0 = &self.0[len..];
-            Some(())
-        }
+        let s = self.take_bytes(dst.len())?;
+        dst.copy_from_slice(s);
+        Some(())
     }
 
     fn take_all(self: &mut Self) -> Option<&'a [u8]> {
-        let r = &self.0[..];
-        self.0 = &self.0[0..0];
-        Some(r)
+        let s = self.0;
+        self.0 = &self.0[..0];
+        Some(s)
     }
 
     fn take_while<F>(self: &mut Self, mut pred: F) -> Option<&'a [u8]>
     where
         F: FnMut(u8) -> bool + Sized,
     {
-        let mut i = 0;
-        while i < self.0.len() && pred(self.0[i]) {
-            i += 1;
+        let mut len = 0;
+        for i in self.0 {
+            if pred(*i) {
+                len += 1;
+                continue;
+            }
+            break;
         }
-        let r = &self.0[..i];
-        self.0 = &self.0[i..];
-        Some(r)
+        self.take_bytes(len)
     }
 
     fn expect_u8(&mut self, x: u8) -> Option<()> {
-        if self.0.get(0)? == &x {
-            self.0 = &self.0[1..];
-            Some(())
-        } else {
-            None
-        }
+        self.take_u8().filter(|y| *y == x).map(drop)
     }
 
     fn expect_u32be(&mut self, x: u32) -> Option<()> {
@@ -170,21 +149,17 @@ impl<'a> Decoder<'a> for BDecoder<'a> {
     }
 
     fn expect_true(&mut self) -> Option<()> {
-        if self.0.get(0)? != &0 {
-            self.0 = &self.0[1..];
-            Some(())
-        } else {
-            None
-        }
+        self.take_bool().filter(|y| *y).map(drop)
     }
 
     fn expect_false(&mut self) -> Option<()> {
-        if self.0.get(0)? == &0 {
-            self.0 = &self.0[1..];
-            Some(())
-        } else {
-            None
-        }
+        self.take_bool().filter(|y| !*y).map(drop)
+    }
+
+    fn expect_bytes<T: AsRef<[u8]>>(self: &mut Self, bytes: &T) -> Option<()> {
+        self.take_bytes(bytes.as_ref().len())
+            .filter(|x| *x == bytes.as_ref())
+            .map(drop)
     }
 }
 
@@ -193,7 +168,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_context_remaining_01() {
+    fn test_remaining_01() {
         let a = [0, 1, 2, 3 as u8];
         let c = BDecoder::from(&a);
 
@@ -217,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_u8_01() {
+    fn test_take_u8_01() {
         let a = [0, 1, 2, 3 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -229,7 +204,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_u32be_01() {
+    fn test_take_u32be_01() {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -238,7 +213,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_u64be_01() {
+    fn test_take_u64be_01() {
         let a = [1, 2, 3, 4, 5, 6, 7, 8 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -247,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_bool_01() {
+    fn test_bool_01() {
         let a = [0, 1 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -257,7 +232,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_str_01() {
+    fn test_take_str_01() {
         let a = "ABCDE".as_bytes();
         let mut c = BDecoder::from(&a);
 
@@ -266,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_str_02() {
+    fn test_take_str_02() {
         let a = "ABCDE".as_bytes();
         let mut c = BDecoder::from(&a);
 
@@ -275,7 +250,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_str_03() {
+    fn test_take_str_03() {
         let a = "ABCDE".as_bytes();
         let mut c = BDecoder::from(&a);
 
@@ -283,7 +258,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_string_01() {
+    fn test_take_string_01() {
         let a = "ABCDE".as_bytes();
         let mut c = BDecoder::from(&a);
 
@@ -292,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_string_02() {
+    fn test_take_string_02() {
         let a = "ABCDE".as_bytes();
         let mut c = BDecoder::from(&a);
 
@@ -301,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_string_03() {
+    fn test_take_string_03() {
         let a = "ABCDE".as_bytes();
         let mut c = BDecoder::from(&a);
 
@@ -309,7 +284,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_bytes_01() {
+    fn test_take_bytes_01() {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -318,7 +293,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_bytes_02() {
+    fn test_take_bytes_02() {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -327,7 +302,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_take_bytes_03() {
+    fn test_take_bytes_03() {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -335,7 +310,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_all_01() {
+    fn test_all_01() {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = BDecoder::from(&a);
 
@@ -344,7 +319,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_into_01() {
+    fn test_into_01() {
         let a = [1, 2, 3, 4, 5, 6 as u8];
         let mut b = [0; 5];
         let mut c = BDecoder::from(&a);
@@ -355,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn test_context_into_02() {
+    fn test_into_02() {
         let a = [1, 2, 3, 4, 5, 6 as u8];
         let mut b = [0; 7];
         let mut c = BDecoder::from(&a);
@@ -371,7 +346,6 @@ mod tests {
 
         assert_eq!(Some(()), c.expect_true());
         assert_eq!(None, c.expect_true());
-        assert_eq!(c.remaining(), 1);
     }
 
     #[test]
@@ -381,6 +355,5 @@ mod tests {
 
         assert_eq!(Some(()), c.expect_false());
         assert_eq!(None, c.expect_false());
-        assert_eq!(c.remaining(), 1);
     }
 }

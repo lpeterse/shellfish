@@ -13,7 +13,7 @@ impl Encode for MsgSuccess {
         std::mem::size_of::<u8>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(<Self as Message>::NUMBER as u8);
+        e.push_u8(<Self as Message>::NUMBER);
     }
 }
 

@@ -1,7 +1,7 @@
 use rssh::client::*;
 use rssh::service::connection::*;
-use async_std::io::ReadExt;
 
+use async_std::io::ReadExt;
 use env_logger;
 
 async fn foobar(mut conn: Connection<Client>) -> Result<(), ConnectionError> {

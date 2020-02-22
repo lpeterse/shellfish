@@ -48,7 +48,7 @@ impl<T: AsRef<[u8]>> Encode for Identification<T> {
 
 impl Decode for Identification<String> {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_match(&Self::PREFIX)?;
+        d.expect_bytes(&Self::PREFIX)?;
         if d.remaining() > Self::MAX_LEN {
             return None;
         };

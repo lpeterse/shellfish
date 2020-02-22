@@ -2,7 +2,7 @@ use super::*;
 use crate::util::*;
 
 use async_std::io::prelude::WriteExt;
-use async_std::io::{ReadExt, Write};
+use async_std::io::ReadExt;
 use async_std::os::unix::net::UnixStream;
 
 pub struct Transmitter {
@@ -21,7 +21,6 @@ impl Transmitter {
     pub async fn send<Msg: Encode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
         let vec = BEncoder::encode(&Frame::new(&msg));
         self.stream.write_all(&vec).await?;
-        //self.stream.flush().await?;
         Ok(())
     }
 
@@ -37,6 +36,7 @@ impl Transmitter {
     }
 }
 
+/*
 #[cfg(test)]
 mod test {
     use super::*;
@@ -171,3 +171,4 @@ mod test {
         }
     }
 }
+*/
