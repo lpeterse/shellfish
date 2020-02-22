@@ -38,7 +38,9 @@ impl<S: Socket> Transmitter<S> {
         let remote_id = timeout(config.identification_timeout(), async {
             Self::send_id(&mut sender, local_id).await?;
             Self::receive_id(&mut receiver).await
-        }).await.map_err(|_| TransportError::IdentificationTimeout)??;
+        })
+        .await
+        .map_err(|_| TransportError::IdentificationTimeout)??;
 
         Ok(Self {
             sender,
@@ -83,23 +85,31 @@ impl<S: Socket> Transmitter<S> {
         self.packets_received
     }
 
+    /// Get mutable access to the encryption context used by the transmitter.
     pub fn encryption_ctx(&mut self) -> &mut CipherContext {
         &mut self.encryption_ctx
     }
 
+    /// Get mutable access to the decryption context used by the transmitter.
     pub fn decryption_ctx(&mut self) -> &mut CipherContext {
         &mut self.decryption_ctx
     }
 
+    /// Ask whether the sender contains unsent data.
     pub fn flushed(&self) -> bool {
         self.sender.flushed()
     }
 
+    /// Poll the sender to flush any unsent data.
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         ready!(self.sender.poll_flush(cx))?;
         Poll::Ready(Ok(()))
     }
 
+    /// Poll sending a message.
+    ///
+    /// Returns `Pending` if the sender does not have enough space and needs to be flushed first.
+    /// Resets the alive timer on success.
     pub fn poll_send<Msg: Encode>(
         &mut self,
         cx: &mut Context,
@@ -114,6 +124,9 @@ impl<S: Socket> Transmitter<S> {
         Poll::Ready(Ok(()))
     }
 
+    /// Poll receiving a message.
+    /// 
+    /// When `Ready`, `decode` and `consume` shall be used to process the message.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         let s = self;
         let mut r = Pin::new(&mut s.receiver);
@@ -123,7 +136,7 @@ impl<S: Socket> Transmitter<S> {
             // in order to impede traffic analysis (as recommended by RFC).
             ready!(r.as_mut().poll_fetch(cx, 2 * 4))?;
             // Decrypt the buffer len. Leave the original packet len field encrypted
-            // as it is required for in encrypted form for message intergrity check.
+            // as it is required in encrypted form for message intergrity check.
             let mut len = [0; 4];
             len.copy_from_slice(&r.window()[..4]);
             s.receiver_state.buffer_len = s
@@ -149,6 +162,9 @@ impl<S: Socket> Transmitter<S> {
         return Poll::Ready(Ok(()));
     }
 
+    /// Decode a decrypted message.
+    /// 
+    /// Shall be called _after_ `poll_receive` was ready.
     pub fn decode<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
         let packet_len = self.receiver_state.packet_len;
         assert!(packet_len != 0);
@@ -159,39 +175,15 @@ impl<S: Socket> Transmitter<S> {
         BDecoder::decode(payload)
     }
 
+    /// Consume a decoded message and remove it from the input buffer.
+    /// 
+    /// Shall be called _after_ `decode`.
     pub fn consume(&mut self) {
         let buffer_len = self.receiver_state.buffer_len;
         assert!(buffer_len != 0);
         self.packets_received += 1;
         self.receiver.consume(buffer_len);
         self.receiver_state.reset();
-    }
-
-    /// Send the local identification string.
-    async fn send_id(
-        socket: &mut BufferedSender<WriteHalf<S>>,
-        id: &Identification<&'static str>,
-    ) -> Result<(), TransportError> {
-        let mut enc = BEncoder::from(socket.reserve(Encode::size(id) + 2).await?);
-        Encode::encode(&id, &mut enc);
-        enc.push_u8('\r' as u8);
-        enc.push_u8('\n' as u8);
-        socket.flush().await?;
-        Ok(())
-    }
-
-    /// Receive the remote identification string.
-    async fn receive_id(
-        socket: &mut BufferedReceiver<ReadHalf<S>>,
-    ) -> Result<Identification<String>, TransportError> {
-        // Drop lines until remote SSH-2.0- version string is recognized
-        loop {
-            let line: &[u8] = socket.read_line(Identification::<String>::MAX_LEN).await?;
-            match Decode::decode(&mut BDecoder::from(&line)) {
-                None => (),
-                Some(id) => return Ok(id),
-            }
-        }
     }
 
     fn reset_alive_timer(&mut self, cx: &mut Context) {
@@ -233,6 +225,33 @@ impl<S: Socket> Transmitter<S> {
             Poll::Ready(()) => Err(TransportError::InactivityTimeout)?,
         }
         Poll::Ready(Ok(()))
+    }
+
+    /// Send the local identification string.
+    async fn send_id(
+        socket: &mut BufferedSender<WriteHalf<S>>,
+        id: &Identification<&'static str>,
+    ) -> Result<(), TransportError> {
+        let mut enc = BEncoder::from(socket.reserve(Encode::size(id) + 2).await?);
+        Encode::encode(&id, &mut enc);
+        enc.push_u8('\r' as u8);
+        enc.push_u8('\n' as u8);
+        socket.flush().await?;
+        Ok(())
+    }
+
+    /// Receive the remote identification string.
+    async fn receive_id(
+        socket: &mut BufferedReceiver<ReadHalf<S>>,
+    ) -> Result<Identification<String>, TransportError> {
+        // Drop lines until remote SSH-2.0- version string is recognized
+        loop {
+            let line: &[u8] = socket.read_line(Identification::<String>::MAX_LEN).await?;
+            match Decode::decode(&mut BDecoder::from(&line)) {
+                None => (),
+                Some(id) => return Ok(id),
+            }
+        }
     }
 }
 
