@@ -4,6 +4,7 @@ use std::time::Duration;
 
 pub trait TransportConfig {
     fn identification(&self) -> &Identification<&'static str>;
+    fn identification_timeout(&self) -> Duration;
     fn kex_interval_bytes(&self) -> u64;
     fn kex_interval_duration(&self) -> Duration;
     fn alive_interval(&self) -> Duration;

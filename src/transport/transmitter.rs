@@ -1,9 +1,12 @@
 use super::*;
 use crate::util::assume;
 
-pub struct Transmitter<T> {
-    sender: BufferedSender<WriteHalf<T>>,
-    receiver: BufferedReceiver<ReadHalf<T>>,
+use async_std::future::timeout;
+
+/// The `Transmitter` handles the low-level part of the wire-protocol including framing and cipher.
+pub struct Transmitter<S> {
+    sender: BufferedSender<WriteHalf<S>>,
+    receiver: BufferedReceiver<ReadHalf<S>>,
     receiver_state: ReceiverState,
     local_id: Identification<&'static str>,
     remote_id: Identification<String>,
@@ -20,13 +23,22 @@ pub struct Transmitter<T> {
 }
 
 impl<S: Socket> Transmitter<S> {
+    /// Create a new transmitter.
+    ///
+    /// This function also performs the identification string exchange which may fail for different
+    /// reasons. An error is returned in this case.
     pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
         let (rh, wh) = socket.split();
         let mut sender = BufferedSender::new(wh);
         let mut receiver = BufferedReceiver::new(rh);
 
-        Self::send_id(&mut sender, config.identification()).await?;
-        let remote_id = Self::receive_id(&mut receiver).await?; // FIXME TIMEOUT
+        // Both parties send their identification string simultaneously.
+        // This process times out in order to avoid denial of service by unserved connections.
+        let local_id = config.identification();
+        let remote_id = timeout(config.identification_timeout(), async {
+            Self::send_id(&mut sender, local_id).await?;
+            Self::receive_id(&mut receiver).await
+        }).await.map_err(|_| TransportError::IdentificationTimeout)??;
 
         Ok(Self {
             sender,
@@ -229,7 +241,7 @@ struct ReceiverState {
     pub packet_len: usize,
 }
 
-impl ReceiverState { 
+impl ReceiverState {
     pub fn new() -> Self {
         Self {
             buffer_len: 0,
