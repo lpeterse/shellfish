@@ -1,33 +1,55 @@
-pub struct RingBuffer {
+/// A growing ring-buffer implementation.
+/// 
+/// The buffer is created without any capacity and grows up to `max_capacity` on write.
+/// This is in expectation that most buffers will never be used. If the buffer is used, it is
+/// expected that the usage pattern is relatively constant over time and reallocations are rare.
+/// 
+/// Writing to the buffer eventually causes it to either move data or to grow and allocate a larger
+/// chunk of memory. In case the buffer is empty after a previous read (the most likely case),
+/// the next write will start at buffer start position and not cause data to be moved.
+/// The buffer never shrinks (yet).
+pub struct Buffer {
     max_capacity: usize,
     off: usize,
     len: usize,
     buf: Box<[u8]>,
 }
 
-impl RingBuffer {
+impl Buffer {
+    /// Create an empty buffer with 0 capacity.
     pub fn new(max_capacity: usize) -> Self {
         Self {
             max_capacity,
             off: 0,
             len: 0,
-            // Initialize empty in expectation the buffer will never be used.
             buf: Vec::new().into_boxed_slice(),
         }
     }
 
+    /// Ask whether the buffer is empty.
+    /// 
+    /// The buffer is empty if `len == 0`.
     pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
+    /// Ask whether the buffer is full.
+    /// 
+    /// The buffer is full if `len == max_capacity`.
     pub fn is_full(&self) -> bool {
         self.len == self.max_capacity
     }
 
+    /// Get the buffer length.
+    /// 
+    /// Invariant: `len <= max_capacity`
     pub fn len(&self) -> usize {
         self.len
     }
 
+    /// Read and remove data from the buffer.
+    /// 
+    /// Returns the number of bytes read into the passed buffer.
     pub fn read(&mut self, buf: &mut [u8]) -> usize {
         if buf.is_empty() || self.is_empty() {
             0
@@ -57,6 +79,9 @@ impl RingBuffer {
         }
     }
 
+    /// Write data to the buffer.
+    /// 
+    /// Returns number of bytes written or `0` if the buffer is full.
     pub fn write(&mut self, buf: &[u8]) -> usize {
         if buf.is_empty() || self.is_full() {
             return 0;
@@ -106,46 +131,46 @@ mod test {
 
     #[test]
     fn test_is_empty_01() {
-        let x = RingBuffer::new(32);
+        let x = Buffer::new(32);
         assert!(x.is_empty())
     }
 
     #[test]
     fn test_is_empty_02() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.len = 1;
         assert!(!x.is_empty())
     }
 
     #[test]
     fn test_is_full_01() {
-        let x = RingBuffer::new(32);
+        let x = Buffer::new(32);
         assert!(!x.is_full());
     }
 
     #[test]
     fn test_is_full_02() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.len = 31;
         assert!(!x.is_full());
     }
 
     #[test]
     fn test_is_full_03() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.len = 32;
         assert!(x.is_full());
     }
 
     #[test]
     fn test_is_len_01() {
-        let x = RingBuffer::new(32);
+        let x = Buffer::new(32);
         assert_eq!(0, x.len());
     }
 
     #[test]
     fn test_is_len_02() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.len = 23;
         assert_eq!(23, x.len());
     }
@@ -153,7 +178,7 @@ mod test {
     // Scenario: Passed buffer empty
     #[test]
     fn test_read_01() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.len = 1;
         let mut b = [];
         assert_eq!(0, x.read(&mut b));
@@ -162,7 +187,7 @@ mod test {
     // Scenario: Internal buffer empty
     #[test]
     fn test_read_02() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         let mut b = [0];
         assert_eq!(0, x.read(&mut b));
     }
@@ -170,7 +195,7 @@ mod test {
     // Scenario: No overlap, request less
     #[test]
     fn test_read_03() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0].into_boxed_slice();
         x.off = 3;
         x.len = 7;
@@ -184,7 +209,7 @@ mod test {
     // Scenario: No overlap, request equal
     #[test]
     fn test_read_04() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0].into_boxed_slice();
         x.off = 3;
         x.len = 7;
@@ -198,7 +223,7 @@ mod test {
     // Scenario: No overlap, request more
     #[test]
     fn test_read_05() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 0, 0, 0].into_boxed_slice();
         x.off = 3;
         x.len = 7;
@@ -212,7 +237,7 @@ mod test {
     // Scenario: Overlap, request less than first slice
     #[test]
     fn test_read_06() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![5, 6, 7, 0, 0, 0, 0, 1, 2, 3, 4].into_boxed_slice();
         x.off = 7;
         x.len = 7;
@@ -226,7 +251,7 @@ mod test {
     // Scenario: Overlap, request whole first slice
     #[test]
     fn test_read_07() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![5, 6, 7, 0, 0, 0, 0, 1, 2, 3, 4].into_boxed_slice();
         x.off = 7;
         x.len = 7;
@@ -240,7 +265,7 @@ mod test {
     // Scenario: Overlap, request less
     #[test]
     fn test_read_08() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![5, 6, 7, 0, 0, 0, 0, 1, 2, 3, 4].into_boxed_slice();
         x.off = 7;
         x.len = 7;
@@ -254,7 +279,7 @@ mod test {
     // Scenario: Overlap, request equal
     #[test]
     fn test_read_09() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![5, 6, 7, 0, 0, 0, 0, 1, 2, 3, 4].into_boxed_slice();
         x.off = 7;
         x.len = 7;
@@ -268,7 +293,7 @@ mod test {
     // Scenario: Overlap, request equal
     #[test]
     fn test_read_10() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![5, 6, 7, 0, 0, 0, 0, 1, 2, 3, 4].into_boxed_slice();
         x.off = 7;
         x.len = 7;
@@ -282,7 +307,7 @@ mod test {
     // Scenario: No overlap
     #[test]
     fn test_grow_01() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![9, 9, 9, 1, 2, 3, 9, 9].into_boxed_slice();
         x.off = 3;
         x.len = 3;
@@ -295,7 +320,7 @@ mod test {
     // Scenario: Overlap
     #[test]
     fn test_grow_02() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![5, 6, 7, 9, 9, 9, 9, 1, 2, 3, 4].into_boxed_slice();
         x.off = 7;
         x.len = 7;
@@ -308,7 +333,7 @@ mod test {
     // Scenario: Passed buffer is empty
     #[test]
     fn test_write_01() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         x.buf = vec![1].into_boxed_slice();
         x.len = 1;
         let b = [];
@@ -318,7 +343,7 @@ mod test {
     // Scenario: Internal buffer is full
     #[test]
     fn test_write_02() {
-        let mut x = RingBuffer::new(0);
+        let mut x = Buffer::new(0);
         let b = [1];
         assert_eq!(0, x.write(&b));
     }
@@ -326,7 +351,7 @@ mod test {
     // Scenario: Buffer resize required (below max capacity)
     #[test]
     fn test_write_03() {
-        let mut x = RingBuffer::new(32);
+        let mut x = Buffer::new(32);
         let b = [1, 2, 3];
         assert_eq!(3, x.write(&b));
         assert_eq!(0, x.off);
@@ -337,7 +362,7 @@ mod test {
     // Scenario: Buffer resize required (hits max capacity)
     #[test]
     fn test_write_04() {
-        let mut x = RingBuffer::new(5);
+        let mut x = Buffer::new(5);
         let b = [1, 2, 3];
         assert_eq!(3, x.write(&b));
         assert_eq!(0, x.off);
@@ -348,7 +373,7 @@ mod test {
     // Scenario: Overlap
     #[test]
     fn test_write_05() {
-        let mut x = RingBuffer::new(6);
+        let mut x = Buffer::new(6);
         x.buf = vec![9, 9, 9, 1, 2, 9].into_boxed_slice();
         x.off = 3;
         x.len = 2;

@@ -25,3 +25,34 @@ impl Decode for UnknownIdentity {
         .into()
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_encode_01() {
+        let msg: UnknownIdentity = UnknownIdentity {
+            algo: "ssh-fobar".into(),
+            data: vec![1, 2, 3, 4],
+        };
+        assert_eq!(
+            vec![0, 0, 0, 9, 115, 115, 104, 45, 102, 111, 98, 97, 114, 0, 0, 0, 4, 1, 2, 3, 4],
+            BEncoder::encode(&msg)
+        );
+    }
+
+    #[test]
+    fn test_decode_01() {
+        let msg: UnknownIdentity = UnknownIdentity {
+            algo: "ssh-fobar".into(),
+            data: vec![1, 2, 3, 4],
+        };
+        assert_eq!(
+            Some(msg),
+            BDecoder::decode(
+                &[0, 0, 0, 9, 115, 115, 104, 45, 102, 111, 98, 97, 114, 0, 0, 0, 4, 1, 2, 3, 4][..]
+            )
+        );
+    }
+}

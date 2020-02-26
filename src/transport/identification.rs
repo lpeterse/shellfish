@@ -10,11 +10,6 @@ impl<T> Identification<T> {
     const PREFIX: &'static [u8] = b"SSH-2.0-";
     pub(crate) const MAX_LEN: usize = 253;
 
-    pub const DEFAULT: Identification<&'static str> = Identification {
-        version: concat!(env!("CARGO_PKG_NAME"), "_", env!("CARGO_PKG_VERSION")),
-        comment: "",
-    };
-
     pub fn new(version: T, comment: T) -> Self {
         Self { version, comment }
     }
@@ -22,7 +17,10 @@ impl<T> Identification<T> {
 
 impl Default for Identification<&'static str> {
     fn default() -> Self {
-        Self::DEFAULT
+        Self {
+            version: concat!(env!("CARGO_PKG_NAME"), "_", env!("CARGO_PKG_VERSION")),
+            comment: "",
+        }
     }
 }
 

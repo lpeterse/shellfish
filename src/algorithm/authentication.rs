@@ -10,14 +10,23 @@ pub use self::unknown::*;
 
 use crate::codec::*;
 
+/// Any algorithm used for authentication shall implement this trait.
+///
+/// The algorithms are expected to have an associated identity format (e.g. pubkey or certificate)
+/// and a signature format (see associated types).
 pub trait AuthenticationAlgorithm {
     type Identity;
     type Signature;
     type SignatureFlags: Copy + Default + Into<u32>;
 
+    /// The identifying algorithm name (e.g. `ssh-ed25519`).
     const NAME: &'static str;
 }
 
+/// A user's or host's identity.
+///
+/// This is either just a key or a certificate.
+/// An identity is `Unknown` if it is not implemented and cannot be interpreted by us.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostIdentity {
     Ed25519Key(<SshEd25519 as AuthenticationAlgorithm>::Identity),
@@ -27,6 +36,10 @@ pub enum HostIdentity {
 }
 
 impl HostIdentity {
+    /// For a given identity, yield the corresponding algorithm name.
+    ///
+    /// NOTE: This is implies that the relation is a bijection which might turn out as a wrong
+    /// assumption in the future. Feel free to fix this as necessary.
     pub fn algorithm(&self) -> &str {
         match self {
             Self::Ed25519Key(_) => <SshEd25519 as AuthenticationAlgorithm>::NAME,
@@ -93,21 +106,31 @@ impl Decode for HostIdentity {
     }
 }
 
+/// A user's or host's signature.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostSignature {
     Ed25519Signature(<SshEd25519 as AuthenticationAlgorithm>::Signature),
 }
 
 impl HostSignature {
-    pub fn verify(&self, sig: &HostIdentity, data: &[u8]) -> Result<(), SignatureError> {
-        match (self, sig) {
+    /// Verify a signature by given identity over given data.
+    ///
+    /// Returns error in case the algorithms do not match or the signature is invalid.
+    pub fn verify(&self, id: &HostIdentity, data: &[u8]) -> Result<(), SignatureError> {
+        log::error!("{:?}", self);
+        log::error!("{:?}", id);
+        log::error!("{:?}", data);
+        match (self, id) {
             (Self::Ed25519Signature(s), HostIdentity::Ed25519Key(i)) => {
                 use ed25519_dalek::{PublicKey, Signature};
-                let key = PublicKey::from_bytes(&i.0[..]).map_err(|_| SignatureError {})?;
-                let sig = Signature::from_bytes(&s.0[..]).map_err(|_| SignatureError {})?;
-                key.verify(data, &sig).map_err(|_| SignatureError {})
+                let key = PublicKey::from_bytes(&i.0[..])
+                    .map_err(|_| SignatureError::InvalidSignature)?;
+                let sig = Signature::from_bytes(&s.0[..])
+                    .map_err(|_| SignatureError::InvalidSignature)?;
+                key.verify(data, &sig)
+                    .map_err(|_| SignatureError::InvalidSignature)
             }
-            _ => Err(SignatureError {}),
+            _ => Err(SignatureError::AlgorithmMismatch),
         }
     }
 }
@@ -134,7 +157,10 @@ impl<'a> DecodeRef<'a> for HostSignature {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SignatureError {}
+pub enum SignatureError {
+    InvalidSignature,
+    AlgorithmMismatch,
+}
 
 #[cfg(test)]
 mod test {
@@ -394,5 +420,72 @@ mod test {
         )
         .unwrap();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_signature_verify_valid_01() {
+        let id = HostIdentity::Ed25519Key(SshEd25519PublicKey([
+            75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
+            102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
+        ]));
+        let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
+            218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
+            129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
+            16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
+            244, 106, 208, 68, 88, 123, 26, 8,
+        ]));
+        let data = [
+            78, 0, 134, 150, 89, 178, 20, 41, 42, 222, 78, 127, 161, 158, 105, 59, 33, 37, 222,
+            103, 4, 44, 156, 174, 112, 125, 167, 190, 71, 199, 166, 114,
+        ];
+        assert!(sig.verify(&id, &data[..]).is_ok());
+    }
+
+    #[test]
+    fn test_signature_verify_invalid_01() {
+        let id = HostIdentity::Ed25519Key(SshEd25519PublicKey([
+            75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
+            102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
+        ]));
+        let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
+            218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
+            129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
+            16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
+            244, 106, 208, 68, 88, 123, 26, 8,
+        ]));
+        let data = [
+            78, 0, 134, 150, 89, 178, 20, 41, 42, 222, 78, 127, 161, 158, 105, 59, 33, 37, 222,
+            103, 4, 44, 156, 174, 112, 125, 167, 190, 71, 199, 166,
+            115, // last byte different!
+        ];
+        match sig.verify(&id, &data[..]) {
+            Err(SignatureError::InvalidSignature) => (),
+            _ => panic!(),
+        }
+    }
+
+    #[test]
+    fn test_signature_verify_mismatch_01() {
+        let id = HostIdentity::Unknown(UnknownIdentity {
+            algo: "unknown".into(),
+            data: vec![],
+        });
+        let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
+            218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
+            129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
+            16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
+            244, 106, 208, 68, 88, 123, 26, 8,
+        ]));
+        let data = [];
+        match sig.verify(&id, &data[..]) {
+            Err(SignatureError::AlgorithmMismatch) => (),
+            _ => panic!(),
+        }
+    }
+    
+    #[test]
+    fn test_signature_error_debug_01() {
+        assert_eq!(format!("{:?}", SignatureError::InvalidSignature), "InvalidSignature");
+        assert_eq!(format!("{:?}", SignatureError::AlgorithmMismatch), "AlgorithmMismatch");
     }
 }

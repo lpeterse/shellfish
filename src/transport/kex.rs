@@ -15,7 +15,9 @@ use super::*;
 
 use futures::task::Poll;
 
+/// A state machine for key exchange.
 pub trait KexMachine {
+    // Create new with initial state.
     fn new<C: TransportConfig>(config: &C, remote_id: Identification<String>) -> Self;
     fn init(&mut self);
     fn is_active(&self) -> bool;

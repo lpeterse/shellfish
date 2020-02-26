@@ -19,7 +19,7 @@ impl Transmitter {
     }
 
     pub async fn send<Msg: Encode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
-        let vec = BEncoder::encode(&Frame::new(&msg));
+        let vec = BEncoder::encode(&Frame::new(msg));
         self.stream.write_all(&vec).await?;
         Ok(())
     }

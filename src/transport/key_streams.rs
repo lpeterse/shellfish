@@ -52,7 +52,7 @@ impl KeyStreamsSha256 {
 
 impl std::fmt::Debug for KeyStreamsSha256 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "KexKeyStreams256 (..)")
+        write!(f, "KeyStreams256 (..)")
     }
 }
 
@@ -222,7 +222,7 @@ mod test {
 
         let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
         assert_eq!(
-            "KeyStreamsSha256(KexKeyStreams256 (..))",
+            "KeyStreamsSha256(KeyStreams256 (..))",
             format!("{:?}", ks)
         )
     }

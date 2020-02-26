@@ -3,23 +3,32 @@ mod encoder;
 
 use num_bigint::BigUint;
 use std::ops::Deref;
+use crate::util::*;
 
 pub use self::decoder::*;
 pub use self::encoder::*;
 
+/// SSH specific encoding.
 pub trait Encode {
     fn size(&self) -> usize;
     fn encode<E: Encoder>(&self, c: &mut E);
 }
 
+/// SSH specific decode (inverse of `Encode`).
 pub trait Decode: Sized {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self>;
 }
 
+/// SSH specific decode that allows the result to contain references into the input.
+/// 
+/// This is useful to avoid unnecessary intermediate allocations in cases where
+/// the result is short-lived and can be processed while the input is still in scope.
 pub trait DecodeRef<'a>: Sized {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self>;
 }
 
+/// `Decode  is a stronger property than `DecodeRef` so everything that is `Decode` can
+/// automatically inherit `DecodeRef`.
 impl<'a, T: Decode> DecodeRef<'a> for T {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         Decode::decode(d)
@@ -52,7 +61,7 @@ impl Decode for () {
 
 impl Encode for u32 {
     fn size(&self) -> usize {
-        4
+        std::mem::size_of::<u32>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u32be(*self)
@@ -67,7 +76,7 @@ impl Decode for u32 {
 
 impl Encode for u64 {
     fn size(&self) -> usize {
-        8
+        std::mem::size_of::<u64>()
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u64be(*self)
@@ -153,19 +162,52 @@ where
     }
 }
 
-impl<T: Encode> Encode for Vec<T> {
+impl<A: Encode, B: Encode> Encode for Result<A, B> {
     fn size(&self) -> usize {
-        let mut r = 4;
-        for x in self {
-            r += x.size();
+        match self {
+            Ok(x) => Encode::size(x),
+            Err(x) => Encode::size(x),
         }
-        r
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u32be(self.len() as u32);
-        for x in self {
-            Encode::encode(x, c);
+        match self {
+            Ok(x) => Encode::encode(x, c),
+            Err(x) => Encode::encode(x, c),
         }
+    }
+}
+
+impl<A: Decode, B: Decode> Decode for Result<A, B> {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        // The decoder state needs to be cloned as the input needs to be restored on failure.
+        None.or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Ok);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+        .or_else(|| {
+            let mut d_ = d.clone();
+            let r = DecodeRef::decode(&mut d_).map(Err);
+            if r.is_some() {
+                *d = d_
+            };
+            r
+        })
+    }
+}
+
+/// A vector is encoded by encoding its number of elements as u32 and each element according to its
+/// own encoding rules.
+impl<T: Encode> Encode for Vec<T> {
+    fn size(&self) -> usize {
+        4 + self.iter().map(Encode::size).sum::<usize>()
+    }
+    fn encode<E: Encoder>(&self, e: &mut E) {
+        e.push_u32be(self.len() as u32);
+        self.iter().for_each(|x| Encode::encode(x, e));
     }
 }
 
@@ -173,7 +215,7 @@ impl<T: Decode> Decode for Vec<T> {
     fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         // NB: Don't use `with_capacity` here as it might
-        // lead to remote triggered resource exhaustion
+        // lead to remote triggered resource exhaustion.
         let mut v = Vec::new();
         for _ in 0..len {
             v.push(DecodeRef::decode(c)?);
@@ -182,46 +224,25 @@ impl<T: Decode> Decode for Vec<T> {
     }
 }
 
-impl Encode for BigUint {
-    fn size(&self) -> usize {
-        let vec = self.to_bytes_be();
-        let bytes = vec.as_slice();
-        if bytes[0] > 127 {
-            4 + 1 + bytes.len()
-        } else {
-            4 + bytes.len()
-        }
-    }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        let vec = self.to_bytes_be();
-        let bytes = vec.as_slice(); // bytes is non-empty
-        if bytes[0] > 127 {
-            c.push_u32be(1 + bytes.len() as u32);
-            c.push_u8(0);
-            c.push_bytes(&bytes);
-        } else {
-            c.push_u32be(bytes.len() as u32);
-            c.push_bytes(&bytes);
-        }
-    }
-}
+/// `List` is a wrapper around `Vec` but with different encoding rules:
+/// Instead of the number of elements, the leading u32 designates the following bytes.
+pub struct List<T>(pub Vec<T>);
 
-impl<'a> DecodeRef<'a> for BigUint {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+impl<T: Decode> Decode for List<T> {
+    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let len = c.take_u32be()?;
         let bytes = c.take_bytes(len as usize)?;
-        if bytes.is_empty() {
-            Some(Self::from(0 as usize))
-        } else {
-            let mut i = 0;
-            while i < bytes.len() && bytes[i] == 0 {
-                i += 1
-            }
-            Some(BigUint::from_bytes_be(&bytes[i..]))
+        let mut vec: Vec<T> = Vec::new();
+        let mut dec = BDecoder::from(&bytes);
+        while let Some(s) = Decode::decode(&mut dec) {
+            vec.push(s);
         }
+        assume(dec.is_eoi())?;
+        Some(Self(vec))
     }
 }
 
+/// Like `List` but contains a reference to `Vec`.
 pub struct ListRef<'a, T>(pub &'a Vec<T>);
 
 impl<'a, T: Encode> Encode for ListRef<'a, T> {
@@ -234,21 +255,8 @@ impl<'a, T: Encode> Encode for ListRef<'a, T> {
     }
 }
 
-pub struct List<T>(pub Vec<T>);
-
-impl<T: Decode> Decode for List<T> {
-    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let len = c.take_u32be()?;
-        let bytes = c.take_bytes(len as usize)?;
-        let mut vec: Vec<T> = Vec::new();
-        let mut dec = BDecoder::from(&bytes);
-        while let Some(s) = Decode::decode(&mut dec) {
-            vec.push(s);
-        }
-        Some(Self(vec))
-    }
-}
-
+/// Certain lists in SSH (i.e. the SSH_KEX_INIT) message contain comma-separated ASCII lists.
+/// This type contains operations for handling them.
 pub enum NameList {}
 
 impl NameList {
@@ -298,6 +306,7 @@ impl NameList {
     }
 }
 
+/// FIXME: How does it relate to BigUint?
 pub struct MPInt<'a>(pub &'a [u8]);
 
 impl<'a> Encode for MPInt<'a> {
@@ -329,43 +338,48 @@ impl<'a> DecodeRef<'a> for MPInt<'a> {
     }
 }
 
-pub enum E2<A, B> {
-    A(A),
-    B(B),
-}
-
-impl<A: Encode, B: Encode> Encode for E2<A, B> {
+/// An BigUint (MPint in SSH terminology) is encoded in big-endian.
+/// 
+/// The number of bytes is designated by a leading u32. If the first byte of the number's big
+/// endian encoding is > 127 and additional leading 0 shall be prepended.
+/// 
+/// FIXME: How does it relate to MPInt?
+impl Encode for BigUint {
     fn size(&self) -> usize {
-        match self {
-            Self::A(x) => Encode::size(x),
-            Self::B(x) => Encode::size(x),
+        let vec = self.to_bytes_be();
+        let bytes = vec.as_slice();
+        if bytes[0] > 127 {
+            4 + 1 + bytes.len()
+        } else {
+            4 + bytes.len()
         }
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
-        match self {
-            Self::A(x) => Encode::encode(x, c),
-            Self::B(x) => Encode::encode(x, c),
+        let vec = self.to_bytes_be();
+        let bytes = vec.as_slice(); // bytes is non-empty
+        if bytes[0] > 127 {
+            c.push_u32be(1 + bytes.len() as u32);
+            c.push_u8(0);
+            c.push_bytes(&bytes);
+        } else {
+            c.push_u32be(bytes.len() as u32);
+            c.push_bytes(&bytes);
         }
     }
 }
 
-impl<A: Decode, B: Decode> Decode for E2<A, B> {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        None.or_else(|| {
-            let mut d_ = d.clone();
-            let r = DecodeRef::decode(&mut d_).map(Self::A);
-            if r.is_some() {
-                *d = d_
-            };
-            r
-        })
-        .or_else(|| {
-            let mut d_ = d.clone();
-            let r = DecodeRef::decode(&mut d_).map(Self::B);
-            if r.is_some() {
-                *d = d_
-            };
-            r
-        })
+impl<'a> DecodeRef<'a> for BigUint {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+        let len = c.take_u32be()?;
+        let bytes = c.take_bytes(len as usize)?;
+        if bytes.is_empty() {
+            Some(Self::from(0 as usize))
+        } else {
+            let mut i = 0;
+            while i < bytes.len() && bytes[i] == 0 {
+                i += 1
+            }
+            Some(BigUint::from_bytes_be(&bytes[i..]))
+        }
     }
 }

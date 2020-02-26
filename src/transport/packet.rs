@@ -55,4 +55,3 @@ impl<'a, T: Encode> Encode for Packet<'a, T> {
         // MAC area stays uninitialised. It's the cipher's responsibility to initialize it.
     }
 }
-

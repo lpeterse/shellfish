@@ -20,9 +20,9 @@ pub enum TransportError {
     NoCommonEncryptionAlgorithm,
     NoCommonKexAlgorithm,
     NoCommonMacAlgorith,
+    InactivityTimeout,
     DisconnectByUs(Reason),
     DisconnectByPeer(Reason),
-    InactivityTimeout,
 }
 
 impl From<std::io::Error> for TransportError {

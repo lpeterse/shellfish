@@ -127,4 +127,37 @@ mod test {
         enc.push_bytes(&[5, 6, 7, 8]);
         assert_eq!([1, 2, 3, 4, 5, 6, 7, 8], buf);
     }
+
+    #[test]
+    fn test_digest_debug() {
+        let enc = BEncoder::from(&mut [][..]);
+        assert_eq!("BEncoder { pos: 0, buf: [] }", format!("{:?}", enc));
+    }
+
+    #[test]
+    fn test_digest_push_u8() {
+        let mut digest = sha2::Sha256::new();
+        digest.push_u8(0x01);
+        assert_eq!([75, 245, 18, 47, 52, 69, 84, 197], digest.result()[..8]);
+    }
+
+    #[test]
+    fn test_digest_push_u32be() {
+        let mut digest = sha2::Sha256::new();
+        digest.push_u32be(0x01020304);
+        assert_eq!([159, 100, 167, 71, 225, 185, 127, 19], digest.result()[..8]);
+    }
+    #[test]
+    fn test_digest_push_u64be() {
+        let mut digest = sha2::Sha256::new();
+        digest.push_u64be(0x0102030405060708);
+        assert_eq!([102, 132, 13, 218, 21, 78, 138, 17], digest.result()[..8]);
+    }
+
+    #[test]
+    fn test_digest_push_bytes() {
+        let mut digest = sha2::Sha256::new();
+        digest.push_bytes(&"1234");
+        assert_eq!([3, 172, 103, 66, 22, 243, 225, 92], digest.result()[..8]);
+    }
 }

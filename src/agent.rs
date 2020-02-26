@@ -77,10 +77,9 @@ impl Agent {
         };
         let mut t = Transmitter::new(&self.path).await?;
         t.send(&msg).await?;
-        let msg: E2<MsgSignResponse<S>, MsgFailure> = t.receive().await?;
-        match msg {
-            E2::A(x) => Ok(Some(x.signature)),
-            E2::B(_) => Ok(None),
+        match t.receive::<Result<MsgSignResponse<S>, MsgFailure>>().await? {
+            Ok(x) => Ok(Some(x.signature)),
+            Err(_) => Ok(None),
         }
     }
 }

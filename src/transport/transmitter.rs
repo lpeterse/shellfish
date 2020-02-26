@@ -16,10 +16,10 @@ pub struct Transmitter<S> {
     packets_received: u64,
     encryption_ctx: CipherContext,
     decryption_ctx: CipherContext,
-    alive_timer: Delay,
-    alive_interval: std::time::Duration,
-    inactivity_timer: Delay,
-    inactivity_timeout: std::time::Duration,
+    local_inactivity_timer: Delay,
+    local_inactivity_timeout: std::time::Duration,
+    remote_inactivity_timer: Delay,
+    remote_inactivity_timeout: std::time::Duration,
 }
 
 impl<S: Socket> Transmitter<S> {
@@ -28,7 +28,7 @@ impl<S: Socket> Transmitter<S> {
     /// This function also performs the identification string exchange which may fail for different
     /// reasons. An error is returned in this case.
     pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
-        let (rh, wh) = socket.split();
+        let (rh, wh) = futures::io::AsyncReadExt::split(socket);
         let mut sender = BufferedSender::new(wh);
         let mut receiver = BufferedReceiver::new(rh);
 
@@ -54,10 +54,10 @@ impl<S: Socket> Transmitter<S> {
             packets_received: 0,
             encryption_ctx: CipherContext::new(),
             decryption_ctx: CipherContext::new(),
-            alive_timer: Delay::new(config.alive_interval()),
-            alive_interval: config.alive_interval(),
-            inactivity_timer: Delay::new(config.inactivity_timeout()),
-            inactivity_timeout: config.inactivity_timeout(),
+            local_inactivity_timer: Delay::new(config.alive_interval()),
+            local_inactivity_timeout: config.alive_interval(),
+            remote_inactivity_timer: Delay::new(config.inactivity_timeout()),
+            remote_inactivity_timeout: config.inactivity_timeout(),
         })
     }
 
@@ -120,12 +120,12 @@ impl<S: Socket> Transmitter<S> {
         packet.encode(&mut BEncoder::from(&mut buffer[..]));
         self.encryption_ctx.encrypt(self.packets_sent, buffer);
         self.packets_sent += 1;
-        self.reset_alive_timer(cx);
+        self.reset_local_inactivity_timer(cx)?;
         Poll::Ready(Ok(()))
     }
 
     /// Poll receiving a message.
-    /// 
+    ///
     /// When `Ready`, `decode` and `consume` shall be used to process the message.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         let s = self;
@@ -158,12 +158,12 @@ impl<S: Socket> Transmitter<S> {
             s.receiver_state.packet_len = packet_len;
         }
         // Case 3: The packet is complete and decrypted in buffer.
-        s.reset_inactivity_timer(cx);
+        s.reset_remote_inactivity_timer(cx)?;
         return Poll::Ready(Ok(()));
     }
 
     /// Decode a decrypted message.
-    /// 
+    ///
     /// Shall be called _after_ `poll_receive` was ready.
     pub fn decode<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
         let packet_len = self.receiver_state.packet_len;
@@ -176,7 +176,7 @@ impl<S: Socket> Transmitter<S> {
     }
 
     /// Consume a decoded message and remove it from the input buffer.
-    /// 
+    ///
     /// Shall be called _after_ `decode`.
     pub fn consume(&mut self) {
         let buffer_len = self.receiver_state.buffer_len;
@@ -186,30 +186,14 @@ impl<S: Socket> Transmitter<S> {
         self.receiver_state.reset();
     }
 
-    fn reset_alive_timer(&mut self, cx: &mut Context) {
-        self.alive_timer.reset(self.alive_interval);
-        match self.alive_timer.poll_unpin(cx) {
-            Poll::Pending => (),
-            _ => panic!("alive_timer fired immediately"),
-        }
-    }
-
-    fn reset_inactivity_timer(&mut self, cx: &mut Context) {
-        self.inactivity_timer.reset(self.inactivity_timeout);
-        match self.inactivity_timer.poll_unpin(cx) {
-            Poll::Pending => (),
-            _ => panic!("inactivity_timer fired immediately"),
-        }
-    }
-
     /// Send a keep alive message when determined to be required.
     /// Like above, the call registers the timer for wakeup. The alive timer is reset
     /// automatically when the message has been sent successfully.
     pub fn poll_keepalive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        match self.alive_timer.poll_unpin(cx) {
+        match self.local_inactivity_timer.poll_unpin(cx) {
             Poll::Pending => (),
             Poll::Ready(()) => {
-                ready!(self.poll_send(cx, &MsgIgnore::new()))?;
+                ready!(self.poll_send(cx, &MsgIgnore::new()))?; // FIXME: Not sent twice?
                 log::debug!("Sent MSG_IGNORE (as keep-alive)");
                 ready!(self.poll_flush(cx))?;
             }
@@ -220,7 +204,7 @@ impl<S: Socket> Transmitter<S> {
     /// The inactivity check causes an error in case of timeout and falls through else.
     /// Calling it also registers the timer for wakeup (consider this when reordering code).
     pub fn poll_inactivity(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        match self.inactivity_timer.poll_unpin(cx) {
+        match self.remote_inactivity_timer.poll_unpin(cx) {
             Poll::Pending => (),
             Poll::Ready(()) => Err(TransportError::InactivityTimeout)?,
         }
@@ -233,7 +217,7 @@ impl<S: Socket> Transmitter<S> {
         id: &Identification<&'static str>,
     ) -> Result<(), TransportError> {
         let mut enc = BEncoder::from(socket.reserve(Encode::size(id) + 2).await?);
-        Encode::encode(&id, &mut enc);
+        Encode::encode(id, &mut enc);
         enc.push_u8('\r' as u8);
         enc.push_u8('\n' as u8);
         socket.flush().await?;
@@ -251,6 +235,28 @@ impl<S: Socket> Transmitter<S> {
                 None => (),
                 Some(id) => return Ok(id),
             }
+        }
+    }
+
+    /// Resets the local inactivity timer to the configured timespan and registers it for wakeup.
+    fn reset_local_inactivity_timer(&mut self, cx: &mut Context) -> Result<(), TransportError> {
+        self.local_inactivity_timer
+            .reset(self.local_inactivity_timeout);
+        match self.local_inactivity_timer.poll_unpin(cx) {
+            Poll::Pending => Ok(()),
+            // Shall not happen, but if it does we rather convert it to an error instead of a panic
+            _ => Err(TransportError::InactivityTimeout),
+        }
+    }
+
+    /// Resets the remote inactivity timer to the configured timespan and registers it for wakeup.
+    fn reset_remote_inactivity_timer(&mut self, cx: &mut Context) -> Result<(), TransportError> {
+        self.remote_inactivity_timer
+            .reset(self.remote_inactivity_timeout);
+        match self.remote_inactivity_timer.poll_unpin(cx) {
+            Poll::Pending => Ok(()),
+            // Shall not happen, but if it does we rather convert it to an error instead of a panic
+            _ => Err(TransportError::InactivityTimeout),
         }
     }
 }

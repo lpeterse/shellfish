@@ -9,7 +9,7 @@ pub use self::request::*;
 use super::*;
 
 use crate::codec::*;
-use crate::ring_buffer::*;
+use crate::buffer::*;
 
 use futures::task::AtomicWaker;
 use futures::task::Poll;
@@ -95,9 +95,9 @@ pub struct SessionState {
     pub outer_error: Option<()>,
     pub env: Vec<(String, String)>,
     pub exit: Option<Exit>,
-    pub stdin: RingBuffer,
-    pub stdout: RingBuffer,
-    pub stderr: RingBuffer,
+    pub stdin: Buffer,
+    pub stdout: Buffer,
+    pub stderr: Buffer,
     pub request: RequestState<SessionRequest>,
 }
 
@@ -130,9 +130,9 @@ impl Default for SessionState {
             outer_error: None,
             env: Vec::new(),
             exit: None,
-            stdin: RingBuffer::new(8192),
-            stdout: RingBuffer::new(8192),
-            stderr: RingBuffer::new(8192),
+            stdin: Buffer::new(8192),
+            stdout: Buffer::new(8192),
+            stderr: Buffer::new(8192),
             request: RequestState::None,
         }
     }
