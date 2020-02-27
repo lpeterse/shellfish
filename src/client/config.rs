@@ -120,7 +120,7 @@ impl ConnectionConfig for ClientConfig {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

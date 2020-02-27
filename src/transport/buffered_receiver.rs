@@ -154,7 +154,7 @@ impl<S: Read + AsyncRead + Unpin> BufferedReceiver<S> {
 /*
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use futures::io::AsyncReadExt;
 

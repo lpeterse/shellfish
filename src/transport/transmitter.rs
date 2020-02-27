@@ -193,7 +193,7 @@ impl<S: Socket> Transmitter<S> {
         match self.local_inactivity_timer.poll_unpin(cx) {
             Poll::Pending => (),
             Poll::Ready(()) => {
-                ready!(self.poll_send(cx, &MsgIgnore::new()))?; // FIXME: Not sent twice?
+                ready!(self.poll_send(cx, &MsgIgnore::new()))?;
                 log::debug!("Sent MSG_IGNORE (as keep-alive)");
                 ready!(self.poll_flush(cx))?;
             }

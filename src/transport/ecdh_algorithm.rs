@@ -63,7 +63,7 @@ impl Decode for x25519_dalek::PublicKey {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

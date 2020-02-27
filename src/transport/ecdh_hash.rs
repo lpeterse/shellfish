@@ -45,7 +45,7 @@ impl<'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use crate::algorithm::encryption::*;
     use crate::algorithm::kex::*;

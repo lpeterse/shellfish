@@ -164,7 +164,7 @@ impl<'a> Decoder<'a> for BDecoder<'a> {
 }
 
 #[cfg(test)]
-mod tests {
+mod testss {
     use super::*;
 
     #[test]

@@ -1,6 +1,8 @@
 mod client;
+mod server;
 
 pub use self::client::*;
+pub use self::server::*;
 pub use self::cookie::*;
 pub use self::ecdh_algorithm::*;
 pub use self::ecdh_hash::*;
@@ -36,7 +38,7 @@ pub trait KexMachine {
     ) -> Poll<Result<(), TransportError>>
     where
         F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>>;
-    fn session_id(&self) -> &Option<SessionId>;
+    fn session_id(&self) -> &SessionId;
 }
 
 pub enum KexOutput {
@@ -125,7 +127,7 @@ pub fn common(client: &Vec<&'static str>, server: &Vec<String>) -> Option<&'stat
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

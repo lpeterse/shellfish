@@ -125,7 +125,7 @@ impl<'a> KeyStreamSha256<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

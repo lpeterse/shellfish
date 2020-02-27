@@ -32,7 +32,7 @@ impl Decode for MsgIdentitiesAnswer {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use num_bigint::BigUint;
 

@@ -21,7 +21,7 @@ impl<T: Encode> Encode for Frame<T> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

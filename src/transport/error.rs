@@ -38,7 +38,7 @@ impl From<SignatureError> for TransportError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

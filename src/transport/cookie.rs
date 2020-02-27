@@ -29,7 +29,7 @@ impl std::fmt::Debug for KexCookie {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

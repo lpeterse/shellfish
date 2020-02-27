@@ -25,7 +25,7 @@ impl Decode for MsgFailure {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

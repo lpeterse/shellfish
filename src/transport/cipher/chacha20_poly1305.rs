@@ -90,7 +90,7 @@ impl Chacha20Poly1305Context {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

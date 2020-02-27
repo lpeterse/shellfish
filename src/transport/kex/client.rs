@@ -21,7 +21,7 @@ pub struct ClientKexMachine<V: HostKeyVerifier = Box<dyn HostKeyVerifier>> {
     host_key_algorithms: Vec<&'static str>,
     encryption_algorithms: Vec<&'static str>,
     compression_algorithms: Vec<&'static str>,
-    session_id: Option<SessionId>,
+    session_id: SessionId,
 }
 
 impl ClientKexMachine {
@@ -122,7 +122,7 @@ impl KexMachine for ClientKexMachine {
                 config.compression_algorithms(),
                 &SUPPORTED_COMPRESSION_ALGORITHMS[..],
             ),
-            session_id: None,
+            session_id: SessionId::default(),
         };
         self_.init();
         self_
@@ -209,9 +209,9 @@ impl KexMachine for ClientKexMachine {
                 assume(self.verifier.verify(&msg.host_key))
                     .ok_or(TransportError::HostKeyUnverifiable)?;
                 // The session id is only computed during first kex and constant afterwards.
-                let session_id = self.session_id.get_or_insert_with(|| SessionId::new(h));
-                let keys1 = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &session_id);
-                let keys2 = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &session_id);
+                self.session_id.update(h);
+                let keys1 = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id);
+                let keys2 = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id);
                 let enc = CipherConfig::new_client_to_server(
                     &self.encryption_algorithms,
                     &self.compression_algorithms,
@@ -247,15 +247,7 @@ impl KexMachine for ClientKexMachine {
         }
     }
 
-    /*fn poll_init(&mut self, cx: &mut Context, bytes_sent: u64, bytes_received: u64) -> Poll<()> {
-        Poll::Ready(())
-        /*ClientKexState::Delay(x) => {
-            ready!(x.poll_unpin(cx));
-            self.init();
-            return Poll::Ready(Ok(()));
-        }*/
-    }*/
-
+    /// FIXME
     fn poll<F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>>>(
         &mut self,
         cx: &mut Context,
@@ -308,7 +300,7 @@ impl KexMachine for ClientKexMachine {
         }
     }
 
-    fn session_id(&self) -> &Option<SessionId> {
+    fn session_id(&self) -> &SessionId {
         &self.session_id
     }
 }

@@ -12,7 +12,7 @@ impl From<std::io::Error> for AgentError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

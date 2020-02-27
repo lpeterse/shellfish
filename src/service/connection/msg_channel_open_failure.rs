@@ -64,7 +64,7 @@ impl<'a> DecodeRef<'a> for MsgChannelOpenFailure {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

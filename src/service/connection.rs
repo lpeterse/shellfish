@@ -32,7 +32,6 @@ use crate::codec::*;
 use crate::role::*;
 use crate::transport::*;
 
-use async_std::net::TcpStream;
 use futures::channel::oneshot;
 use futures::future::{Future, FutureExt};
 use std::pin::Pin;
@@ -51,7 +50,7 @@ where
 {
     const NAME: &'static str = "ssh-connection";
 
-    fn new(config: &R::Config, transport: Transport<R, TcpStream>) -> Connection<R> {
+    fn new<S: Socket>(config: &R::Config, transport: Transport<R, S>) -> Connection<R> {
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();
@@ -77,6 +76,14 @@ impl<R: Role> Connection<R> {
 }
 
 impl Connection<Client> {
+    pub async fn request<S: Socket>(
+        transport: Transport<Client, S>,
+        config: &ClientConfig,
+    ) -> Result<Self, ConnectionError> {
+        let transport = transport.request_service(Self::NAME).await?;
+        Ok(<Self as Service<Client>>::new(config, transport))
+    }
+
     pub async fn session(
         &mut self,
     ) -> Result<Result<Session, ChannelOpenFailure>, ConnectionError> {

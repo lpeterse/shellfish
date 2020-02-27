@@ -7,6 +7,12 @@ impl SessionId {
     pub fn new(x: [u8; 32]) -> Self {
         Self(x)
     }
+
+    pub fn update(&mut self, x: [u8; 32]) {
+        if self.0 == Self::default().0 {
+            self.0 = x;
+        }
+    }
 }
 
 impl AsRef<[u8]> for SessionId {
@@ -25,6 +31,12 @@ impl Encode for SessionId {
     }
 }
 
+impl Default for SessionId {
+    fn default() -> Self {
+        Self([0; 32])
+    }
+}
+
 impl std::fmt::Debug for SessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SessionId(")?;
@@ -36,7 +48,7 @@ impl std::fmt::Debug for SessionId {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

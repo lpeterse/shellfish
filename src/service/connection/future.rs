@@ -13,8 +13,8 @@ use futures::ready;
 use futures::task::{Context, Poll};
 use std::pin::*;
 
-pub struct ConnectionFuture<R: Role, T> {
-    pub transport: Transport<R,T>,
+pub struct ConnectionFuture<R: Role, S: Socket> {
+    pub transport: Transport<R, S>,
     pub request_sender: RequestSender,
     pub request_receiver: RequestReceiver,
     pub channels: ChannelMap<Channel>,

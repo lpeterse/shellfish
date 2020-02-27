@@ -163,7 +163,7 @@ pub enum SignatureError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
     use num_bigint::BigUint;
 

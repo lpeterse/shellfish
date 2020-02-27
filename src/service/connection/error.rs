@@ -36,7 +36,7 @@ impl From<ChannelOpenFailure> for ConnectionError {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

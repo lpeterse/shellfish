@@ -40,7 +40,7 @@ impl<'a> DecodeRef<'a> for MsgChannelRequest<'a, &'a [u8]> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

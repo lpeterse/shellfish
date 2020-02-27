@@ -108,7 +108,7 @@ impl Into<u32> for SshEd25519SignatureFlags {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

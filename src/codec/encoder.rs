@@ -83,7 +83,7 @@ impl<'a> From<&'a mut [u8]> for BEncoder<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

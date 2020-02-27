@@ -102,6 +102,6 @@ impl<S: Write + AsyncWrite + Unpin> BufferedSender<S> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     //use super::*;
 }

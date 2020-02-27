@@ -26,7 +26,7 @@ impl<'a> DecodeRef<'a> for MsgServiceRequest<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

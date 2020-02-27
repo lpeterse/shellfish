@@ -30,7 +30,7 @@ impl Decode for MsgChannelEof {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

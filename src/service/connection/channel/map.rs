@@ -111,7 +111,7 @@ impl<'a, T> Iterator for ChannelMapIterator<'a, T> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

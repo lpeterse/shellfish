@@ -34,7 +34,7 @@ impl<'a> DecodeRef<'a> for MsgFailure<'a> {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[test]

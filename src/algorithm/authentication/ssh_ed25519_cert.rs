@@ -135,7 +135,7 @@ impl Decode for SshEd25519Certificate {
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     fn example_ed25519_key() -> SshEd25519PublicKey {

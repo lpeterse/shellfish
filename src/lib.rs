@@ -1,6 +1,7 @@
 pub mod algorithm;
 pub mod agent;
 pub mod client;
+pub mod server;
 pub mod service;
 pub mod transport;
 

@@ -37,7 +37,7 @@ where
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     #[derive(Debug, PartialEq)]

@@ -38,7 +38,7 @@ impl Transmitter {
 
 /*
 #[cfg(test)]
-mod test {
+mod tests {
     use super::*;
 
     use async_std::io::ReadExt;

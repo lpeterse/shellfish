@@ -1,14 +1,11 @@
-pub mod user_auth;
 pub mod connection;
+pub mod user_auth;
 
 use crate::role::Role;
-use crate::transport::Transport;
-
-use async_std::net::TcpStream;
+use crate::transport::{Socket, Transport};
 
 pub trait Service<R: Role> {
-
     const NAME: &'static str;
 
-    fn new(config: &R::Config, transport: Transport<R, TcpStream>) -> Self;
+    fn new<S: Socket>(config: &R::Config, transport: Transport<R, S>) -> Self;
 }

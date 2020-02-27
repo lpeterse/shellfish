@@ -26,20 +26,15 @@ impl Client {
     ) -> Result<Connection<Self>, ClientError> {
         let e = ClientError::ConnectError;
         let socket = TcpStream::connect(addr).await.map_err(e)?;
-        let transport: Transport<Client, TcpStream> = Transport::new(&self.config, socket).await?;
+        self.connect_(socket).await
+    }
+
+    pub async fn connect_<S: Socket>(&self, socket: S) -> Result<Connection<Self>, ClientError> {
+        let transport = Transport::<Client, S>::new(&self.config, socket).await?;
         Ok(match self.username {
-            None => {
-                let service = <Connection<Self> as Service<Self>>::NAME;
-                let transport = transport.request_service(service).await?;
-                Connection::new(&self.config, transport)
-            }
+            None => Connection::request(transport, &self.config).await?,
             Some(ref user) => {
-                let agent = self.agent.clone();
-                let service = <UserAuth<Self> as Service<Self>>::NAME;
-                let transport = transport.request_service(service).await?;
-                UserAuth::new(&self.config, transport)
-                    .authenticate(&self.config, user, agent)
-                    .await?
+                UserAuth::authenticate(transport, &self.config, user, self.agent.clone()).await?
             }
         })
     }

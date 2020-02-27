@@ -48,7 +48,9 @@ use self::packet::*;
 use crate::client::Client;
 use crate::codec::*;
 use crate::role::*;
+use crate::server::Server;
 
+use async_std::net::TcpStream;
 use futures::future::poll_fn;
 use futures::future::FutureExt;
 use futures::io::{ReadHalf, WriteHalf};
@@ -57,50 +59,61 @@ use futures::task::Context;
 use futures::task::Poll;
 use futures_timer::Delay;
 use std::convert::From;
-use std::marker::Unpin;
 use std::option::Option;
 use std::pin::Pin;
 
-pub trait HasTransport {
-    type KexMachine: KexMachine + Sized + Send + Unpin;
-}
-
-impl HasTransport for Client {
-    type KexMachine = ClientKexMachine;
-}
-
-pub struct Transport<R: Role, S> {
+/// Implements the transport layer as described in RFC 4253.
+///
+/// This structure is polymorphic in role (either client or server) and the socket type (most
+/// likely `TcpStream` but other types are used for testing).
+/// The only difference between client and server is the key exchange mechanism and the
+/// implementation is chosen at compile time dependant on the role parameter.
+pub struct Transport<R: Role, S: Socket = TcpStream> {
     transmitter: Transmitter<S>,
-    kex: <R as HasTransport>::KexMachine,
+    kex: <R as Role>::KexMachine,
 }
 
-impl<R: Role, S: Socket> Transport<R, S> {
+impl <S: Socket> Transport<Client, S> {
     /// Create a new transport.
     ///
     /// The initial key exchange has been completed successfully when this
     /// function does not return an error.
     pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
         let transmitter = Transmitter::new(config, socket).await?;
-        let kex = <R as HasTransport>::KexMachine::new(config, transmitter.remote_id().clone());
+        let kex = <Client as Role>::KexMachine::new(config, transmitter.remote_id().clone());
         let mut transport = Self { transmitter, kex };
         transport.rekey().await?;
         Ok(transport)
     }
+}
 
+impl<S: Socket> Transport<Server, S> {
+    /// Create a new transport.
+    ///
+    /// The initial key exchange has been completed successfully when this
+    /// function does not return an error.
+    pub async fn new<C: TransportConfig>(_config: &C, _socket: S) -> Result<Self, TransportError> {
+        unimplemented!()
+    }
+}
+
+impl<R: Role, S: Socket> Transport<R, S> {
     /// Return the connection's session id.
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
     /// lifetime of the connection.
-    pub fn session_id(&self) -> &Option<SessionId> {
+    pub fn session_id(&self) -> &SessionId {
         &self.kex.session_id()
     }
 
     /// Check whether the transport is flushed (output buffer empty).
+    /// FIXME: necessary?
     pub fn is_flushed(&self) -> bool {
         self.transmitter.flushed()
     }
 
     /// Initiate a rekeying and wait for it to complete.
+    /// FIXME: Why async?
     pub async fn rekey(&mut self) -> Result<(), TransportError> {
         self.kex.init();
         Ok(())
@@ -156,12 +169,6 @@ impl<R: Role, S: Socket> Transport<R, S> {
         self.transmitter.consume()
     }
 
-    /// Try to flush all pending operations and output buffers.
-    pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        ready!(self.transmitter.poll_inactivity(cx))?;
-        self.transmitter.poll_flush(cx)
-    }
-
     /// Try to send a message.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
@@ -173,8 +180,16 @@ impl<R: Role, S: Socket> Transport<R, S> {
         cx: &mut Context,
         msg: &M,
     ) -> Poll<Result<(), TransportError>> {
+        // The next call does nothing unless the keep-alive timeout triggers.
+        // When it triggers, it tries to send a message ignore which might pend.
         ready!(self.transmitter.poll_keepalive(cx))?;
+        // The next call does nothing unless the remote inactivity timeout triggers.
+        // When it triggers, it returns an error.
         ready!(self.transmitter.poll_inactivity(cx))?;
+        // In case a running kex forbids sending no-kex packets we need to drive
+        // kex to completion first. This requires dispatching transport messages.
+        // It might happen that kex can be completed non-blocking and sending the
+        // message migh succeed in a later loop iteration.
         loop {
             ready!(self.poll_kex(cx))?;
             if self.kex.is_sending_critical() {
@@ -196,24 +211,54 @@ impl<R: Role, S: Socket> Transport<R, S> {
     ///
     /// NB: Polling drives kex to completion.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        // See `poll_send` concerning the next two calls.
         ready!(self.transmitter.poll_keepalive(cx))?;
         ready!(self.transmitter.poll_inactivity(cx))?;
+        // Transport messages are handled internally by this function. In such a case the loop
+        // will iterate more than once but always terminate with either Ready or Pending.
+        // In case a running kex forbids receiving non-kex packets we need to drive kex to
+        // completion first: This means dispatching transport messages only; all other packets
+        // will cause an error.
         loop {
             ready!(self.poll_kex(cx))?;
             ready!(self.transmitter.poll_receive(cx))?;
             if self.consume_transport_message()? {
                 continue;
-            } else if self.kex.is_receiving_critical() {
-                return self.poll_send_unimplemented(cx);
-            } else {
-                return Poll::Ready(Ok(()));
             }
+            if self.kex.is_receiving_critical() {
+                return self.poll_send_unimplemented(cx);
+            }
+            return Poll::Ready(Ok(()));
         }
     }
 
+    /// Try to flush all pending operations and output buffers.
+    pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        ready!(self.transmitter.poll_inactivity(cx))?;
+        self.transmitter.poll_flush(cx)
+    }
+
+    /// Try to send MSG_UNIMPLEMENTED and return `MessageUnexpected` error
+    /// even in the presence of other errors (preserve the former).
+    pub fn poll_send_unimplemented(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<(), TransportError>> {
+        let msg = MsgUnimplemented {
+            packet_number: self.transmitter.packets_received() as u32,
+        };
+        let _ = self.transmitter.poll_send(cx, &msg);
+        let _ = self.transmitter.poll_flush(cx);
+        Poll::Ready(Err(TransportError::MessageUnexpected))
+    }
+
+    /// This function is Ready unless sending an eventual kex message blocks.
     fn poll_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         let k = &mut self.kex;
         let t = &mut self.transmitter;
+        // `poll` determines whether a kex is necessary or in progress and uses the lambda to send
+        // as many messages as necessary. It returns Pending in case sending blocks. The next
+        // invocation of this function will then proceed right where it blocked before.
         k.poll(cx, t.bytes_sent(), t.bytes_received(), |cx, x| {
             match x {
                 KexOutput::Init(msg) => {
@@ -241,10 +286,11 @@ impl<R: Role, S: Socket> Transport<R, S> {
                         .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 }
             }
-            t.poll_flush(cx) // TODO
+            t.poll_flush(cx)
         })
     }
 
+    /// Consumes message and returns true iff it is a transport message.
     fn consume_transport_message(&mut self) -> Result<bool, TransportError> {
         // Try to interpret as MSG_DISCONNECT. If successful, convert it into an error and let
         // the callee handle the termination.
@@ -325,21 +371,9 @@ impl<R: Role, S: Socket> Transport<R, S> {
         }
         Ok(false)
     }
-
-    pub fn poll_send_unimplemented(
-        &mut self,
-        cx: &mut Context,
-    ) -> Poll<Result<(), TransportError>> {
-        let msg = MsgUnimplemented {
-            packet_number: self.transmitter.packets_received() as u32,
-        };
-        let _ = self.transmitter.poll_send(cx, &msg);
-        let _ = self.transmitter.poll_flush(cx);
-        return Poll::Ready(Err(TransportError::MessageUnexpected));
-    }
 }
 
 #[cfg(test)]
-mod test {
+mod tests {
     //use super::*;
 }

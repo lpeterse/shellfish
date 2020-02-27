@@ -18,34 +18,25 @@ use crate::role::*;
 use crate::service::Service;
 use crate::transport::*;
 
-use async_std::net::TcpStream;
-
 /// The `ssh-userauth` service negotiates and performs methods of user authentication between
 /// client and server.
 ///
 /// The service is a short-lived proxy that is only used to lift other services into an
 /// authenticated context.
-pub struct UserAuth<R: Role> {
-    transport: Transport<R, TcpStream>,
-}
+pub struct UserAuth {}
 
-impl<R: Role> Service<R> for UserAuth<R> {
-    const NAME: &'static str = "ssh-userauth";
+impl UserAuth {
+    pub const NAME: &'static str = "ssh-userauth";
 
-    fn new(_config: &R::Config, transport: Transport<R, TcpStream>) -> Self {
-        Self { transport }
-    }
-}
-
-impl UserAuth<Client> {
     /// Request another service with user authentication.
-    pub async fn authenticate<S: Service<Client>>(
-        mut self,
+    pub async fn authenticate<S: Socket, T: Service<Client>>(
+        transport: Transport<Client, S>,
         config: &<Client as Role>::Config,
         user: &str,
         agent: Option<Agent>,
-    ) -> Result<S, UserAuthError> {
-        let service = <S as Service<Client>>::NAME;
+    ) -> Result<T, UserAuthError> {
+        let mut transport = transport.request_service(Self::NAME).await?;
+        let service = <T as Service<Client>>::NAME;
         let agent = agent.ok_or(UserAuthError::NoMoreAuthMethods)?;
         let identities = agent.identities().await?;
 
@@ -53,27 +44,25 @@ impl UserAuth<Client> {
             log::debug!("Trying identity {}: {}", comment, id.algorithm());
             let success = match id {
                 HostIdentity::Ed25519Key(x) => {
-                    (&mut self)
-                        .try_pubkey::<SshEd25519>(&agent, service, user, x)
+                    Self::try_pubkey::<S, SshEd25519>(&mut transport, &agent, service, user, x)
                         .await?
                 }
                 HostIdentity::Ed25519Cert(x) => {
-                    (&mut self)
-                        .try_pubkey::<SshEd25519Cert>(&agent, service, user, x)
+                    Self::try_pubkey::<S, SshEd25519Cert>(&mut transport, &agent, service, user, x)
                         .await?
                 }
                 _ => false,
             };
             if success {
-                return Ok(<S as Service<Client>>::new(config, self.transport));
+                return Ok(<T as Service<Client>>::new(config, transport));
             }
         }
 
         Err(UserAuthError::NoMoreAuthMethods)
     }
 
-    async fn try_pubkey<A>(
-        &mut self,
+    async fn try_pubkey<S: Socket, A>(
+        transport: &mut Transport<Client, S>,
         agent: &Agent,
         service: &str,
         user: &str,
@@ -84,7 +73,7 @@ impl UserAuth<Client> {
         A::Identity: Clone + Encode,
         A::Signature: Encode + Decode,
     {
-        let session_id = &self.transport.session_id().unwrap();
+        let session_id = &transport.session_id();
         let data: SignatureData<A> = SignatureData {
             session_id,
             user_name: user,
@@ -104,22 +93,19 @@ impl UserAuth<Client> {
                 signature: Some(signature),
             },
         };
-        self.transport.send(&msg).await?;
-        self.transport.flush().await?;
-        self.transport.receive().await?;
-        match self.transport.decode() {
+        transport.send(&msg).await?;
+        transport.flush().await?;
+        transport.receive().await?;
+        match transport.decode() {
             Some(x) => {
                 let _: MsgSuccess = x;
-                self.transport.consume();
+                transport.consume();
                 return Ok(true);
             }
             None => (),
         }
-        let _: MsgFailure = self
-            .transport
-            .decode_ref()
-            .ok_or(TransportError::DecoderError)?;
-        self.transport.consume();
+        let _: MsgFailure = transport.decode_ref().ok_or(TransportError::DecoderError)?;
+        transport.consume();
         return Ok(false);
     }
 }
