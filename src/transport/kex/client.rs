@@ -6,6 +6,7 @@ use crate::algorithm::*;
 use std::time::Duration;
 
 pub struct ClientKex {
+    hostname: String,
     local_id: Identification<&'static str>,
     remote_id: Identification<String>,
     interval_bytes: u64,
@@ -26,8 +27,9 @@ pub struct ClientKex {
 impl ClientKex {
     pub fn new<C: TransportConfig>(
         config: &C,
-        remote_id: Identification<String>,
         verifier: Arc<Box<dyn HostKeyVerifier>>,
+        hostname: String,
+        remote_id: Identification<String>,
     ) -> Self {
         let ka = intersection(config.kex_algorithms(), &KEX_ALGORITHMS[..]);
         let ma = intersection(config.mac_algorithms(), &MAC_ALGORITHMS[..]);
@@ -35,6 +37,7 @@ impl ClientKex {
         let ea = intersection(config.encryption_algorithms(), &ENCRYPTION_ALGORITHMS[..]);
         let ca = intersection(config.compression_algorithms(), &COMPRESSION_ALGORITHMS[..]);
         let mut self_ = Self {
+            hostname,
             local_id: config.identification().clone(),
             remote_id,
             interval_bytes: config.kex_interval_bytes(),
@@ -154,8 +157,8 @@ impl Kex for ClientKex {
                         &ecdh.server_init,
                         KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id),
                     )?;
-                    let ver = self.verifier.verify(&msg.host_key);
-                    self.state = Some(Box::new(State::HostKeyVerification((ver, enc, dec))));
+                    let verified = self.verifier.verify(&self.hostname, &msg.host_key);
+                    self.state = Some(Box::new(State::HostKeyVerification((verified, enc, dec))));
                 }
                 _ => Err(TransportError::ProtocolError)?,
             },
@@ -216,8 +219,8 @@ impl Kex for ClientKex {
                             continue;
                         }
                     }
-                    State::HostKeyVerification((ver, enc_config, dec_config)) => {
-                        ready!(ver.poll_unpin(cx))?;
+                    State::HostKeyVerification((verified, enc_config, dec_config)) => {
+                        ready!(verified.poll_unpin(cx))?;
                         self.state = Some(Box::new(State::NewKeys((
                             enc_config.clone(),
                             dec_config.clone(),

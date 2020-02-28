@@ -80,12 +80,14 @@ impl<S: Socket> Transport<Client, S> {
     /// function does not return an error.
     pub async fn new<C: TransportConfig>(
         config: &C,
-        host_key_verifier: Arc<Box<dyn HostKeyVerifier>>,
+        verifier: Arc<Box<dyn HostKeyVerifier>>,
+        hostname: String,
         socket: S,
     ) -> Result<Self, TransportError> {
-        let verifier = host_key_verifier.clone();
+        let verifier = verifier.clone();
         let transmitter = Transmitter::new(config, socket).await?;
-        let kex = ClientKex::new(config, transmitter.remote_id().clone(), verifier);
+        let id = transmitter.remote_id().clone();
+        let kex = ClientKex::new(config, verifier, hostname, id);
         let mut transport = Self { transmitter, kex };
         transport.rekey().await?;
         Ok(transport)

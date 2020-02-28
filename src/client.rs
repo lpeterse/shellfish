@@ -5,35 +5,37 @@ pub use self::config::*;
 pub use self::error::*;
 
 use crate::agent::Agent;
+use crate::host_key_verification::*;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
 use crate::transport::*;
-use crate::host_key_verification::*;
 
 use async_std::net::TcpStream;
-use async_std::net::ToSocketAddrs;
 use std::sync::Arc;
 
 pub struct Client {
     config: ClientConfig,
     username: Option<String>,
     agent: Option<Agent>,
-    host_key_verifier: Arc<Box<dyn HostKeyVerifier>>,
+    hostkey_verifier: Arc<Box<dyn HostKeyVerifier>>,
 }
 
 impl Client {
-    pub async fn connect<A: ToSocketAddrs>(
-        &self,
-        addr: A,
-    ) -> Result<Connection<Self>, ClientError> {
+    pub async fn connect<H: HostName>(&self, host: H) -> Result<Connection<Self>, ClientError> {
         let e = ClientError::ConnectError;
-        let socket = TcpStream::connect(addr).await.map_err(e)?;
-        self.handle(socket).await
+        let hostname = host.name();
+        let socket = TcpStream::connect(host).await.map_err(e)?;
+        self.handle(hostname, socket).await
     }
 
-    pub async fn handle<S: Socket>(&self, socket: S) -> Result<Connection<Self>, ClientError> {
-        let v = self.host_key_verifier.clone();
-        let t = Transport::<Client, S>::new(&self.config, v, socket).await?;
+    pub async fn handle<S: Socket>(
+        &self,
+        hostname: String,
+        socket: S,
+    ) -> Result<Connection<Self>, ClientError> {
+        let verifier = self.hostkey_verifier.clone();
+        let t = Transport::<Client, S>::new(&self.config, verifier, hostname, socket).await?;
+        log::error!("ABC");
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, &self.config, user, self.agent.clone()).await?,
             None => Connection::request(t, &self.config).await?,
@@ -52,8 +54,8 @@ impl Client {
         &mut self.agent
     }
 
-    pub fn host_key_verifier(&mut self) -> &mut Arc<Box<dyn HostKeyVerifier>> {
-        &mut self.host_key_verifier
+    pub fn hostkey_verifier(&mut self) -> &mut Arc<Box<dyn HostKeyVerifier>> {
+        &mut self.hostkey_verifier
     }
 }
 
@@ -65,7 +67,7 @@ impl Default for Client {
                 .or_else(|_| std::env::var("USER"))
                 .ok(),
             agent: Agent::new_env(),
-            host_key_verifier: Arc::new(Box::new(IgnorantVerifier {})),
+            hostkey_verifier: Arc::new(Box::new(AcceptingVerifier {})),
         }
     }
 }
