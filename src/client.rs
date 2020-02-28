@@ -8,6 +8,7 @@ use crate::agent::Agent;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
 use crate::transport::*;
+use crate::host_key_verification::*;
 
 use async_std::net::TcpStream;
 use async_std::net::ToSocketAddrs;

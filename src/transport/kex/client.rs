@@ -2,7 +2,6 @@ use super::super::config::*;
 use super::kex::*;
 use crate::algorithm::kex::*;
 use crate::algorithm::*;
-use crate::util::*;
 
 use std::time::Duration;
 
@@ -139,9 +138,6 @@ impl Kex for ClientKex {
                     .sha256();
                     // Verify the host key signature
                     msg.signature.verify(&msg.host_key, &h[..])?;
-                    // Verify the host key
-                    let verified = self.verifier.verify(&msg.host_key);
-                    assume(verified).ok_or(TransportError::HostKeyUnverifiable)?;
                     // The session id is only computed during first kex and constant afterwards
                     self.session_id.update(h);
                     let enc = CipherConfig::new_client_to_server(
@@ -158,7 +154,8 @@ impl Kex for ClientKex {
                         &ecdh.server_init,
                         KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id),
                     )?;
-                    self.state = Some(Box::new(State::NewKeys((enc, dec))));
+                    let ver = self.verifier.verify(&msg.host_key);
+                    self.state = Some(Box::new(State::HostKeyVerification((ver, enc, dec))));
                 }
                 _ => Err(TransportError::ProtocolError)?,
             },
@@ -219,6 +216,14 @@ impl Kex for ClientKex {
                             continue;
                         }
                     }
+                    State::HostKeyVerification((ver, enc_config, dec_config)) => {
+                        ready!(ver.poll_unpin(cx))?;
+                        self.state = Some(Box::new(State::NewKeys((
+                            enc_config.clone(),
+                            dec_config.clone(),
+                        ))));
+                        continue;
+                    }
                     State::NewKeys((enc_config, dec_config)) => {
                         ready!(send(cx, &KexOutput::NewKeys(enc_config.clone())))?;
                         self.state = Some(Box::new(State::NewKeysSent(dec_config.clone())));
@@ -245,6 +250,7 @@ impl Kex for ClientKex {
 enum State {
     Init(Init),
     Ecdh(Ecdh<X25519>),
+    HostKeyVerification((VerificationFuture, EncryptionConfig, DecryptionConfig)),
     NewKeys((EncryptionConfig, DecryptionConfig)),
     NewKeysSent(DecryptionConfig),
     NewKeysReceived(EncryptionConfig),

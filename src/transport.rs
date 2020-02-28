@@ -6,7 +6,6 @@ pub(crate) mod cookie;
 pub(crate) mod ecdh_algorithm;
 pub(crate) mod ecdh_hash;
 pub(crate) mod error;
-pub(crate) mod host_key_verification;
 pub(crate) mod identification;
 pub(crate) mod kex;
 pub(crate) mod key_streams;
@@ -27,7 +26,6 @@ pub(crate) mod transmitter;
 
 pub use self::config::*;
 pub use self::error::*;
-pub use self::host_key_verification::*;
 pub use self::identification::*;
 pub use self::session_id::*;
 pub use self::socket::*;
@@ -47,6 +45,7 @@ use self::packet::*;
 
 use crate::client::Client;
 use crate::codec::*;
+use crate::host_key_verification::*;
 use crate::role::*;
 use crate::server::Server;
 

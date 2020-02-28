@@ -2,6 +2,7 @@ use super::*;
 
 use crate::algorithm::authentication::*;
 use crate::transport::msg_disconnect::Reason;
+use crate::host_key_verification::*;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TransportError {
@@ -11,7 +12,7 @@ pub enum TransportError {
     ProtocolError,
     BadPacketLength,
     InvalidSignature,
-    HostKeyUnverifiable,
+    HostKeyVerificationError(HostKeyVerificationError),
     MessageIntegrity,
     MessageUnexpected,
     MessageUnimplemented,
@@ -34,6 +35,12 @@ impl From<std::io::Error> for TransportError {
 impl From<SignatureError> for TransportError {
     fn from(_: SignatureError) -> Self {
         Self::InvalidSignature
+    }
+}
+
+impl From<HostKeyVerificationError> for TransportError {
+    fn from(e: HostKeyVerificationError) -> Self {
+        Self::HostKeyVerificationError(e)
     }
 }
 
