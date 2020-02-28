@@ -117,9 +117,6 @@ impl HostSignature {
     ///
     /// Returns error in case the algorithms do not match or the signature is invalid.
     pub fn verify(&self, id: &HostIdentity, data: &[u8]) -> Result<(), SignatureError> {
-        log::error!("{:?}", self);
-        log::error!("{:?}", id);
-        log::error!("{:?}", data);
         match (self, id) {
             (Self::Ed25519Signature(s), HostIdentity::Ed25519Key(i)) => {
                 use ed25519_dalek::{PublicKey, Signature};

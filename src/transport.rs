@@ -61,6 +61,7 @@ use futures_timer::Delay;
 use std::convert::From;
 use std::option::Option;
 use std::pin::Pin;
+use std::sync::Arc;
 
 /// Implements the transport layer as described in RFC 4253.
 ///
@@ -70,17 +71,22 @@ use std::pin::Pin;
 /// implementation is chosen at compile time dependant on the role parameter.
 pub struct Transport<R: Role, S: Socket = TcpStream> {
     transmitter: Transmitter<S>,
-    kex: <R as Role>::KexMachine,
+    kex: <R as Role>::Kex,
 }
 
-impl <S: Socket> Transport<Client, S> {
+impl<S: Socket> Transport<Client, S> {
     /// Create a new transport.
     ///
     /// The initial key exchange has been completed successfully when this
     /// function does not return an error.
-    pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
+    pub async fn new<C: TransportConfig>(
+        config: &C,
+        host_key_verifier: Arc<Box<dyn HostKeyVerifier>>,
+        socket: S,
+    ) -> Result<Self, TransportError> {
+        let verifier = host_key_verifier.clone();
         let transmitter = Transmitter::new(config, socket).await?;
-        let kex = <Client as Role>::KexMachine::new(config, transmitter.remote_id().clone());
+        let kex = ClientKex::new(config, transmitter.remote_id().clone(), verifier);
         let mut transport = Self { transmitter, kex };
         transport.rekey().await?;
         Ok(transport)

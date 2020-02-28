@@ -1,13 +1,14 @@
-use super::super::config::*;
 use super::kex::*;
 
-pub struct ServerKexMachine {}
+pub struct ServerKex {}
 
-impl KexMachine for ServerKexMachine {
-    // Create new with initial state.
-    fn new<C: TransportConfig>(config: &C, remote_id: Identification<String>) -> Self {
-        unimplemented!()
+impl ServerKex {
+    pub fn new() -> Self {
+        Self {}
     }
+}
+
+impl Kex for ServerKex {
     fn init(&mut self) {
         unimplemented!()
     }
@@ -40,9 +41,10 @@ impl KexMachine for ServerKexMachine {
         f: F,
     ) -> Poll<Result<(), TransportError>>
     where
-        F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>> {
-            unimplemented!()
-        }
+        F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>>,
+    {
+        unimplemented!()
+    }
     fn session_id(&self) -> &SessionId {
         unimplemented!()
     }

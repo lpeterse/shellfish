@@ -2,7 +2,6 @@ mod client;
 mod server;
 
 pub use self::client::*;
-pub use self::server::*;
 pub use self::cookie::*;
 pub use self::ecdh_algorithm::*;
 pub use self::ecdh_hash::*;
@@ -10,17 +9,15 @@ pub use self::msg_ecdh_init::*;
 pub use self::msg_ecdh_reply::*;
 pub use self::msg_kex_init::*;
 pub use self::msg_new_keys::*;
+pub use self::server::*;
 pub use super::transmitter::*;
 
-use super::config::*;
 use super::*;
 
 use futures::task::Poll;
 
 /// A state machine for key exchange.
-pub trait KexMachine {
-    // Create new with initial state.
-    fn new<C: TransportConfig>(config: &C, remote_id: Identification<String>) -> Self;
+pub trait Kex {
     fn init(&mut self);
     fn is_active(&self) -> bool;
     fn is_sending_critical(&self) -> bool;

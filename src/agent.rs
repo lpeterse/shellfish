@@ -22,6 +22,7 @@ use crate::codec::*;
 
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
+use async_std::os::unix::net::UnixStream;
 
 /// An interface to the local `ssh-agent`.
 #[derive(Clone)]
@@ -48,7 +49,7 @@ impl Agent {
 
     /// Request a list of identities from the agent.
     pub async fn identities(&self) -> Result<Vec<(HostIdentity, String)>, AgentError> {
-        let mut t = Transmitter::new(&self.path).await?;
+        let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
         t.send(&MsgIdentitiesRequest {}).await?;
         t.receive::<MsgIdentitiesAnswer>()
             .await
@@ -75,9 +76,12 @@ impl Agent {
             data,
             flags,
         };
-        let mut t = Transmitter::new(&self.path).await?;
+        let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
         t.send(&msg).await?;
-        match t.receive::<Result<MsgSignResponse<S>, MsgFailure>>().await? {
+        match t
+            .receive::<Result<MsgSignResponse<S>, MsgFailure>>()
+            .await?
+        {
             Ok(x) => Ok(Some(x.signature)),
             Err(_) => Ok(None),
         }

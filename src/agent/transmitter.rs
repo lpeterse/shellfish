@@ -1,42 +1,41 @@
 use super::*;
 use crate::util::*;
+use crate::transport::Socket;
 
 use async_std::io::prelude::WriteExt;
-use async_std::io::ReadExt;
 use async_std::os::unix::net::UnixStream;
 
-pub struct Transmitter {
-    stream: UnixStream,
+pub struct Transmitter<S: Socket = UnixStream> {
+    socket: S,
 }
 
-impl Transmitter {
+impl <S: Socket> Transmitter<S> {
     const MAX_FRAME_LEN: usize = 35000;
-
-    pub async fn new(path: &PathBuf) -> Result<Self, AgentError> {
-        Ok(Self {
-            stream: UnixStream::connect(&path).await?,
-        })
-    }
 
     pub async fn send<Msg: Encode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
         let vec = BEncoder::encode(&Frame::new(msg));
-        self.stream.write_all(&vec).await?;
+        self.socket.write_all(&vec).await?;
         Ok(())
     }
 
     pub async fn receive<Msg: Decode>(&mut self) -> Result<Msg, AgentError> {
         let mut len: [u8; 4] = [0; 4];
-        self.stream.read_exact(&mut len[..]).await?;
+        self.socket.read_exact(&mut len[..]).await?;
         let len = u32::from_be_bytes(len) as usize;
         assume(len <= Self::MAX_FRAME_LEN).ok_or(AgentError::FrameError)?;
         let mut vec = Vec::with_capacity(len);
         vec.resize(len, 0);
-        self.stream.read_exact(&mut vec[..]).await?;
+        self.socket.read_exact(&mut vec[..]).await?;
         BDecoder::decode(&vec).ok_or(AgentError::DecoderError)
     }
 }
 
-/*
+impl <S: Socket> From<S> for Transmitter<S> {
+    fn from(socket: S) -> Self {
+        Self { socket }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -54,6 +53,8 @@ mod tests {
         path
     }
 
+}
+/*
     /// Tests opening the domain socket (happy path)
     #[test]
     fn test_new_01() {
@@ -68,6 +69,7 @@ mod tests {
         let _ = std::fs::remove_file(path);
         x.unwrap()
     }
+
 
     /// Tests opening the domain socket (connection refused)
     #[test]

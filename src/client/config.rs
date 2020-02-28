@@ -1,6 +1,6 @@
 use crate::algorithm::*;
-use crate::transport::*;
 use crate::service::connection::ConnectionConfig;
+use crate::transport::*;
 
 use std::time::Duration;
 
@@ -10,7 +10,7 @@ pub struct ClientConfig {
     /// Defaults to `SSH-2.0-${CARGO_PKG_NAME}_${CARGO_PKG_VERSION}`.
     pub identification: Identification<&'static str>,
     /// The timespan within which the remote identification string must have been received.
-    /// 
+    ///
     /// Defaults to 10s.
     pub identification_timeout: Duration,
     /// The maximum number of bytes (inbound or outbound) after which a rekeying is initiated.
@@ -53,7 +53,7 @@ pub struct ClientConfig {
     /// Defaults to the empty list.
     pub mac_algorithms: Vec<&'static str>,
     /// The maximum number of local channels.
-    /// 
+    ///
     /// Defaults to 256.
     pub channel_max_count: u32,
 }
@@ -67,11 +67,11 @@ impl Default for ClientConfig {
             kex_interval_duration: Duration::from_secs(3600),
             alive_interval: Duration::from_secs(300),
             inactivity_timeout: Duration::from_secs(3600),
-            kex_algorithms: SUPPORTED_KEX_ALGORITHMS.to_vec(),
-            host_key_algorithms: SUPPORTED_HOST_KEY_ALGORITHMS.to_vec(),
-            encryption_algorithms: SUPPORTED_ENCRYPTION_ALGORITHMS.to_vec(),
-            compression_algorithms: SUPPORTED_COMPRESSION_ALGORITHMS.to_vec(),
-            mac_algorithms: SUPPORTED_MAC_ALGORITHMS.to_vec(),
+            kex_algorithms: KEX_ALGORITHMS.to_vec(),
+            host_key_algorithms: HOST_KEY_ALGORITHMS.to_vec(),
+            encryption_algorithms: ENCRYPTION_ALGORITHMS.to_vec(),
+            compression_algorithms: COMPRESSION_ALGORITHMS.to_vec(),
+            mac_algorithms: MAC_ALGORITHMS.to_vec(),
             channel_max_count: 256,
         }
     }
@@ -132,11 +132,11 @@ mod tests {
         assert_eq!(c.kex_interval_duration(), Duration::from_secs(3600));
         assert_eq!(c.alive_interval(), Duration::from_secs(300));
         assert_eq!(c.inactivity_timeout(), Duration::from_secs(3600));
-        assert_eq!(c.kex_algorithms(), &SUPPORTED_KEX_ALGORITHMS.to_vec());
-        assert_eq!(c.host_key_algorithms(), &SUPPORTED_HOST_KEY_ALGORITHMS.to_vec());
-        assert_eq!(c.encryption_algorithms(), &SUPPORTED_ENCRYPTION_ALGORITHMS.to_vec());
-        assert_eq!(c.compression_algorithms(), &SUPPORTED_COMPRESSION_ALGORITHMS.to_vec());
-        assert_eq!(c.mac_algorithms(), &SUPPORTED_MAC_ALGORITHMS.to_vec());
+        assert_eq!(c.kex_algorithms(), &KEX_ALGORITHMS.to_vec());
+        assert_eq!(c.host_key_algorithms(), &HOST_KEY_ALGORITHMS.to_vec());
+        assert_eq!(c.encryption_algorithms(), &ENCRYPTION_ALGORITHMS.to_vec());
+        assert_eq!(c.compression_algorithms(), &COMPRESSION_ALGORITHMS.to_vec());
+        assert_eq!(c.mac_algorithms(), &MAC_ALGORITHMS.to_vec());
         assert_eq!(c.channel_max_count(), 256);
     }
 }

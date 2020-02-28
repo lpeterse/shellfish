@@ -20,7 +20,7 @@ fn main() {
     env_logger::init();
 
     futures::executor::block_on(async move {
-        let mut client = Client::default();
+        let client = Client::default();
         match client.connect("localhost:22").await {
             Err(e) => log::error!("{:?}", e),
             Ok(conn) => {

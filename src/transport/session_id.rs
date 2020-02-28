@@ -52,6 +52,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn test_update_01() {
+        let mut x = SessionId::default();
+        x.update([1;32]);
+        assert_eq!(x.as_ref(), [1;32]);
+    }
+
+    #[test]
+    fn test_update_02() {
+        let mut x = SessionId::default();
+        x.update([1;32]);
+        x.update([2;32]);
+        assert_eq!(x.as_ref(), [1;32]);
+    }
+
+    #[test]
     fn test_debug_01() {
         let x = SessionId::new([
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,

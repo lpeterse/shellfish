@@ -19,4 +19,14 @@ mod tests {
     fn test_debug_01() {
         assert_eq!("FrameError", format!("{:?}", AgentError::FrameError));
     }
+
+    #[test]
+    fn test_from_io_error() {
+        let e = std::io::Error::new(std::io::ErrorKind::Other, "");
+        let e: AgentError = e.into();
+        match e {
+            AgentError::IoError(_) => (),
+            _ => panic!()
+        }
+    }
 }

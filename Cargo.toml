@@ -21,6 +21,6 @@ ed25519-dalek = "1.0.0-pre.3"
 
 [profile.release]
 lto = true
-panic = "abort"
-opt-level = "z"
-codegen-units = 1
+#panic = "abort"
+#opt-level = "z"
+#codegen-units = 1

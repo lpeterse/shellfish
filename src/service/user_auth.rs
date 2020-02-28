@@ -29,13 +29,13 @@ impl UserAuth {
     pub const NAME: &'static str = "ssh-userauth";
 
     /// Request another service with user authentication.
-    pub async fn authenticate<S: Socket, T: Service<Client>>(
+    pub async fn request<S: Socket, T: Service<Client>>(
         transport: Transport<Client, S>,
         config: &<Client as Role>::Config,
         user: &str,
         agent: Option<Agent>,
     ) -> Result<T, UserAuthError> {
-        let mut transport = transport.request_service(Self::NAME).await?;
+        let mut t = transport.request_service(Self::NAME).await?;
         let service = <T as Service<Client>>::NAME;
         let agent = agent.ok_or(UserAuthError::NoMoreAuthMethods)?;
         let identities = agent.identities().await?;
@@ -44,17 +44,15 @@ impl UserAuth {
             log::debug!("Trying identity {}: {}", comment, id.algorithm());
             let success = match id {
                 HostIdentity::Ed25519Key(x) => {
-                    Self::try_pubkey::<S, SshEd25519>(&mut transport, &agent, service, user, x)
-                        .await?
+                    Self::try_pubkey::<S, SshEd25519>(&mut t, &agent, service, user, x).await?
                 }
                 HostIdentity::Ed25519Cert(x) => {
-                    Self::try_pubkey::<S, SshEd25519Cert>(&mut transport, &agent, service, user, x)
-                        .await?
+                    Self::try_pubkey::<S, SshEd25519Cert>(&mut t, &agent, service, user, x).await?
                 }
                 _ => false,
             };
             if success {
-                return Ok(<T as Service<Client>>::new(config, transport));
+                return Ok(<T as Service<Client>>::new(config, t));
             }
         }
 
