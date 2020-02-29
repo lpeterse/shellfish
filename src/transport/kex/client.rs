@@ -72,23 +72,23 @@ impl Kex for ClientKex {
         self.state.is_some()
     }
 
-    //FIXME
     fn is_sending_critical(&self) -> bool {
         match self.state {
             None => false,
             Some(ref x) => match x.as_ref() {
                 State::Init(ref x) => x.client_init.is_some(),
+                State::NewKeysSent(_) => false,
                 _ => true,
             },
         }
     }
 
-    //FIXME
     fn is_receiving_critical(&self) -> bool {
         match self.state {
             None => false,
             Some(ref x) => match x.as_ref() {
                 State::Init(ref x) => x.server_init.is_some(),
+                State::NewKeysReceived(_) => false,
                 _ => true,
             },
         }
@@ -157,18 +157,19 @@ impl Kex for ClientKex {
                     msg.signature.verify(&msg.host_key, &h[..])?;
                     // The session id is only computed during first kex and constant afterwards
                     self.session_id.update(h);
-                    let keys = KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id);
+                    let keys =
+                        KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id);
                     let enc = CipherConfig {
                         ea: ecdh.algos.ea_c2s,
                         ca: ecdh.algos.ca_c2s,
                         ma: ecdh.algos.ma_c2s,
-                        ke: keys.c()
+                        ke: keys.c(),
                     };
                     let dec = CipherConfig {
                         ea: ecdh.algos.ea_c2s,
                         ca: ecdh.algos.ca_c2s,
                         ma: ecdh.algos.ma_c2s,
-                        ke: keys.d()
+                        ke: keys.d(),
                     };
                     let verified = self.verifier.verify(&self.hostname, &msg.host_key);
                     self.state = Some(Box::new(State::HostKeyVerification((verified, enc, dec))));
@@ -311,7 +312,7 @@ mod tests {
     use crate::client::*;
 
     #[test]
-    fn test_kex_client_new() {
+    fn test_client_kex_new() {
         let mut config = ClientConfig::default();
         config.kex_interval_bytes = 1234;
         config.kex_interval_duration = std::time::Duration::from_secs(1235);
@@ -345,5 +346,114 @@ mod tests {
         assert_eq!(kex.encryption_algorithms, f(config.encryption_algorithms));
         assert_eq!(kex.compression_algorithms, f(config.compression_algorithms));
         assert!(kex.state.is_none());
+    }
+
+    #[test]
+    fn test_client_kex_is_active_01() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        assert!(!kex.is_active());
+        kex.init();
+        assert!(kex.is_active());
+    }
+
+    #[test]
+    fn test_client_kex_is_sending_critical_01() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ri = MsgKexInit::<String>::new(c.clone(), vec![], vec![], vec![], vec![], vec![]);
+        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
+        let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
+        let cc = CipherConfig {
+            ea: "",
+            ca: "",
+            ma: None,
+            ke: ks.c(),
+        };
+
+        // Shall not be critical after creation
+        assert!(!kex.is_sending_critical());
+        // Shall not be critical after init
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: None,
+            server_init: None,
+        })));
+        assert!(!kex.is_sending_critical());
+        // Shall be critical after MSG_KEX_INIT was sent
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: Some(ci),
+            server_init: None,
+        })));
+        assert!(kex.is_sending_critical());
+        // Shall not be critical after MSG_KEX_INIT was received
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: None,
+            server_init: Some(ri),
+        })));
+        assert!(!kex.is_sending_critical());
+        // Shall be critical while MGS_NEWKEYS neither sent nor received
+        kex.state = Some(Box::new(State::NewKeys((cc.clone(), cc.clone()))));
+        assert!(kex.is_sending_critical());
+        // Shall be critical while MGS_NEWKEYS received but not sent
+        kex.state = Some(Box::new(State::NewKeysReceived(cc.clone())));
+        assert!(kex.is_sending_critical());
+        // Shall not be critical after MSG_NEWKEYS was sent
+        kex.state = Some(Box::new(State::NewKeysSent(cc)));
+        assert!(!kex.is_sending_critical());
+    }
+
+    #[test]
+    fn test_client_kex_is_receiving_critical_01() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ri = MsgKexInit::<String>::new(c.clone(), vec![], vec![], vec![], vec![], vec![]);
+        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
+        let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
+        let cc = CipherConfig {
+            ea: "",
+            ca: "",
+            ma: None,
+            ke: ks.c(),
+        };
+
+        // Shall not be critical after creation
+        assert!(!kex.is_receiving_critical());
+        // Shall not be critical after init
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: None,
+            server_init: None,
+        })));
+        assert!(!kex.is_receiving_critical());
+        // Shall not be critical after MSG_KEX_INIT was sent
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: Some(ci),
+            server_init: None,
+        })));
+        assert!(!kex.is_receiving_critical());
+        // Shall be critical after MSG_KEX_INIT was received
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: None,
+            server_init: Some(ri),
+        })));
+        assert!(kex.is_receiving_critical());
+        // Shall be critical while MGS_NEWKEYS neither sent nor received
+        kex.state = Some(Box::new(State::NewKeys((cc.clone(), cc.clone()))));
+        assert!(kex.is_receiving_critical());
+        // Shall not be critical while MGS_NEWKEYS received but not sent
+        kex.state = Some(Box::new(State::NewKeysReceived(cc.clone())));
+        assert!(!kex.is_receiving_critical());
+        // Shall be critical after MSG_NEWKEYS was sent
+        kex.state = Some(Box::new(State::NewKeysSent(cc)));
+        assert!(kex.is_receiving_critical());
     }
 }

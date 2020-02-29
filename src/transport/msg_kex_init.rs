@@ -18,14 +18,14 @@ pub struct MsgKexInit<T = String> {
     pub first_packet_follows: bool,
 }
 
-impl MsgKexInit<&'static str> {
+impl <T: Clone> MsgKexInit<T> {
     pub fn new(
         cookie: KexCookie,
-        kex_algorithms: Vec<&'static str>,
-        server_host_key_algorithms: Vec<&'static str>,
-        encryption_algorithms: Vec<&'static str>,
-        mac_algorithms: Vec<&'static str>,
-        compression_algorithms: Vec<&'static str>,
+        kex_algorithms: Vec<T>,
+        server_host_key_algorithms: Vec<T>,
+        encryption_algorithms: Vec<T>,
+        mac_algorithms: Vec<T>,
+        compression_algorithms: Vec<T>,
     ) -> Self {
         Self {
             cookie: cookie,
@@ -114,7 +114,7 @@ mod tests {
 
     #[test]
     fn test_new_01() {
-        let msg1 = MsgKexInit::new(
+        let msg1: MsgKexInit<String> = MsgKexInit::new(
             KexCookie([0; 16]),
             vec!["kex".into()],
             vec!["hk".into()],
