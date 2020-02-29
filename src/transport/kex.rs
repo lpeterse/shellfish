@@ -178,30 +178,44 @@ mod tests {
         assert_eq!(common(&xs, &ys), Some("abc"))
     }
 
-    /*
     #[test]
-    fn test_cipher_config_new_c2s_ok() {
-        let ka = vec![];
-        let ha = vec![];
-        let ea = vec!["ea2".into(), "ea1".into()];
-        let ma = vec!["ma2".into(), "ma1".into()];
-        let ca = vec!["ca2".into(), "ca1".into()];
-        let enc = vec!["ea1", "ea2"];
-        let cmp = vec!["ca1", "ca2"];
-        let mac = vec!["ma1", "ma2"];
-        let cookie = KexCookie::random();
-        let init = MsgKexInit::new(cookie, ka, ha, ea, ma, ca);
-        let keys = KeyStreams::new_sha256(&[0][..], &[0][..], SessionId::default());
-        match CipherConfig::new_client_to_server(&enc, &cmp, &mac, &init, keys) {
-            Ok(x) => {
-                assert_eq!(x.encryption_algorithm, "ea1");
-                assert_eq!(x.compression_algorithm, "ca1");
-                assert_eq!(x.mac_algorithm, Some("ma1"));
-            }
-            e => panic!("{:?}", e),
-        }
-    }*/
-
-    #[test]
-    fn test_cipher_config_new_s2c_01() {}
+    fn test_algorithm_agreement_01 () {
+        let client_init = MsgKexInit::<&'static str> {
+            cookie: KexCookie::random(),
+            kex_algorithms: vec!["ka", "ka_"],
+            server_host_key_algorithms: vec!["ha", "ha_"],
+            encryption_algorithms_client_to_server: vec!["ea_c2s", "ea_c2s_"],
+            encryption_algorithms_server_to_client: vec!["ea_s2c", "ea_s2c_"],
+            mac_algorithms_client_to_server: vec!["ma_c2s", "ma_c2s_"],
+            mac_algorithms_server_to_client: vec!["ma_s2c", "ma_s2c_"],
+            compression_algorithms_client_to_server: vec!["ca_c2s", "ca_c2s_"],
+            compression_algorithms_server_to_client: vec!["ca_s2c", "ca_s2c_"],
+            languages_client_to_server: vec![],
+            languages_server_to_client: vec![],
+            first_packet_follows: false,
+        };
+        let server_init = MsgKexInit {
+            cookie: KexCookie::random(),
+            kex_algorithms: vec!["ka_".into(), "ka".into()],
+            server_host_key_algorithms: vec!["ha_".into(), "ha".into()],
+            encryption_algorithms_client_to_server: vec!["ea_c2s_".into(), "ea_c2s".into()],
+            encryption_algorithms_server_to_client: vec!["ea_s2c_".into(), "ea_s2c".into()],
+            mac_algorithms_client_to_server: vec!["ma_c2s_".into(), "ma_c2s".into()],
+            mac_algorithms_server_to_client: vec!["ma_s2c_".into(), "ma_s2c".into()],
+            compression_algorithms_client_to_server: vec!["ca_c2s_".into(), "ca_c2s".into()],
+            compression_algorithms_server_to_client: vec!["ca_s2c_".into(), "ca_s2c".into()],
+            languages_client_to_server: vec![],
+            languages_server_to_client: vec![],
+            first_packet_follows: false,
+        };
+        let x = AlgorithmAgreement::agree(&client_init, &server_init).unwrap();
+        assert_eq!(x.ka, "ka");
+        assert_eq!(x.ha, "ha");
+        assert_eq!(x.ea_c2s, "ea_c2s");
+        assert_eq!(x.ea_s2c, "ea_s2c");
+        assert_eq!(x.ca_c2s, "ca_c2s");
+        assert_eq!(x.ca_s2c, "ca_s2c");
+        assert_eq!(x.ma_c2s, Some("ma_c2s"));
+        assert_eq!(x.ma_s2c, Some("ma_s2c"));
+    }
 }

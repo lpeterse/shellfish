@@ -370,10 +370,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 log::debug!("Received MSG_NEWKEYS");
                 let _: MsgNewKeys = msg;
                 let dec = self.kex.push_new_keys()?;
-                self.transmitter
-                    .decryption_ctx()
-                    .update(dec)
-                    .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+                let r = self.transmitter.decryption_ctx().update(dec);
+                r.ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 self.consume();
                 return Ok(true);
             }

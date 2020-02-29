@@ -114,6 +114,7 @@ impl<S: Socket> Transmitter<S> {
         packet.encode(&mut BEncoder::from(&mut buffer[..]));
         self.encryption_ctx.encrypt(self.packets_sent, buffer);
         self.packets_sent += 1;
+        self.bytes_sent += packet.size() as u64;
         self.reset_local_inactivity_timer(cx)?;
         Poll::Ready(Ok(()))
     }
@@ -176,6 +177,7 @@ impl<S: Socket> Transmitter<S> {
         let buffer_len = self.receiver_state.buffer_len;
         assert!(buffer_len != 0);
         self.packets_received += 1;
+        self.bytes_received += buffer_len as u64;
         self.receiver.consume(buffer_len);
         self.receiver_state.reset();
     }
