@@ -1,7 +1,7 @@
 use crate::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Identification<T> {
+pub struct Identification<T = String> {
     pub version: T,
     pub comment: T,
 }

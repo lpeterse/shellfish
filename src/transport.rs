@@ -45,7 +45,7 @@ use self::packet::*;
 
 use crate::client::Client;
 use crate::codec::*;
-use crate::host_key_verification::*;
+use crate::host::*;
 use crate::role::*;
 use crate::server::Server;
 
@@ -120,10 +120,19 @@ impl<R: Role, S: Socket> Transport<R, S> {
     }
 
     /// Initiate a rekeying and wait for it to complete.
-    /// FIXME: Why async?
     pub async fn rekey(&mut self) -> Result<(), TransportError> {
         self.kex.init();
-        Ok(())
+        poll_fn(|cx| {
+            while self.kex.is_active() {
+                ready!(self.poll_kex(cx))?;
+                ready!(self.transmitter.poll_receive(cx))?;
+                if !self.consume_transport_message()? {
+                    return self.poll_send_unimplemented(cx);
+                }
+            }
+            Poll::Ready(Ok(()))
+        })
+        .await
     }
 
     /// Send a message.
@@ -247,6 +256,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
 
     /// Try to send MSG_UNIMPLEMENTED and return `MessageUnexpected` error
     /// even in the presence of other errors (preserve the former).
+    /// Does not block even if the message cannot be sent.
     pub fn poll_send_unimplemented(
         &mut self,
         cx: &mut Context,
@@ -280,16 +290,11 @@ impl<R: Role, S: Socket> Transport<R, S> {
                     ready!(t.poll_send(cx, &msg))?;
                     log::debug!("Sent MSG_ECDH_REPLY");
                 }
-                KexOutput::NewKeys(c) => {
+                KexOutput::NewKeys(enc) => {
                     ready!(t.poll_send(cx, &MsgNewKeys {}))?;
                     log::debug!("Sent MSG_NEWKEYS");
                     t.encryption_ctx()
-                        .update(
-                            c.encryption_algorithm,
-                            c.compression_algorithm,
-                            c.mac_algorithm,
-                            &mut c.key_streams.clone().c(),
-                        )
+                        .update(enc)
                         .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 }
             }
@@ -364,13 +369,11 @@ impl<R: Role, S: Socket> Transport<R, S> {
             Some(msg) => {
                 log::debug!("Received MSG_NEWKEYS");
                 let _: MsgNewKeys = msg;
-                let mut config = self.kex.push_new_keys()?;
-                self.transmitter.decryption_ctx().update(
-                    config.encryption_algorithm,
-                    config.compression_algorithm,
-                    config.mac_algorithm,
-                    &mut config.key_streams.d(),
-                );
+                let dec = self.kex.push_new_keys()?;
+                self.transmitter
+                    .decryption_ctx()
+                    .update(dec)
+                    .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 self.consume();
                 return Ok(true);
             }

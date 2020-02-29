@@ -5,7 +5,7 @@ pub use self::config::*;
 pub use self::error::*;
 
 use crate::agent::Agent;
-use crate::host_key_verification::*;
+use crate::host::*;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
 use crate::transport::*;
@@ -35,7 +35,6 @@ impl Client {
     ) -> Result<Connection<Self>, ClientError> {
         let verifier = self.hostkey_verifier.clone();
         let t = Transport::<Client, S>::new(&self.config, verifier, hostname, socket).await?;
-        log::error!("ABC");
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, &self.config, user, self.agent.clone()).await?,
             None => Connection::request(t, &self.config).await?,

@@ -8,8 +8,7 @@ pub struct Transmitter<S> {
     sender: BufferedSender<WriteHalf<S>>,
     receiver: BufferedReceiver<ReadHalf<S>>,
     receiver_state: ReceiverState,
-    local_id: Identification<&'static str>,
-    remote_id: Identification<String>,
+    remote_id: Identification,
     bytes_sent: u64,
     packets_sent: u64,
     bytes_received: u64,
@@ -46,7 +45,6 @@ impl<S: Socket> Transmitter<S> {
             sender,
             receiver,
             receiver_state: ReceiverState::new(),
-            local_id: config.identification().clone(),
             remote_id,
             bytes_sent: 0,
             packets_sent: 0,
@@ -59,10 +57,6 @@ impl<S: Socket> Transmitter<S> {
             remote_inactivity_timer: Delay::new(config.inactivity_timeout()),
             remote_inactivity_timeout: config.inactivity_timeout(),
         })
-    }
-
-    pub fn local_id(&self) -> &Identification<&'static str> {
-        &self.local_id
     }
 
     pub fn remote_id(&self) -> &Identification<String> {

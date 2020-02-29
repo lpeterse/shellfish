@@ -3,29 +3,29 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct MsgKexInit {
+pub struct MsgKexInit<T = String> {
     pub cookie: KexCookie,
-    pub kex_algorithms: Vec<String>,
-    pub server_host_key_algorithms: Vec<String>,
-    pub encryption_algorithms_client_to_server: Vec<String>,
-    pub encryption_algorithms_server_to_client: Vec<String>,
-    pub mac_algorithms_client_to_server: Vec<String>,
-    pub mac_algorithms_server_to_client: Vec<String>,
-    pub compression_algorithms_client_to_server: Vec<String>,
-    pub compression_algorithms_server_to_client: Vec<String>,
-    pub languages_client_to_server: Vec<String>,
-    pub languages_server_to_client: Vec<String>,
+    pub kex_algorithms: Vec<T>,
+    pub server_host_key_algorithms: Vec<T>,
+    pub encryption_algorithms_client_to_server: Vec<T>,
+    pub encryption_algorithms_server_to_client: Vec<T>,
+    pub mac_algorithms_client_to_server: Vec<T>,
+    pub mac_algorithms_server_to_client: Vec<T>,
+    pub compression_algorithms_client_to_server: Vec<T>,
+    pub compression_algorithms_server_to_client: Vec<T>,
+    pub languages_client_to_server: Vec<T>,
+    pub languages_server_to_client: Vec<T>,
     pub first_packet_follows: bool,
 }
 
-impl MsgKexInit {
+impl MsgKexInit<&'static str> {
     pub fn new(
         cookie: KexCookie,
-        kex_algorithms: Vec<String>,
-        server_host_key_algorithms: Vec<String>,
-        encryption_algorithms: Vec<String>,
-        mac_algorithms: Vec<String>,
-        compression_algorithms: Vec<String>,
+        kex_algorithms: Vec<&'static str>,
+        server_host_key_algorithms: Vec<&'static str>,
+        encryption_algorithms: Vec<&'static str>,
+        mac_algorithms: Vec<&'static str>,
+        compression_algorithms: Vec<&'static str>,
     ) -> Self {
         Self {
             cookie: cookie,
@@ -44,11 +44,11 @@ impl MsgKexInit {
     }
 }
 
-impl Message for MsgKexInit {
+impl<T> Message for MsgKexInit<T> {
     const NUMBER: u8 = 20;
 }
 
-impl Encode for MsgKexInit {
+impl<T: AsRef<[u8]>> Encode for MsgKexInit<T> {
     fn size(&self) -> usize {
         1 + 16
             + 1
@@ -141,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgKexInit {
+        let msg: MsgKexInit<String> = MsgKexInit {
             cookie: KexCookie([0; 16]),
             kex_algorithms: vec!["kex".into()],
             server_host_key_algorithms: vec!["hk".into()],

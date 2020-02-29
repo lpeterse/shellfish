@@ -1,7 +1,7 @@
 pub mod agent;
 pub mod algorithm;
 pub mod client;
-pub mod host_key_verification;
+pub mod host;
 pub mod server;
 pub mod service;
 pub mod transport;

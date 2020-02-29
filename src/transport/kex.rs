@@ -34,66 +34,73 @@ pub trait Kex {
         f: F,
     ) -> Poll<Result<(), TransportError>>
     where
-        F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>>;
+        F: FnMut(&mut Context, KexOutput) -> Poll<Result<(), TransportError>>;
     fn session_id(&self) -> &SessionId;
 }
 
 pub enum KexOutput {
-    Init(MsgKexInit),
+    Init(MsgKexInit<&'static str>),
     EcdhInit(MsgKexEcdhInit<X25519>),
     EcdhReply(MsgKexEcdhReply<X25519>),
-    NewKeys(CipherConfig),
+    NewKeys(EncryptionConfig),
 }
-
-pub type EncryptionConfig = CipherConfig;
-pub type DecryptionConfig = CipherConfig;
 
 #[derive(Clone, Debug)]
-pub struct CipherConfig {
-    pub encryption_algorithm: &'static str,
-    pub compression_algorithm: &'static str,
-    pub mac_algorithm: Option<&'static str>,
-    pub key_streams: KeyStreams,
+pub struct AlgorithmAgreement {
+    pub ka: &'static str,
+    pub ha: &'static str,
+    pub ea_c2s: &'static str,
+    pub ea_s2c: &'static str,
+    pub ca_c2s: &'static str,
+    pub ca_s2c: &'static str,
+    pub ma_c2s: Option<&'static str>,
+    pub ma_s2c: Option<&'static str>,
 }
 
-impl CipherConfig {
-    pub fn new_client_to_server(
-        enc: &Vec<&'static str>,
-        comp: &Vec<&'static str>,
-        mac: &Vec<&'static str>,
+impl AlgorithmAgreement {
+    pub fn agree(
+        client_init: &MsgKexInit<&'static str>,
         server_init: &MsgKexInit,
-        key_streams: KeyStreams,
-    ) -> Result<Self, TransportError> {
-        Ok(Self {
-            encryption_algorithm: common(enc, &server_init.encryption_algorithms_client_to_server)
-                .ok_or(TransportError::NoCommonEncryptionAlgorithm)?,
-            compression_algorithm: common(
-                comp,
-                &server_init.compression_algorithms_client_to_server,
-            )
-            .ok_or(TransportError::NoCommonCompressionAlgorithm)?,
-            mac_algorithm: common(mac, &server_init.mac_algorithms_client_to_server),
-            key_streams,
-        })
-    }
+    ) -> Result<AlgorithmAgreement, TransportError> {
+        let ka = common(&client_init.kex_algorithms, &server_init.kex_algorithms);
+        let ha = common(
+            &client_init.server_host_key_algorithms,
+            &server_init.server_host_key_algorithms,
+        );
+        let ea_c2s = common(
+            &client_init.encryption_algorithms_client_to_server,
+            &server_init.encryption_algorithms_client_to_server,
+        );
+        let ea_s2c = common(
+            &client_init.encryption_algorithms_server_to_client,
+            &server_init.encryption_algorithms_server_to_client,
+        );
+        let ma_c2s = common(
+            &client_init.mac_algorithms_client_to_server,
+            &server_init.mac_algorithms_client_to_server,
+        );
+        let ma_s2c = common(
+            &client_init.mac_algorithms_server_to_client,
+            &server_init.mac_algorithms_server_to_client,
+        );
+        let ca_c2s = common(
+            &client_init.compression_algorithms_client_to_server,
+            &server_init.compression_algorithms_client_to_server,
+        );
+        let ca_s2c = common(
+            &client_init.compression_algorithms_server_to_client,
+            &server_init.compression_algorithms_server_to_client,
+        );
 
-    pub fn new_server_to_client(
-        enc: &Vec<&'static str>,
-        comp: &Vec<&'static str>,
-        mac: &Vec<&'static str>,
-        server_init: &MsgKexInit,
-        key_streams: KeyStreams,
-    ) -> Result<Self, TransportError> {
         Ok(Self {
-            encryption_algorithm: common(enc, &server_init.encryption_algorithms_server_to_client)
-                .ok_or(TransportError::NoCommonEncryptionAlgorithm)?,
-            compression_algorithm: common(
-                comp,
-                &server_init.compression_algorithms_server_to_client,
-            )
-            .ok_or(TransportError::NoCommonCompressionAlgorithm)?,
-            mac_algorithm: common(mac, &server_init.mac_algorithms_server_to_client),
-            key_streams,
+            ka: ka.ok_or(TransportError::NoCommonKexAlgorithm)?,
+            ha: ha.ok_or(TransportError::NoCommonServerHostKeyAlgorithm)?,
+            ea_c2s: ea_c2s.ok_or(TransportError::NoCommonEncryptionAlgorithm)?,
+            ea_s2c: ea_s2c.ok_or(TransportError::NoCommonEncryptionAlgorithm)?,
+            ca_c2s: ca_c2s.ok_or(TransportError::NoCommonCompressionAlgorithm)?,
+            ca_s2c: ca_s2c.ok_or(TransportError::NoCommonCompressionAlgorithm)?,
+            ma_c2s,
+            ma_s2c,
         })
     }
 }
@@ -170,4 +177,31 @@ mod tests {
         let ys = vec!["def".into(), "abc".into()];
         assert_eq!(common(&xs, &ys), Some("abc"))
     }
+
+    /*
+    #[test]
+    fn test_cipher_config_new_c2s_ok() {
+        let ka = vec![];
+        let ha = vec![];
+        let ea = vec!["ea2".into(), "ea1".into()];
+        let ma = vec!["ma2".into(), "ma1".into()];
+        let ca = vec!["ca2".into(), "ca1".into()];
+        let enc = vec!["ea1", "ea2"];
+        let cmp = vec!["ca1", "ca2"];
+        let mac = vec!["ma1", "ma2"];
+        let cookie = KexCookie::random();
+        let init = MsgKexInit::new(cookie, ka, ha, ea, ma, ca);
+        let keys = KeyStreams::new_sha256(&[0][..], &[0][..], SessionId::default());
+        match CipherConfig::new_client_to_server(&enc, &cmp, &mac, &init, keys) {
+            Ok(x) => {
+                assert_eq!(x.encryption_algorithm, "ea1");
+                assert_eq!(x.compression_algorithm, "ca1");
+                assert_eq!(x.mac_algorithm, Some("ma1"));
+            }
+            e => panic!("{:?}", e),
+        }
+    }*/
+
+    #[test]
+    fn test_cipher_config_new_s2c_01() {}
 }

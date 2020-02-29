@@ -7,6 +7,21 @@ use super::*;
 use crate::algorithm::compression::*;
 use crate::algorithm::encryption::*;
 
+#[derive(Clone, Debug)]
+pub struct CipherConfig {
+    /// Encryption algorithm
+    pub ea: &'static str,
+    /// Compression algorithm
+    pub ca: &'static str,
+    /// MAC algorithm
+    pub ma: Option<&'static str>,
+    /// Encryption key stream
+    pub ke: KeyStream,
+}
+
+pub type EncryptionConfig = CipherConfig;
+pub type DecryptionConfig = CipherConfig;
+
 pub enum CipherContext {
     Plain(PlainContext),
     Chacha20Poly1305(Chacha20Poly1305Context),
@@ -17,20 +32,16 @@ impl CipherContext {
         Self::Plain(PlainContext::new())
     }
 
-    pub fn update(
-        &mut self,
-        enc: &'static str,
-        comp: &'static str,
-        mac: Option<&'static str>,
-        ks: &mut KeyStream,
-    ) -> Option<()> {
-        match (enc, comp, mac) {
+    pub fn update(&mut self, mut config: CipherConfig) -> Option<()> {
+        match (config.ea, config.ca, config.ma) {
             (Chacha20Poly1305AtOpensshDotCom::NAME, NoCompression::NAME, None) => {
                 match self {
                     // Just pass new keys to existing instance (very likely)
-                    Self::Chacha20Poly1305(ctx) => ctx.update(ks),
+                    Self::Chacha20Poly1305(ctx) => ctx.update(&mut config.ke),
                     // Create and assign new instance
-                    _ => *self = Self::Chacha20Poly1305(Chacha20Poly1305Context::new(ks)),
+                    _ => {
+                        *self = Self::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut config.ke))
+                    }
                 }
             }
             _ => return None,
@@ -93,10 +104,14 @@ mod tests {
     #[test]
     fn test_update_01() {
         let mut ctx = CipherContext::new();
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let config = CipherConfig {
+            ea: "chacha20-poly1305@openssh.com",
+            ca: "none",
+            ma: None,
+            ke: KeyStreams::new_sha256(&[], &[], &[]).c(),
+        };
         // The first update shall create a new instance of chacha20.
-        ctx.update("chacha20-poly1305@openssh.com", "none", None, &mut ks.c())
-            .unwrap();
+        ctx.update(config.clone()).unwrap();
         match ctx {
             CipherContext::Chacha20Poly1305(_) => (),
             _ => panic!(""),
@@ -104,8 +119,7 @@ mod tests {
         // The second update shalll update the existing instance.
         // This is not so much a perfomance optimization, but will ensure that that
         // the old keys will vanish by being overwritten.
-        ctx.update("chacha20-poly1305@openssh.com", "none", None, &mut ks.c())
-            .unwrap();
+        ctx.update(config).unwrap();
         match ctx {
             CipherContext::Chacha20Poly1305(_) => (),
             _ => panic!(""),
@@ -115,9 +129,14 @@ mod tests {
     #[test]
     fn test_update_02() {
         let mut ctx = CipherContext::new();
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let config = CipherConfig {
+            ea: "chacha20-poly1305@openssh.com",
+            ca: "some",
+            ma: None,
+            ke: KeyStreams::new_sha256(&[], &[], &[]).c(),
+        };
         // This combination shall not work.
-        match ctx.update("chacha20-poly1305@openssh.com", "some", None, &mut ks.c()) {
+        match ctx.update(config) {
             None => (),
             _ => panic!(""),
         }
@@ -126,14 +145,14 @@ mod tests {
     #[test]
     fn test_update_03() {
         let mut ctx = CipherContext::new();
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let config = CipherConfig {
+            ea: "chacha20-poly1305@openssh.com",
+            ca: "none",
+            ma: Some("none"),
+            ke: KeyStreams::new_sha256(&[], &[], &[]).c(),
+        };
         // This combination shall not work.
-        match ctx.update(
-            "chacha20-poly1305@openssh.com",
-            "none",
-            Some("none"),
-            &mut ks.c(),
-        ) {
+        match ctx.update(config) {
             None => (),
             _ => panic!(""),
         }
@@ -150,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_encrypt_chacha_01() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let buf1 = [
             227, 107, 184, 85, 22, 165, 167, 251, 182, 172, 219, 51, 204, 70, 149, 248, 19, 33,
@@ -175,7 +194,7 @@ mod tests {
 
     #[test]
     fn test_decrypt_chacha_01() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let mut buf1 = [
             227, 107, 184, 85, 22, 165, 167, 251, 182, 172, 219, 51, 204, 70, 149, 248, 19, 33,
@@ -198,7 +217,7 @@ mod tests {
 
     #[test]
     fn test_decrypt_len_chacha_01() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let buf = [227, 107, 184, 85];
         assert_eq!(ctx.decrypt_len(23, buf), Some(36));
@@ -257,7 +276,7 @@ mod tests {
 
     #[test]
     fn test_packet_chacha_empty() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let packet = ctx.packet(&());
         // ChaCha20Poly1305 is authentication with additional data (AAD).
@@ -275,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_packet_chacha_bytes1() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let packet = ctx.packet(&Bytes1 {});
         assert_eq!(packet.size(), 36);
@@ -290,7 +309,7 @@ mod tests {
 
     #[test]
     fn test_packet_chacha_bytes8() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let packet = ctx.packet(&Bytes8 {});
         assert_eq!(packet.size(), 36);
@@ -305,7 +324,7 @@ mod tests {
 
     #[test]
     fn test_packet_chacha_bytes16() {
-        let mut ks = KeyStreams::new_sha256(&[], &[], &[]);
+        let ks = KeyStreams::new_sha256(&[], &[], &[]);
         let ctx = CipherContext::Chacha20Poly1305(Chacha20Poly1305Context::new(&mut ks.c()));
         let packet = ctx.packet(&Bytes16 {});
         assert_eq!(packet.size(), 44);

@@ -1,18 +1,7 @@
 use crate::algorithm::authentication::*;
 
-use async_std::net::ToSocketAddrs;
 use std::future::Future;
 use std::ops::Deref;
-
-pub trait HostName: ToSocketAddrs {
-    fn name(&self) -> String;
-}
-
-impl HostName for &str {
-    fn name(&self) -> String {
-        String::from(*self)
-    }
-}
 
 pub trait HostKeyVerifier: Send + Sync + 'static {
     fn verify(&self, hostname: &str, identity: &HostIdentity) -> VerificationFuture;

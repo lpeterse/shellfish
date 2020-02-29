@@ -10,13 +10,13 @@ impl KeyStreams {
         Self::KeyStreamsSha256(KeyStreamsSha256::new(k, h, sid.as_ref()))
     }
 
-    pub fn c<'a>(&'a mut self) -> KeyStream<'a> {
+    pub fn c(&self) -> KeyStream {
         match self {
             Self::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.c()),
         }
     }
 
-    pub fn d<'a>(&'a mut self) -> KeyStream<'a> {
+    pub fn d(&self) -> KeyStream {
         match self {
             Self::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.d()),
         }
@@ -28,7 +28,6 @@ pub struct KeyStreamsSha256 {
     h: Vec<u8>,
     k: Vec<u8>,
     sid: Vec<u8>,
-    state: Sha256,
 }
 
 impl KeyStreamsSha256 {
@@ -37,16 +36,15 @@ impl KeyStreamsSha256 {
             k: Vec::from(k),
             h: Vec::from(h),
             sid: Vec::from(sid),
-            state: Sha256::new(),
         }
     }
 
-    fn c<'a>(&'a mut self) -> KeyStreamSha256<'a> {
-        KeyStreamSha256::new(&mut self.state, &self.k, &self.h, &self.sid, 'C')
+    fn c(&self) -> KeyStreamSha256 {
+        KeyStreamSha256::new(self.k.clone(), self.h.clone(), self.sid.clone(), 'C')
     }
 
-    fn d<'a>(&'a mut self) -> KeyStreamSha256<'a> {
-        KeyStreamSha256::new(&mut self.state, &self.k, &self.h, &self.sid, 'D')
+    fn d(&self) -> KeyStreamSha256 {
+        KeyStreamSha256::new(self.k.clone(), self.h.clone(), self.sid.clone(), 'D')
     }
 }
 
@@ -56,11 +54,12 @@ impl std::fmt::Debug for KeyStreamsSha256 {
     }
 }
 
-pub enum KeyStream<'a> {
-    KeyStreamSha256(KeyStreamSha256<'a>),
+#[derive(Clone, Debug)]
+pub enum KeyStream {
+    KeyStreamSha256(KeyStreamSha256),
 }
 
-impl<'a> KeyStream<'a> {
+impl KeyStream {
     pub fn read(&mut self, buf: &mut [u8]) {
         match self {
             KeyStream::KeyStreamSha256(ks) => ks.read(buf),
@@ -68,22 +67,24 @@ impl<'a> KeyStream<'a> {
     }
 }
 
-pub struct KeyStreamSha256<'a> {
-    k: &'a [u8],
-    h: &'a [u8],
-    state: &'a mut Sha256,
+#[derive(Clone, Debug)]
+pub struct KeyStreamSha256 {
+    k: Vec<u8>,
+    h: Vec<u8>,
+    state: Sha256,
     stream: Vec<u8>,
     position: usize,
 }
 
-impl<'a> KeyStreamSha256<'a> {
+impl KeyStreamSha256 {
     const DIGEST_SIZE: usize = 32;
 
-    fn new(state: &'a mut Sha256, k: &'a [u8], h: &'a [u8], sid: &'a [u8], idx: char) -> Self {
+    fn new(k: Vec<u8>, h: Vec<u8>, sid: Vec<u8>, idx: char) -> Self {
+        let mut state = Sha256::new();
         // RFC: "Here K is encoded as mpint and "A" as byte and session_id as raw
         //       data.  "A" means the single character A, ASCII 65."
-        Self::input_as_mpint(state, k);
-        state.input(h);
+        Self::input_as_mpint(&mut state, &k[..]);
+        state.input(&h[..]);
         state.input([idx as u8]);
         state.input(sid);
         let mut stream = Vec::with_capacity(2 * Self::DIGEST_SIZE);
@@ -101,8 +102,8 @@ impl<'a> KeyStreamSha256<'a> {
         let requested = buf.len();
         let mut available = self.stream.len() - self.position;
         while requested > available {
-            Self::input_as_mpint(&mut self.state, self.k);
-            self.state.input(self.h);
+            Self::input_as_mpint(&mut self.state, &self.k[..]);
+            self.state.input(&self.h[..]);
             self.state.input(&self.stream);
             self.stream
                 .extend_from_slice(&self.state.result_reset()[..]);
@@ -164,7 +165,7 @@ mod tests {
             112, 145, 205, 14, 56, 169, 159, 134, 220, 119, 201, 5, 244,
         ];
 
-        let mut ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
+        let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
 
         let mut c = ks.c();
         let mut c1_ = [0; 32];
@@ -206,7 +207,7 @@ mod tests {
             231, 87, 227, 10, 212, 137, 52, 16, 100, 244, 188, 104, 75, 76,
         ];
 
-        let mut ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
+        let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
 
         let mut c = ks.c();
         let mut c1_ = [0; 32];
@@ -221,9 +222,6 @@ mod tests {
         let sid = h;
 
         let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
-        assert_eq!(
-            "KeyStreamsSha256(KeyStreams256 (..))",
-            format!("{:?}", ks)
-        )
+        assert_eq!("KeyStreamsSha256(KeyStreams256 (..))", format!("{:?}", ks))
     }
 }

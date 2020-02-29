@@ -2,7 +2,7 @@ use super::*;
 
 use crate::algorithm::authentication::*;
 use crate::transport::msg_disconnect::Reason;
-use crate::host_key_verification::*;
+use crate::host::*;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TransportError {
@@ -16,7 +16,7 @@ pub enum TransportError {
     MessageIntegrity,
     MessageUnexpected,
     MessageUnimplemented,
-    NoCommonServerAuthenticationAlgorithm,
+    NoCommonServerHostKeyAlgorithm,
     NoCommonCompressionAlgorithm,
     NoCommonEncryptionAlgorithm,
     NoCommonKexAlgorithm,

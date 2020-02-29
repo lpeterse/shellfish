@@ -41,7 +41,7 @@ impl Kex for ServerKex {
         f: F,
     ) -> Poll<Result<(), TransportError>>
     where
-        F: FnMut(&mut Context, &KexOutput) -> Poll<Result<(), TransportError>>,
+        F: FnMut(&mut Context, KexOutput) -> Poll<Result<(), TransportError>>,
     {
         unimplemented!()
     }

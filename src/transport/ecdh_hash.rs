@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
     pub client_identification: &'a Identification<&'static str>,
     pub server_identification: &'a Identification<String>,
-    pub client_kex_init: &'a MsgKexInit,
+    pub client_kex_init: &'a MsgKexInit<&'static str>,
     pub server_kex_init: &'a MsgKexInit,
     pub server_host_key: &'a HostIdentity,
     pub dh_client_key: &'a A::PublicKey,
