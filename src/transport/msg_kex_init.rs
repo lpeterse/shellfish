@@ -18,7 +18,7 @@ pub struct MsgKexInit<T = String> {
     pub first_packet_follows: bool,
 }
 
-impl <T: Clone> MsgKexInit<T> {
+impl<T: Clone> MsgKexInit<T> {
     pub fn new(
         cookie: KexCookie,
         kex_algorithms: Vec<T>,
@@ -105,6 +105,27 @@ impl Decode for MsgKexInit {
         };
         d.take_u32be()?;
         r.into()
+    }
+}
+
+#[cfg(test)]
+impl From<MsgKexInit<&'static str>> for MsgKexInit {
+    fn from(x: MsgKexInit<&'static str>) -> Self {
+        let f = |y: Vec<&'static str>| y.into_iter().map(Into::into).collect();
+        Self {
+            cookie: x.cookie,
+            kex_algorithms: x.kex_algorithms.into_iter().map(Into::into).collect(),
+            server_host_key_algorithms: f(x.server_host_key_algorithms),
+            encryption_algorithms_client_to_server: f(x.encryption_algorithms_client_to_server),
+            encryption_algorithms_server_to_client: f(x.encryption_algorithms_server_to_client),
+            mac_algorithms_client_to_server: f(x.mac_algorithms_client_to_server),
+            mac_algorithms_server_to_client: f(x.mac_algorithms_server_to_client),
+            compression_algorithms_client_to_server: f(x.compression_algorithms_client_to_server),
+            compression_algorithms_server_to_client: f(x.compression_algorithms_server_to_client),
+            languages_client_to_server: f(x.languages_client_to_server),
+            languages_server_to_client: f(x.languages_server_to_client),
+            first_packet_follows: x.first_packet_follows,
+        }
     }
 }
 

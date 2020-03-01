@@ -141,6 +141,7 @@ impl Kex for ClientKex {
                     let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
                     let dh_public = X25519::public(&dh_secret);
                     let k = X25519::diffie_hellman(dh_secret, &msg.dh_public);
+                    let k = X25519::secret_as_ref(&k);
                     // Compute the exchange hash over the data exchanged so far.
                     let h: [u8; 32] = KexEcdhHash::<X25519> {
                         client_identification: &self.local_id,
@@ -150,15 +151,14 @@ impl Kex for ClientKex {
                         server_host_key: &msg.host_key,
                         dh_client_key: &dh_public,
                         dh_server_key: &msg.dh_public,
-                        dh_secret: X25519::secret_as_ref(&k),
+                        dh_secret: k,
                     }
                     .sha256();
                     // Verify the host key signature
                     msg.signature.verify(&msg.host_key, &h[..])?;
                     // The session id is only computed during first kex and constant afterwards
                     self.session_id.update(h);
-                    let keys =
-                        KeyStreams::new_sha256(X25519::secret_as_ref(&k), &h, &self.session_id);
+                    let keys = KeyStreams::new_sha256(k, &h, &self.session_id);
                     let enc = CipherConfig {
                         ea: ecdh.algos.ea_c2s,
                         ca: ecdh.algos.ca_c2s,
@@ -166,34 +166,36 @@ impl Kex for ClientKex {
                         ke: keys.c(),
                     };
                     let dec = CipherConfig {
-                        ea: ecdh.algos.ea_c2s,
-                        ca: ecdh.algos.ca_c2s,
-                        ma: ecdh.algos.ma_c2s,
+                        ea: ecdh.algos.ea_s2c,
+                        ca: ecdh.algos.ca_s2c,
+                        ma: ecdh.algos.ma_s2c,
                         ke: keys.d(),
                     };
-                    let verified = self.verifier.verify(&self.hostname, &msg.host_key);
-                    self.state = Some(Box::new(State::HostKeyVerification((verified, enc, dec))));
+                    let fut = self.verifier.verify(&self.hostname, &msg.host_key);
+                    self.state = Some(Box::new(State::HostKeyVerification((fut, enc, dec))));
+                    return Ok(());
                 }
-                _ => Err(TransportError::ProtocolError)?,
+                _ => (),
             },
-            _ => Err(TransportError::ProtocolError)?,
+            _ => (),
         }
-        Ok(())
+        Err(TransportError::ProtocolError)
     }
 
     fn push_new_keys(&mut self) -> Result<CipherConfig, TransportError> {
         match std::mem::replace(&mut self.state, None) {
             Some(x) => match *x {
-                State::NewKeysSent(dec) => Ok(dec),
+                State::NewKeysSent(dec) => return Ok(dec),
                 State::NewKeys((enc, dec)) => {
                     let state = State::NewKeysReceived(enc.clone());
                     self.state = Some(Box::new(state));
-                    Ok(dec)
+                    return Ok(dec);
                 }
-                _ => Err(TransportError::ProtocolError),
+                _ => (),
             },
-            _ => Err(TransportError::ProtocolError),
+            _ => (),
         }
+        Err(TransportError::ProtocolError)
     }
 
     /// FIXME
@@ -219,10 +221,10 @@ impl Kex for ClientKex {
                             let algos = AlgorithmAgreement::agree(ci, &si)?;
                             let state = match algos.ka {
                                 Curve25519Sha256::NAME => {
-                                    State::new_ecdh_x25519(algos, ci.clone(), si.clone())
+                                    State::Ecdh(Ecdh::new(ci.clone(), si.clone(), algos))
                                 }
                                 Curve25519Sha256AtLibsshDotOrg::NAME => {
-                                    State::new_ecdh_x25519(algos, ci.clone(), si.clone())
+                                    State::Ecdh(Ecdh::new(ci.clone(), si.clone(), algos))
                                 }
                                 _ => Err(TransportError::NoCommonKexAlgorithm)?,
                             };
@@ -277,33 +279,33 @@ enum State {
     NewKeysReceived(EncryptionConfig),
 }
 
-impl State {
-    fn new_ecdh_x25519(
-        algos: AlgorithmAgreement,
-        client_init: MsgKexInit<&'static str>,
-        server_init: MsgKexInit,
-    ) -> Self {
-        Self::Ecdh(Ecdh {
-            algos,
-            client_init,
-            server_init,
-            dh_secret: X25519::new(),
-            sent: false,
-        })
-    }
-}
-
 struct Init {
     client_init: Option<MsgKexInit<&'static str>>,
     server_init: Option<MsgKexInit>,
 }
 
 struct Ecdh<A: EcdhAlgorithm> {
-    algos: AlgorithmAgreement,
     client_init: MsgKexInit<&'static str>,
     server_init: MsgKexInit,
+    algos: AlgorithmAgreement,
     dh_secret: A::EphemeralSecret,
     sent: bool,
+}
+
+impl Ecdh<X25519> {
+    fn new(
+        client_init: MsgKexInit<&'static str>,
+        server_init: MsgKexInit,
+        algos: AlgorithmAgreement,
+    ) -> Self {
+        Self {
+            client_init,
+            server_init,
+            algos,
+            dh_secret: X25519::new(),
+            sent: false,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -349,7 +351,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_kex_is_active_01() {
+    fn test_client_kex_is_active() {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
@@ -360,7 +362,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_kex_is_sending_critical_01() {
+    fn test_client_kex_is_sending_critical() {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
@@ -409,7 +411,7 @@ mod tests {
     }
 
     #[test]
-    fn test_client_kex_is_receiving_critical_01() {
+    fn test_client_kex_is_receiving_critical() {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
@@ -455,5 +457,384 @@ mod tests {
         // Shall be critical after MSG_NEWKEYS was sent
         kex.state = Some(Box::new(State::NewKeysSent(cc)));
         assert!(kex.is_receiving_critical());
+    }
+
+    /// State shall be Init after init()
+    #[test]
+    fn test_client_kex_init_01() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        kex.init();
+        match kex.state {
+            None => assert!(false),
+            Some(ref x) => match x.as_ref() {
+                State::Init(ref x) => {
+                    assert!(x.client_init.is_none());
+                    assert!(x.server_init.is_none());
+                }
+                _ => assert!(false),
+            },
+        }
+    }
+
+    /// Shall not override kex state when kex is already active
+    #[test]
+    fn test_client_kex_init_02() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
+
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: Some(ci),
+            server_init: None,
+        })));
+        kex.init();
+        match kex.state {
+            None => assert!(false),
+            Some(ref x) => match x.as_ref() {
+                State::Init(ref x) => {
+                    assert!(x.client_init.is_some());
+                    assert!(x.server_init.is_none());
+                }
+                _ => assert!(false),
+            },
+        }
+    }
+
+    /// State shall be Init after remote init has been pushed
+    #[test]
+    fn test_client_kex_push_init_01() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
+
+        assert!(kex.push_init(ri).is_ok());
+
+        match kex.state {
+            None => assert!(false),
+            Some(ref x) => match x.as_ref() {
+                State::Init(ref x) => {
+                    assert!(x.client_init.is_none());
+                    assert!(x.server_init.is_some());
+                }
+                _ => assert!(false),
+            },
+        }
+    }
+
+    /// State shall contain both inits when remote init is pushed after local init
+    #[test]
+    fn test_client_kex_push_init_02() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ri = MsgKexInit::<String>::new(c.clone(), vec![], vec![], vec![], vec![], vec![]);
+        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
+
+        kex.state = Some(Box::new(State::Init(Init {
+            client_init: Some(ci),
+            server_init: None,
+        })));
+
+        assert!(kex.push_init(ri).is_ok());
+
+        match kex.state {
+            None => assert!(false),
+            Some(ref x) => match x.as_ref() {
+                State::Init(ref x) => {
+                    assert!(x.client_init.is_some());
+                    assert!(x.server_init.is_some());
+                }
+                _ => assert!(false),
+            },
+        }
+    }
+
+    /// Shall return ProtocolError when remote init is pushed twice
+    #[test]
+    fn test_client_kex_push_init_03() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
+
+        assert!(kex.push_init(ri.clone()).is_ok());
+        match kex.push_init(ri) {
+            Err(TransportError::ProtocolError) => (),
+            _ => assert!(false),
+        }
+    }
+
+    /// Shall return ProtocolError when remote init is pushed to incompatible state
+    #[test]
+    fn test_client_kex_push_init_04() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let c = KexCookie::random();
+        let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
+        let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
+        let cc = CipherConfig {
+            ea: "",
+            ca: "",
+            ma: None,
+            ke: ks.c(),
+        };
+
+        kex.state = Some(Box::new(State::NewKeysSent(cc)));
+
+        match kex.push_init(ri) {
+            Err(TransportError::ProtocolError) => (),
+            _ => assert!(false),
+        }
+    }
+
+    /// Shall return ProtocolError when MSG_ECDH_INIT is pushed
+    #[test]
+    fn test_client_kex_push_ecdh_init() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let dh_secret = X25519::new();
+        let dh_public = X25519::public(&dh_secret);
+        let ecdh_init = MsgKexEcdhInit { dh_public };
+
+        match kex.push_ecdh_init(ecdh_init) {
+            Err(TransportError::ProtocolError) => (),
+            _ => assert!(false),
+        }
+    }
+
+    /// Shall go into HostKeyVerification state when MSG_ECDH_REPLY with valid signature is pushed
+    #[test]
+    fn test_client_kex_push_ecdh_reply_01() {
+        use crate::algorithm::authentication::*;
+        use ed25519_dalek::Keypair;
+
+        let keypair = Keypair::from_bytes(
+            &[
+                223, 172, 247, 249, 240, 155, 4, 236, 168, 114, 191, 70, 106, 161, 235, 150, 233,
+                230, 152, 224, 83, 82, 245, 159, 35, 191, 255, 71, 23, 84, 237, 123, 217, 95, 204,
+                68, 59, 27, 189, 73, 127, 200, 155, 100, 107, 123, 205, 53, 8, 124, 126, 128, 119,
+                43, 108, 225, 133, 231, 36, 55, 164, 112, 190, 91,
+            ][..],
+        )
+        .unwrap();
+
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let local_id = Identification::default();
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id.clone());
+
+        let mut ci = kex.new_msg_kex_init();
+        ci.cookie = KexCookie([1; 16]);
+        let mut si: MsgKexInit = ci.clone().into();
+        si.cookie = KexCookie([2; 16]);
+
+        let host_key = keypair.public.to_bytes().clone();
+        let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey(host_key));
+        let client_dh_secret = X25519::new();
+        let client_dh_public = X25519::public(&client_dh_secret);
+        let server_dh_secret = X25519::new();
+        let server_dh_public = X25519::public(&server_dh_secret);
+        let k = X25519::diffie_hellman(server_dh_secret, &client_dh_public);
+
+        // Prepare client state
+        let algos = AlgorithmAgreement::agree(&ci, &si).unwrap();
+        let state = State::Ecdh(Ecdh {
+            client_init: ci.clone(),
+            server_init: si.clone(),
+            algos,
+            dh_secret: client_dh_secret,
+            sent: false,
+        });
+        kex.state = Some(Box::new(state));
+
+        // Create "server" reply with correct signature (a bit complicated)
+        let h: [u8; 32] = KexEcdhHash::<X25519> {
+            client_identification: &local_id,
+            server_identification: &remote_id,
+            client_kex_init: &ci,
+            server_kex_init: &si,
+            server_host_key: &host_key,
+            dh_client_key: &client_dh_public,
+            dh_server_key: &server_dh_public,
+            dh_secret: X25519::secret_as_ref(&k),
+        }
+        .sha256();
+        let signature = SshEd25519Signature(keypair.sign(&h[..]).to_bytes());
+        let signature = HostSignature::Ed25519Signature(signature);
+        let ecdh_reply = MsgKexEcdhReply {
+            host_key,
+            dh_public: server_dh_public,
+            signature,
+        };
+
+        assert!(kex.push_ecdh_reply(ecdh_reply).is_ok());
+        match kex.state {
+            None => assert!(false),
+            Some(ref x) => match x.as_ref() {
+                State::HostKeyVerification(_) => (),
+                _ => assert!(false),
+            },
+        }
+    }
+
+    /// Shall return error when MSG_ECDH_REPLY with invalid signature is pushed
+    #[test]
+    fn test_client_kex_push_ecdh_reply_02() {
+        use crate::algorithm::authentication::*;
+
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id.clone());
+
+        let mut ci = kex.new_msg_kex_init();
+        ci.cookie = KexCookie([1; 16]);
+        let mut si: MsgKexInit = ci.clone().into();
+        si.cookie = KexCookie([2; 16]);
+
+        let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([8; 32]));
+        let client_dh_secret = X25519::new();
+        let server_dh_secret = X25519::new();
+        let server_dh_public = X25519::public(&server_dh_secret);
+
+        // Prepare client state
+        let algos = AlgorithmAgreement::agree(&ci, &si).unwrap();
+        let state = State::Ecdh(Ecdh {
+            client_init: ci.clone(),
+            server_init: si.clone(),
+            algos,
+            dh_secret: client_dh_secret,
+            sent: false,
+        });
+        kex.state = Some(Box::new(state));
+
+        let ecdh_reply = MsgKexEcdhReply {
+            host_key,
+            dh_public: server_dh_public,
+            signature: HostSignature::Ed25519Signature(SshEd25519Signature([7; 64])),
+        };
+
+        match kex.push_ecdh_reply(ecdh_reply) {
+            Err(TransportError::InvalidSignature) => (),
+            _ => assert!(false),
+        }
+    }
+
+    /// Shall return error when MSG_ECDH_REPLY is pushed onto incompatible state
+    #[test]
+    fn test_client_kex_push_ecdh_reply_03() {
+        use crate::algorithm::authentication::*;
+
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id.clone());
+
+        let mut ci = kex.new_msg_kex_init();
+        ci.cookie = KexCookie([1; 16]);
+        let mut si: MsgKexInit = ci.clone().into();
+        si.cookie = KexCookie([2; 16]);
+
+        let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([8; 32]));
+        let server_dh_secret = X25519::new();
+        let server_dh_public = X25519::public(&server_dh_secret);
+
+        let ecdh_reply = MsgKexEcdhReply {
+            host_key,
+            dh_public: server_dh_public,
+            signature: HostSignature::Ed25519Signature(SshEd25519Signature([7; 64])),
+        };
+
+        match kex.push_ecdh_reply(ecdh_reply) {
+            Err(TransportError::ProtocolError) => (),
+            _ => assert!(false),
+        }
+    }
+
+    /// State shall be NewKeysReceived after MSG_NEWKEYS pushed
+    #[test]
+    fn test_client_kex_push_new_keys_01() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
+        let cc = CipherConfig {
+            ea: "",
+            ca: "",
+            ma: None,
+            ke: ks.c(),
+        };
+
+        kex.state = Some(Box::new(State::NewKeys((cc.clone(), cc))));
+
+        assert!(kex.push_new_keys().is_ok());
+
+        match kex.state {
+            None => assert!(false),
+            Some(ref x) => match x.as_ref() {
+                State::NewKeysReceived(_) => (),
+                _ => assert!(false),
+            },
+        }
+    }
+
+    /// State shall be None after MSG_NEWKEYS sent and received
+    #[test]
+    fn test_client_kex_push_new_keys_02() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
+        let cc = CipherConfig {
+            ea: "",
+            ca: "",
+            ma: None,
+            ke: ks.c(),
+        };
+
+        kex.state = Some(Box::new(State::NewKeysSent(cc)));
+
+        assert!(kex.push_new_keys().is_ok());
+        assert!(kex.state.is_none());
+    }
+
+    /// Shall return ProtocolError when receiving MSG_NEWKEYS whlie kex is not in progress
+    #[test]
+    fn test_client_kex_push_new_keys_03() {
+        let config = ClientConfig::default();
+        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let remote_id: Identification = Identification::new("foobar".into(), "".into());
+        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+
+        assert!(kex.push_new_keys().is_err());
     }
 }
