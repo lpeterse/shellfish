@@ -38,6 +38,7 @@ impl<R: Role, T: Socket> ConnectionFuture<R,T> {
     fn terminate(&mut self, e: ConnectionError) -> ConnectionError {
         //self.request_sender.terminate(e); // FIXME
         self.request_receiver.terminate(e);
+        log::error!("HIER {:?}", e);
         //self.channels.terminate(e);
         todo!();
         e

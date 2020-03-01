@@ -1,9 +1,9 @@
 mod decoder;
 mod encoder;
 
+use crate::util::*;
 use num_bigint::BigUint;
 use std::ops::Deref;
-use crate::util::*;
 
 pub use self::decoder::*;
 pub use self::encoder::*;
@@ -20,7 +20,7 @@ pub trait Decode: Sized {
 }
 
 /// SSH specific decode that allows the result to contain references into the input.
-/// 
+///
 /// This is useful to avoid unnecessary intermediate allocations in cases where
 /// the result is short-lived and can be processed while the input is still in scope.
 pub trait DecodeRef<'a>: Sized {
@@ -307,21 +307,51 @@ impl NameList {
 }
 
 /// FIXME: How does it relate to BigUint?
+/// FIXME: Unit tests!
+/// 
+/// RFC 4251:
+/// "Represents multiple precision integers in two's complement format,
+/// stored as a string, 8 bits per byte, MSB first.  Negative numbers
+/// have the value 1 as the most significant bit of the first byte of
+/// the data partition.  If the most significant bit would be set for
+/// a positive number, the number MUST be preceded by a zero byte.
+/// Unnecessary leading bytes with the value 0 or 255 MUST NOT be
+/// included.  The value zero MUST be stored as a string with zero
+/// bytes of data."
 pub struct MPInt<'a>(pub &'a [u8]);
 
 impl<'a> Encode for MPInt<'a> {
     fn size(&self) -> usize {
-        4 + if self.0[0] > 127 { 1 } else { 0 } + self.0.len()
+        let mut x: &[u8] = self.0;
+        while let Some(0) = x.get(0) {
+            x = &x[1..];
+        }
+        if let Some(n) = x.get(0) {
+            if *n > 127 {
+                5 + x.len()
+            } else {
+                4 + x.len()
+            }
+        } else {
+            4
+        }
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
-        let len = self.0.len();
-        if self.0[0] > 127 {
-            e.push_u32be(len as u32 + 1);
-            e.push_u8(0);
-        } else {
-            e.push_u32be(len as u32);
+        let mut x: &[u8] = self.0;
+        while let Some(0) = x.get(0) {
+            x = &x[1..];
         }
-        e.push_bytes(&self.0);
+        if let Some(n) = x.get(0) {
+            if *n > 127 {
+                e.push_u32be(x.len() as u32 + 1);
+                e.push_u8(0);
+            } else {
+                e.push_u32be(x.len() as u32);
+            }
+            e.push_bytes(&x);
+        } else {
+            e.push_u32be(0);
+        }
     }
 }
 
@@ -339,10 +369,10 @@ impl<'a> DecodeRef<'a> for MPInt<'a> {
 }
 
 /// An BigUint (MPint in SSH terminology) is encoded in big-endian.
-/// 
+///
 /// The number of bytes is designated by a leading u32. If the first byte of the number's big
 /// endian encoding is > 127 and additional leading 0 shall be prepended.
-/// 
+///
 /// FIXME: How does it relate to MPInt?
 impl Encode for BigUint {
     fn size(&self) -> usize {

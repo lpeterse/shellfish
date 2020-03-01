@@ -5,22 +5,31 @@ use crate::algorithm::*;
 
 use std::time::Duration;
 
+/// The client side state machine for key exchange.
 pub struct ClientKex {
-    hostname: String,
-    local_id: Identification<&'static str>,
-    remote_id: Identification,
-    interval_bytes: u64,
-    interval_duration: Duration,
-    next_kex_at_timeout: Delay,
-    next_kex_at_bytes_sent: u64,
-    next_kex_at_bytes_received: u64,
-    kex_algorithms: Vec<&'static str>,
-    mac_algorithms: Vec<&'static str>,
-    host_key_algorithms: Vec<&'static str>,
-    encryption_algorithms: Vec<&'static str>,
-    compression_algorithms: Vec<&'static str>,
-    state: Option<Box<State>>,
+    /// Host key verifier
     verifier: Arc<Box<dyn HostKeyVerifier>>,
+    /// Mutable state (when kex in progress)
+    state: Option<Box<State>>,
+    /// Local identification string
+    local_id: Identification<&'static str>,
+    /// Local MSG_KEX_INIT (cookie shall be updated before re-exchange)
+    local_init: MsgKexInit<&'static str>,
+    /// Remote identification string
+    remote_id: Identification,
+    /// Remote name (hostname) for host key verification
+    remote_name: String,
+    /// Rekeying interval (bytes sent or received)
+    interval_bytes: u64,
+    /// Rekeying interval (time passed since last kex)
+    interval_duration: Duration,
+    /// Rekeying timeout (reset after successful kex)
+    next_at: Delay,
+    /// Rekeying threshold (updated after successful kex)
+    next_at_bytes_sent: u64,
+    /// Rekeying threshold (updates after successful kex)
+    next_at_bytes_received: u64,
+    /// Session id (only after after initial kex, constant afterwards)
     session_id: SessionId,
 }
 
@@ -28,8 +37,8 @@ impl ClientKex {
     pub fn new<C: TransportConfig>(
         config: &C,
         verifier: Arc<Box<dyn HostKeyVerifier>>,
-        hostname: String,
         remote_id: Identification<String>,
+        remote_name: String,
     ) -> Self {
         let ka = intersection(config.kex_algorithms(), &KEX_ALGORITHMS[..]);
         let ma = intersection(config.mac_algorithms(), &MAC_ALGORITHMS[..]);
@@ -37,33 +46,19 @@ impl ClientKex {
         let ea = intersection(config.encryption_algorithms(), &ENCRYPTION_ALGORITHMS[..]);
         let ca = intersection(config.compression_algorithms(), &COMPRESSION_ALGORITHMS[..]);
         Self {
-            hostname,
+            verifier,
+            state: None,
             local_id: config.identification().clone(),
+            local_init: MsgKexInit::new(KexCookie::random(), ka, ha, ea, ma, ca),
             remote_id,
+            remote_name,
             interval_bytes: config.kex_interval_bytes(),
             interval_duration: config.kex_interval_duration(),
-            next_kex_at_timeout: Delay::new(config.kex_interval_duration()),
-            next_kex_at_bytes_sent: config.kex_interval_bytes(),
-            next_kex_at_bytes_received: config.kex_interval_bytes(),
-            kex_algorithms: ka,
-            mac_algorithms: ma,
-            host_key_algorithms: ha,
-            encryption_algorithms: ea,
-            compression_algorithms: ca,
-            state: None,
-            verifier,
+            next_at: Delay::new(config.kex_interval_duration()),
+            next_at_bytes_sent: config.kex_interval_bytes(),
+            next_at_bytes_received: config.kex_interval_bytes(),
             session_id: SessionId::default(),
         }
-    }
-
-    fn new_msg_kex_init(&self) -> MsgKexInit<&'static str> {
-        let f = |s: &Vec<&'static str>| s.iter().map(|t| *t).collect();
-        let ka = f(&self.kex_algorithms);
-        let ha = f(&self.host_key_algorithms);
-        let ea = f(&self.encryption_algorithms);
-        let ma = f(&self.mac_algorithms);
-        let ca = f(&self.compression_algorithms);
-        MsgKexInit::new(KexCookie::random(), ka, ha, ea, ma, ca)
     }
 }
 
@@ -76,7 +71,7 @@ impl Kex for ClientKex {
         match self.state {
             None => false,
             Some(ref x) => match x.as_ref() {
-                State::Init(ref x) => x.client_init.is_some(),
+                State::Init(ref x) => x.local_init.is_some(),
                 State::NewKeysSent(_) => false,
                 _ => true,
             },
@@ -87,7 +82,7 @@ impl Kex for ClientKex {
         match self.state {
             None => false,
             Some(ref x) => match x.as_ref() {
-                State::Init(ref x) => x.server_init.is_some(),
+                State::Init(ref x) => x.remote_init.is_some(),
                 State::NewKeysReceived(_) => false,
                 _ => true,
             },
@@ -98,8 +93,8 @@ impl Kex for ClientKex {
         match self.state {
             None => {
                 let state = State::Init(Init {
-                    client_init: None,
-                    server_init: None,
+                    local_init: None,
+                    remote_init: None,
                 });
                 self.state = Some(Box::new(state))
             }
@@ -107,19 +102,19 @@ impl Kex for ClientKex {
         }
     }
 
-    fn push_init(&mut self, server_init: MsgKexInit) -> Result<(), TransportError> {
+    fn push_init(&mut self, remote_init: MsgKexInit) -> Result<(), TransportError> {
         match self.state {
             None => {
                 let state = State::Init(Init {
-                    client_init: None,
-                    server_init: Some(server_init),
+                    local_init: None,
+                    remote_init: Some(remote_init),
                 });
                 self.state = Some(Box::new(state));
                 return Ok(());
             }
             Some(ref mut x) => match x.as_mut() {
-                State::Init(ref mut i) if i.server_init.is_none() => {
-                    i.server_init = Some(server_init);
+                State::Init(ref mut i) if i.remote_init.is_none() => {
+                    i.remote_init = Some(remote_init);
                     return Ok(());
                 }
                 _ => (),
@@ -146,14 +141,15 @@ impl Kex for ClientKex {
                     let h: [u8; 32] = KexEcdhHash::<X25519> {
                         client_identification: &self.local_id,
                         server_identification: &self.remote_id,
-                        client_kex_init: &ecdh.client_init,
-                        server_kex_init: &ecdh.server_init,
+                        client_kex_init: &self.local_init,
+                        server_kex_init: &ecdh.remote_init,
                         server_host_key: &msg.host_key,
                         dh_client_key: &dh_public,
                         dh_server_key: &msg.dh_public,
                         dh_secret: k,
                     }
                     .sha256();
+                    log::error!("{:?} {:?} {:?}", k, dh_public, msg.dh_public);
                     // Verify the host key signature
                     msg.signature.verify(&msg.host_key, &h[..])?;
                     // The session id is only computed during first kex and constant afterwards
@@ -171,7 +167,7 @@ impl Kex for ClientKex {
                         ma: ecdh.algos.ma_s2c,
                         ke: keys.d(),
                     };
-                    let fut = self.verifier.verify(&self.hostname, &msg.host_key);
+                    let fut = self.verifier.verify(&self.remote_name, &msg.host_key);
                     self.state = Some(Box::new(State::HostKeyVerification((fut, enc, dec))));
                     return Ok(());
                 }
@@ -182,7 +178,15 @@ impl Kex for ClientKex {
         Err(TransportError::ProtocolError)
     }
 
-    fn push_new_keys(&mut self) -> Result<CipherConfig, TransportError> {
+    fn push_new_keys(
+        &mut self,
+        bytes_sent: u64,
+        bytes_received: u64,
+    ) -> Result<CipherConfig, TransportError> {
+        self.next_at.reset(self.interval_duration);
+        self.next_at_bytes_sent = bytes_sent + self.interval_bytes;
+        self.next_at_bytes_received = bytes_received + self.interval_bytes;
+
         match std::mem::replace(&mut self.state, None) {
             Some(x) => match *x {
                 State::NewKeysSent(dec) => return Ok(dec),
@@ -198,7 +202,6 @@ impl Kex for ClientKex {
         Err(TransportError::ProtocolError)
     }
 
-    /// FIXME
     fn poll<F: FnMut(&mut Context, KexOutput) -> Poll<Result<(), TransportError>>>(
         &mut self,
         cx: &mut Context,
@@ -206,25 +209,31 @@ impl Kex for ClientKex {
         bytes_received: u64,
         mut send: F,
     ) -> Poll<Result<(), TransportError>> {
-        let msg_kex_init = self.new_msg_kex_init(); // FIXME
+        // Determine whether kex is required according to timeout or traffic.
+        // This might evaluate to true even if kex is already in progress, but is harmless.
+        let a = self.next_at.poll_unpin(cx).is_ready();
+        let b = self.next_at_bytes_sent <= bytes_sent;
+        let c = self.next_at_bytes_received <= bytes_received;
+        if a || b || c {
+            self.init();
+        }
+        // Pop all pending kex messages from the state machine. Return Ready if no more messages
+        // available or Pending if sending such a message failed.
         loop {
             match self.state {
                 Some(ref mut s) => match s.as_mut() {
                     State::Init(ref mut i) => {
-                        if i.client_init.is_none() {
-                            ready!(send(cx, KexOutput::Init(msg_kex_init.clone())))?;
-                            i.client_init = Some(msg_kex_init.clone());
+                        if i.local_init.is_none() {
+                            self.local_init.cookie = KexCookie::random();
+                            ready!(send(cx, KexOutput::Init(self.local_init.clone())))?;
+                            i.local_init = Some(());
                         }
-                        if let (Some(ci), Some(si)) =
-                            (i.client_init.as_ref(), i.server_init.as_ref())
-                        {
-                            let algos = AlgorithmAgreement::agree(ci, &si)?;
+                        if let Some(si) = i.remote_init.as_ref() {
+                            let algos = AlgorithmAgreement::agree(&self.local_init, &si)?;
                             let state = match algos.ka {
-                                Curve25519Sha256::NAME => {
-                                    State::Ecdh(Ecdh::new(ci.clone(), si.clone(), algos))
-                                }
+                                Curve25519Sha256::NAME => State::Ecdh(Ecdh::new(si.clone(), algos)),
                                 Curve25519Sha256AtLibsshDotOrg::NAME => {
-                                    State::Ecdh(Ecdh::new(ci.clone(), si.clone(), algos))
+                                    State::Ecdh(Ecdh::new(si.clone(), algos))
                                 }
                                 _ => Err(TransportError::NoCommonKexAlgorithm)?,
                             };
@@ -280,27 +289,21 @@ enum State {
 }
 
 struct Init {
-    client_init: Option<MsgKexInit<&'static str>>,
-    server_init: Option<MsgKexInit>,
+    local_init: Option<()>,
+    remote_init: Option<MsgKexInit>,
 }
 
 struct Ecdh<A: EcdhAlgorithm> {
-    client_init: MsgKexInit<&'static str>,
-    server_init: MsgKexInit,
+    remote_init: MsgKexInit,
     algos: AlgorithmAgreement,
     dh_secret: A::EphemeralSecret,
     sent: bool,
 }
 
 impl Ecdh<X25519> {
-    fn new(
-        client_init: MsgKexInit<&'static str>,
-        server_init: MsgKexInit,
-        algos: AlgorithmAgreement,
-    ) -> Self {
+    fn new(remote_init: MsgKexInit, algos: AlgorithmAgreement) -> Self {
         Self {
-            client_init,
-            server_init,
+            remote_init,
             algos,
             dh_secret: X25519::new(),
             sent: false,
@@ -331,22 +334,34 @@ mod tests {
         };
 
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
-        let hostname: String = "hostname".into();
         let remote_id: Identification = Identification::new("testing".into(), "".into());
-        let kex = ClientKex::new(&config, verifier, hostname.clone(), remote_id.clone());
+        let remote_name: String = "hostname".into();
+        let kex = ClientKex::new(&config, verifier, remote_id.clone(), remote_name.clone());
 
-        assert_eq!(kex.hostname, hostname);
         assert_eq!(kex.local_id, *config.identification());
         assert_eq!(kex.remote_id, remote_id);
+        assert_eq!(kex.remote_name, remote_name);
         assert_eq!(kex.interval_bytes, config.kex_interval_bytes);
         assert_eq!(kex.interval_duration, config.kex_interval_duration);
-        assert_eq!(kex.next_kex_at_bytes_sent, config.kex_interval_bytes);
-        assert_eq!(kex.next_kex_at_bytes_received, config.kex_interval_bytes);
-        assert_eq!(kex.kex_algorithms, f(config.kex_algorithms));
-        assert_eq!(kex.mac_algorithms, f(config.mac_algorithms));
-        assert_eq!(kex.host_key_algorithms, f(config.host_key_algorithms));
-        assert_eq!(kex.encryption_algorithms, f(config.encryption_algorithms));
-        assert_eq!(kex.compression_algorithms, f(config.compression_algorithms));
+        assert_eq!(kex.next_at_bytes_sent, config.kex_interval_bytes);
+        assert_eq!(kex.next_at_bytes_received, config.kex_interval_bytes);
+        assert_eq!(kex.local_init.kex_algorithms, f(config.kex_algorithms));
+        assert_eq!(
+            kex.local_init.server_host_key_algorithms,
+            f(config.host_key_algorithms)
+        );
+        assert_eq!(
+            kex.local_init.mac_algorithms_client_to_server,
+            f(config.mac_algorithms)
+        );
+        assert_eq!(
+            kex.local_init.encryption_algorithms_client_to_server,
+            f(config.encryption_algorithms)
+        );
+        assert_eq!(
+            kex.local_init.compression_algorithms_client_to_server,
+            f(config.compression_algorithms)
+        );
         assert!(kex.state.is_none());
     }
 
@@ -355,7 +370,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
         assert!(!kex.is_active());
         kex.init();
         assert!(kex.is_active());
@@ -366,11 +381,10 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let c = KexCookie::random();
         let ri = MsgKexInit::<String>::new(c.clone(), vec![], vec![], vec![], vec![], vec![]);
-        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
         let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
         let cc = CipherConfig {
             ea: "",
@@ -383,20 +397,20 @@ mod tests {
         assert!(!kex.is_sending_critical());
         // Shall not be critical after init
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: None,
-            server_init: None,
+            local_init: None,
+            remote_init: None,
         })));
         assert!(!kex.is_sending_critical());
         // Shall be critical after MSG_KEX_INIT was sent
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: Some(ci),
-            server_init: None,
+            local_init: Some(()),
+            remote_init: None,
         })));
         assert!(kex.is_sending_critical());
         // Shall not be critical after MSG_KEX_INIT was received
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: None,
-            server_init: Some(ri),
+            local_init: None,
+            remote_init: Some(ri),
         })));
         assert!(!kex.is_sending_critical());
         // Shall be critical while MGS_NEWKEYS neither sent nor received
@@ -415,11 +429,10 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let c = KexCookie::random();
         let ri = MsgKexInit::<String>::new(c.clone(), vec![], vec![], vec![], vec![], vec![]);
-        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
         let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
         let cc = CipherConfig {
             ea: "",
@@ -432,20 +445,20 @@ mod tests {
         assert!(!kex.is_receiving_critical());
         // Shall not be critical after init
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: None,
-            server_init: None,
+            local_init: None,
+            remote_init: None,
         })));
         assert!(!kex.is_receiving_critical());
         // Shall not be critical after MSG_KEX_INIT was sent
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: Some(ci),
-            server_init: None,
+            local_init: Some(()),
+            remote_init: None,
         })));
         assert!(!kex.is_receiving_critical());
         // Shall be critical after MSG_KEX_INIT was received
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: None,
-            server_init: Some(ri),
+            local_init: None,
+            remote_init: Some(ri),
         })));
         assert!(kex.is_receiving_critical());
         // Shall be critical while MGS_NEWKEYS neither sent nor received
@@ -465,15 +478,15 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         kex.init();
         match kex.state {
             None => assert!(false),
             Some(ref x) => match x.as_ref() {
                 State::Init(ref x) => {
-                    assert!(x.client_init.is_none());
-                    assert!(x.server_init.is_none());
+                    assert!(x.local_init.is_none());
+                    assert!(x.remote_init.is_none());
                 }
                 _ => assert!(false),
             },
@@ -486,22 +499,19 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
-
-        let c = KexCookie::random();
-        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: Some(ci),
-            server_init: None,
+            local_init: Some(()),
+            remote_init: None,
         })));
         kex.init();
         match kex.state {
             None => assert!(false),
             Some(ref x) => match x.as_ref() {
                 State::Init(ref x) => {
-                    assert!(x.client_init.is_some());
-                    assert!(x.server_init.is_none());
+                    assert!(x.local_init.is_some());
+                    assert!(x.remote_init.is_none());
                 }
                 _ => assert!(false),
             },
@@ -514,7 +524,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let c = KexCookie::random();
         let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
@@ -525,8 +535,8 @@ mod tests {
             None => assert!(false),
             Some(ref x) => match x.as_ref() {
                 State::Init(ref x) => {
-                    assert!(x.client_init.is_none());
-                    assert!(x.server_init.is_some());
+                    assert!(x.local_init.is_none());
+                    assert!(x.remote_init.is_some());
                 }
                 _ => assert!(false),
             },
@@ -539,15 +549,14 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let c = KexCookie::random();
-        let ri = MsgKexInit::<String>::new(c.clone(), vec![], vec![], vec![], vec![], vec![]);
-        let ci = MsgKexInit::<&'static str>::new(c, vec![], vec![], vec![], vec![], vec![]);
+        let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
 
         kex.state = Some(Box::new(State::Init(Init {
-            client_init: Some(ci),
-            server_init: None,
+            local_init: Some(()),
+            remote_init: None,
         })));
 
         assert!(kex.push_init(ri).is_ok());
@@ -556,8 +565,8 @@ mod tests {
             None => assert!(false),
             Some(ref x) => match x.as_ref() {
                 State::Init(ref x) => {
-                    assert!(x.client_init.is_some());
-                    assert!(x.server_init.is_some());
+                    assert!(x.local_init.is_some());
+                    assert!(x.remote_init.is_some());
                 }
                 _ => assert!(false),
             },
@@ -570,7 +579,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let c = KexCookie::random();
         let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
@@ -588,7 +597,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let c = KexCookie::random();
         let ri = MsgKexInit::<String>::new(c, vec![], vec![], vec![], vec![], vec![]);
@@ -614,7 +623,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let dh_secret = X25519::new();
         let dh_public = X25519::public(&dh_secret);
@@ -646,11 +655,14 @@ mod tests {
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let local_id = Identification::default();
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id.clone());
+        let mut kex = ClientKex::new(
+            &config,
+            verifier,
+            remote_id.clone().into(),
+            "hostname".into(),
+        );
 
-        let mut ci = kex.new_msg_kex_init();
-        ci.cookie = KexCookie([1; 16]);
-        let mut si: MsgKexInit = ci.clone().into();
+        let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
         let host_key = keypair.public.to_bytes().clone();
@@ -662,10 +674,9 @@ mod tests {
         let k = X25519::diffie_hellman(server_dh_secret, &client_dh_public);
 
         // Prepare client state
-        let algos = AlgorithmAgreement::agree(&ci, &si).unwrap();
+        let algos = AlgorithmAgreement::agree(&kex.local_init, &si).unwrap();
         let state = State::Ecdh(Ecdh {
-            client_init: ci.clone(),
-            server_init: si.clone(),
+            remote_init: si.clone(),
             algos,
             dh_secret: client_dh_secret,
             sent: false,
@@ -676,7 +687,7 @@ mod tests {
         let h: [u8; 32] = KexEcdhHash::<X25519> {
             client_identification: &local_id,
             server_identification: &remote_id,
-            client_kex_init: &ci,
+            client_kex_init: &kex.local_init,
             server_kex_init: &si,
             server_host_key: &host_key,
             dh_client_key: &client_dh_public,
@@ -710,11 +721,9 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id.clone());
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
-        let mut ci = kex.new_msg_kex_init();
-        ci.cookie = KexCookie([1; 16]);
-        let mut si: MsgKexInit = ci.clone().into();
+        let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
         let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([8; 32]));
@@ -723,10 +732,9 @@ mod tests {
         let server_dh_public = X25519::public(&server_dh_secret);
 
         // Prepare client state
-        let algos = AlgorithmAgreement::agree(&ci, &si).unwrap();
+        let algos = AlgorithmAgreement::agree(&kex.local_init, &si).unwrap();
         let state = State::Ecdh(Ecdh {
-            client_init: ci.clone(),
-            server_init: si.clone(),
+            remote_init: si.clone(),
             algos,
             dh_secret: client_dh_secret,
             sent: false,
@@ -753,11 +761,9 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id.clone());
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
-        let mut ci = kex.new_msg_kex_init();
-        ci.cookie = KexCookie([1; 16]);
-        let mut si: MsgKexInit = ci.clone().into();
+        let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
         let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([8; 32]));
@@ -782,7 +788,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
         let cc = CipherConfig {
@@ -794,7 +800,7 @@ mod tests {
 
         kex.state = Some(Box::new(State::NewKeys((cc.clone(), cc))));
 
-        assert!(kex.push_new_keys().is_ok());
+        assert!(kex.push_new_keys(0, 0).is_ok());
 
         match kex.state {
             None => assert!(false),
@@ -811,7 +817,7 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let ks = KeyStreams::new_sha256(&[][..], &[][..], &[][..]);
         let cc = CipherConfig {
@@ -823,7 +829,7 @@ mod tests {
 
         kex.state = Some(Box::new(State::NewKeysSent(cc)));
 
-        assert!(kex.push_new_keys().is_ok());
+        assert!(kex.push_new_keys(0, 0).is_ok());
         assert!(kex.state.is_none());
     }
 
@@ -833,8 +839,8 @@ mod tests {
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
-        let mut kex = ClientKex::new(&config, verifier, "hostname".into(), remote_id);
+        let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
-        assert!(kex.push_new_keys().is_err());
+        assert!(kex.push_new_keys(0, 0).is_err());
     }
 }

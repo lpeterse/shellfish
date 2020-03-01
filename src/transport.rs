@@ -87,7 +87,7 @@ impl<S: Socket> Transport<Client, S> {
         let verifier = verifier.clone();
         let transmitter = Transmitter::new(config, socket).await?;
         let id = transmitter.remote_id().clone();
-        let kex = ClientKex::new(config, verifier, hostname, id);
+        let kex = ClientKex::new(config, verifier, id, hostname);
         let mut transport = Self { transmitter, kex };
         transport.rekey().await?;
         Ok(transport)
@@ -369,7 +369,9 @@ impl<R: Role, S: Socket> Transport<R, S> {
             Some(msg) => {
                 log::debug!("Received MSG_NEWKEYS");
                 let _: MsgNewKeys = msg;
-                let dec = self.kex.push_new_keys()?;
+                let sent = self.transmitter.bytes_sent();
+                let rcvd = self.transmitter.bytes_received();
+                let dec = self.kex.push_new_keys(sent, rcvd)?;
                 let r = self.transmitter.decryption_ctx().update(dec);
                 r.ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 self.consume();

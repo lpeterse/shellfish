@@ -1,3 +1,4 @@
+use crate::codec::*;
 use sha2::{Digest, Sha256};
 
 #[derive(Clone, Debug)]
@@ -83,7 +84,7 @@ impl KeyStreamSha256 {
         let mut state = Sha256::new();
         // RFC: "Here K is encoded as mpint and "A" as byte and session_id as raw
         //       data.  "A" means the single character A, ASCII 65."
-        Self::input_as_mpint(&mut state, &k[..]);
+        Encode::encode(&MPInt(&k[..]), &mut state);
         state.input(&h[..]);
         state.input([idx as u8]);
         state.input(sid);
@@ -102,7 +103,7 @@ impl KeyStreamSha256 {
         let requested = buf.len();
         let mut available = self.stream.len() - self.position;
         while requested > available {
-            Self::input_as_mpint(&mut self.state, &self.k[..]);
+            Encode::encode(&MPInt(&self.k[..]), &mut self.state);
             self.state.input(&self.h[..]);
             self.state.input(&self.stream);
             self.stream
@@ -111,17 +112,6 @@ impl KeyStreamSha256 {
         }
         buf.copy_from_slice(&self.stream[self.position..self.position + requested]);
         self.position += requested;
-    }
-
-    fn input_as_mpint(s: &mut Sha256, k: &[u8]) {
-        if !k.is_empty() && k[0] > 127 {
-            let l = k.len() + 1;
-            s.input([(l >> 24) as u8, (l >> 16) as u8, (l >> 8) as u8, l as u8, 0]);
-        } else {
-            let l = k.len();
-            s.input([(l >> 24) as u8, (l >> 16) as u8, (l >> 8) as u8, l as u8]);
-        }
-        s.input(k);
     }
 }
 

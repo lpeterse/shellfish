@@ -25,7 +25,7 @@ pub trait Kex {
     fn push_init(&mut self, msg: MsgKexInit) -> Result<(), TransportError>;
     fn push_ecdh_init(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError>;
     fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError>;
-    fn push_new_keys(&mut self) -> Result<CipherConfig, TransportError>;
+    fn push_new_keys(&mut self, bytes_sent: u64, bytes_received: u64) -> Result<CipherConfig, TransportError>;
     fn poll<F>(
         &mut self,
         cx: &mut Context,

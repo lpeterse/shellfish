@@ -30,7 +30,7 @@ impl Kex for ServerKex {
     fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
         unimplemented!()
     }
-    fn push_new_keys(&mut self) -> Result<CipherConfig, TransportError> {
+    fn push_new_keys(&mut self, bytes_sent: u64, bytes_received: u64) -> Result<CipherConfig, TransportError> {
         unimplemented!()
     }
     fn poll<F>(
