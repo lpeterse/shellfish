@@ -29,8 +29,8 @@ pub trait AuthenticationAlgorithm {
 /// An identity is `Unknown` if it is not implemented and cannot be interpreted by us.
 #[derive(Clone, Debug, PartialEq)]
 pub enum HostIdentity {
-    Ed25519Key(<SshEd25519 as AuthenticationAlgorithm>::Identity),
     Ed25519Cert(<SshEd25519Cert as AuthenticationAlgorithm>::Identity),
+    Ed25519Key(<SshEd25519 as AuthenticationAlgorithm>::Identity),
     RsaKey(<SshRsa as AuthenticationAlgorithm>::Identity),
     Unknown(UnknownIdentity),
 }
@@ -42,10 +42,25 @@ impl HostIdentity {
     /// assumption in the future. Feel free to fix this as necessary.
     pub fn algorithm(&self) -> &str {
         match self {
-            Self::Ed25519Key(_) => <SshEd25519 as AuthenticationAlgorithm>::NAME,
             Self::Ed25519Cert(_) => <SshEd25519Cert as AuthenticationAlgorithm>::NAME,
+            Self::Ed25519Key(_) => <SshEd25519 as AuthenticationAlgorithm>::NAME,
             Self::RsaKey(_) => <SshRsa as AuthenticationAlgorithm>::NAME,
             Self::Unknown(x) => x.algo.as_str(),
+        }
+    }
+
+    pub fn is_valid_cert(&self, cakey: &HostIdentity) -> bool {
+        match (self, cakey) {
+            (Self::Ed25519Cert(_), Self::Ed25519Key(_)) => false, // FIXME
+            _ => false
+        }
+    }
+
+    pub fn is_pubkey(&self, pubkey: &HostIdentity) -> bool {
+        match (self, pubkey) {
+            (Self::Ed25519Key(x), Self::Ed25519Key(y)) => x == y,
+            (Self::RsaKey(x), Self::RsaKey(y)) => x == y,
+            _ => false
         }
     }
 }
@@ -53,16 +68,16 @@ impl HostIdentity {
 impl Encode for HostIdentity {
     fn size(&self) -> usize {
         match self {
-            Self::Ed25519Key(x) => Encode::size(x),
             Self::Ed25519Cert(x) => Encode::size(x),
+            Self::Ed25519Key(x) => Encode::size(x),
             Self::RsaKey(x) => Encode::size(x),
             Self::Unknown(x) => Encode::size(x),
         }
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         match self {
-            Self::Ed25519Key(x) => Encode::encode(x, e),
             Self::Ed25519Cert(x) => Encode::encode(x, e),
+            Self::Ed25519Key(x) => Encode::encode(x, e),
             Self::RsaKey(x) => Encode::encode(x, e),
             Self::Unknown(x) => Encode::encode(x, e),
         }

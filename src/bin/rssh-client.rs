@@ -22,7 +22,7 @@ fn main() {
 
     futures::executor::block_on(async move {
         let mut client = Client::default();
-        client.config().kex_interval_duration = std::time::Duration::from_millis(500);
+        client.config().kex_interval_duration = std::time::Duration::from_millis(300);
         match client.connect("localhost:22").await {
             Err(e) => log::error!("{:?}", e),
             Ok(conn) => {
