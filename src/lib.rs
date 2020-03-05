@@ -8,6 +8,7 @@ pub mod transport;
 
 pub mod util; // FIXME
 pub mod codec;  // FIXME
+pub mod glob; // FIXME
 pub(crate) mod buffer;
 pub(crate) mod role;
 pub(crate) mod message;

@@ -2,6 +2,7 @@ use base64;
 use rssh::algorithm::authentication::*;
 use rssh::codec::*;
 use rssh::util::*;
+use rssh::glob::*;
 
 #[derive(Clone, Debug)]
 pub struct HostLine {
@@ -14,13 +15,7 @@ pub struct HostLine {
 #[derive(Clone, Debug)]
 pub struct Pattern {
     negated: bool,
-    pattern: String,
-}
-
-impl Pattern {
-    pub fn test(&self, x: &str) -> bool {
-        self.pattern == x
-    }
+    glob: Glob,
 }
 
 #[derive(Clone, Debug)]
@@ -43,12 +38,12 @@ impl HostLine {
                 if n.starts_with('!') {
                     Pattern {
                         negated: true,
-                        pattern: String::from(&n[1..]),
+                        glob: Glob(String::from(&n[1..])),
                     }
                 } else {
                     Pattern {
                         negated: false,
-                        pattern: String::from(n),
+                        glob: Glob(String::from(n)),
                     }
                 }
             })
@@ -66,7 +61,7 @@ impl HostLine {
     pub fn verify(self, name: &str, identity: &HostIdentity) -> Option<bool> {
         let mut name_matches_pattern = false;
         for pattern in &self.names {
-            if pattern.test(name) {
+            if pattern.glob.test(name) {
                 if pattern.negated {
                     // Return early: This line must not be used for this host
                     return None;
