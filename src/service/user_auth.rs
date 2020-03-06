@@ -11,7 +11,7 @@ use self::msg_userauth_request::*;
 use self::signature::*;
 
 use crate::agent::*;
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 use crate::client::*;
 use crate::codec::*;
 use crate::role::*;
@@ -43,10 +43,10 @@ impl UserAuth {
         for (id, comment) in identities {
             log::debug!("Trying identity {}: {}", comment, id.algorithm());
             let success = match id {
-                HostIdentity::Ed25519Key(x) => {
+                Identity::Ed25519Key(x) => {
                     Self::try_pubkey::<S, SshEd25519>(&mut t, &agent, service, user, x).await?
                 }
-                HostIdentity::Ed25519Cert(x) => {
+                Identity::Ed25519Cert(x) => {
                     Self::try_pubkey::<S, SshEd25519Cert>(&mut t, &agent, service, user, x).await?
                 }
                 _ => false,
@@ -64,12 +64,12 @@ impl UserAuth {
         agent: &Agent,
         service: &str,
         user: &str,
-        identity: A::Identity,
+        identity: A::AuthIdentity,
     ) -> Result<bool, UserAuthError>
     where
-        A: AuthenticationAlgorithm,
-        A::Identity: Clone + Encode,
-        A::Signature: Encode + Decode,
+        A: AuthAlgorithm,
+        A::AuthIdentity: Clone + Encode,
+        A::AuthSignature: Encode + Decode,
     {
         let session_id = &transport.session_id();
         let data: SignatureData<A> = SignatureData {
@@ -78,7 +78,9 @@ impl UserAuth {
             service_name: service,
             public_key: identity.clone(),
         };
-        let signature = agent.sign::<A, _>(&identity, &data, Default::default()).await?;
+        let signature = agent
+            .sign::<A, _>(&identity, &data, Default::default())
+            .await?;
         let signature = match signature {
             None => return Ok(false),
             Some(s) => s,

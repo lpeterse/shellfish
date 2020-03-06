@@ -1,6 +1,6 @@
 use super::ecdh_algorithm::*;
 use super::msg_kex_init::MsgKexInit;
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 use crate::codec::*;
 use crate::transport::identification::*;
 
@@ -11,7 +11,7 @@ pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
     pub server_identification: &'a Identification<String>,
     pub client_kex_init: &'a MsgKexInit<&'static str>,
     pub server_kex_init: &'a MsgKexInit,
-    pub server_host_key: &'a HostIdentity,
+    pub server_host_key: &'a Identity,
     pub dh_client_key: &'a A::PublicKey,
     pub dh_server_key: &'a A::PublicKey,
     pub dh_secret: &'a [u8],
@@ -95,7 +95,7 @@ mod tests {
             languages_server_to_client: vec![],
             first_packet_follows: false,
         };
-        let server_host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([
+        let server_host_key = Identity::Ed25519Key(SshEd25519PublicKey([
             106, 114, 105, 46, 246, 21, 248, 172, 243, 187, 200, 45, 247, 246, 225, 218, 206, 250,
             145, 15, 246, 140, 131, 40, 234, 255, 135, 177, 8, 161, 128, 79,
         ]));

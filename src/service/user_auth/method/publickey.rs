@@ -2,19 +2,19 @@ use super::*;
 use crate::algorithm::*;
 
 #[derive(Debug)]
-pub struct PublicKeyMethod<S: AuthenticationAlgorithm> {
-    pub identity: S::Identity,
-    pub signature: Option<S::Signature>,
+pub struct PublicKeyMethod<S: AuthAlgorithm> {
+    pub identity: S::AuthIdentity,
+    pub signature: Option<S::AuthSignature>,
 }
 
-impl<'a, S: AuthenticationAlgorithm> AuthMethod for PublicKeyMethod<S> {
+impl<'a, S: AuthAlgorithm> AuthMethod for PublicKeyMethod<S> {
     const NAME: &'static str = "publickey";
 }
 
-impl<S: AuthenticationAlgorithm> Encode for PublicKeyMethod<S>
+impl<S: AuthAlgorithm> Encode for PublicKeyMethod<S>
 where
-    S::Identity: Encode,
-    S::Signature: Encode,
+    S::AuthIdentity: Encode,
+    S::AuthSignature: Encode,
 {
     fn size(&self) -> usize {
         1 + Encode::size(&S::NAME)
@@ -35,10 +35,10 @@ where
     }
 }
 
-impl<'a, S: AuthenticationAlgorithm> DecodeRef<'a> for PublicKeyMethod<S>
+impl<'a, S: AuthAlgorithm> DecodeRef<'a> for PublicKeyMethod<S>
 where
-    S::Identity: DecodeRef<'a>,
-    S::Signature: DecodeRef<'a>,
+    S::AuthIdentity: DecodeRef<'a>,
+    S::AuthSignature: DecodeRef<'a>,
 {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         let b = d.take_u8()? != 0;
@@ -56,7 +56,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::authentication::*;
+    use crate::algorithm::auth::*;
 
     #[test]
     fn test_debug_01() {

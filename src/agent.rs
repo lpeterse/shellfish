@@ -17,7 +17,7 @@ use self::msg_sign_request::*;
 use self::msg_sign_response::*;
 use self::transmitter::*;
 
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 use crate::codec::*;
 
 use std::convert::TryFrom;
@@ -48,7 +48,7 @@ impl Agent {
     }
 
     /// Request a list of identities from the agent.
-    pub async fn identities(&self) -> Result<Vec<(HostIdentity, String)>, AgentError> {
+    pub async fn identities(&self) -> Result<Vec<(Identity, String)>, AgentError> {
         let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
         t.send(&MsgIdentitiesRequest {}).await?;
         t.receive::<MsgIdentitiesAnswer>()
@@ -61,14 +61,14 @@ impl Agent {
     /// Returns `Ok(None)` in case the agent refused to sign.
     pub async fn sign<S, D>(
         &self,
-        identity: &S::Identity,
+        identity: &S::AuthIdentity,
         data: &D,
-        flags: S::SignatureFlags,
-    ) -> Result<Option<S::Signature>, AgentError>
+        flags: S::AuthSignatureFlags,
+    ) -> Result<Option<S::AuthSignature>, AgentError>
     where
-        S: AuthenticationAlgorithm,
-        S::Identity: Encode,
-        S::Signature: Encode + Decode,
+        S: AuthAlgorithm,
+        S::AuthIdentity: Encode,
+        S::AuthSignature: Encode + Decode,
         D: Encode,
     {
         let msg: MsgSignRequest<S, D> = MsgSignRequest {

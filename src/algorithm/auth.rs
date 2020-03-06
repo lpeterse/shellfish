@@ -1,12 +1,16 @@
+mod identity;
+mod public_key;
+mod signature;
 mod ssh_ed25519;
 mod ssh_ed25519_cert;
 mod ssh_rsa;
-mod unknown;
 
+pub use self::identity::*;
+pub use self::public_key::*;
+pub use self::signature::*;
 pub use self::ssh_ed25519::*;
 pub use self::ssh_ed25519_cert::*;
 pub use self::ssh_rsa::*;
-pub use self::unknown::*;
 
 use crate::codec::*;
 
@@ -14,155 +18,13 @@ use crate::codec::*;
 ///
 /// The algorithms are expected to have an associated identity format (e.g. pubkey or certificate)
 /// and a signature format (see associated types).
-pub trait AuthenticationAlgorithm {
-    type Identity;
-    type Signature;
-    type SignatureFlags: Copy + Default + Into<u32>;
+pub trait AuthAlgorithm {
+    type AuthIdentity;
+    type AuthSignature;
+    type AuthSignatureFlags: Copy + Default + Into<u32>;
 
     /// The identifying algorithm name (e.g. `ssh-ed25519`).
     const NAME: &'static str;
-}
-
-/// A user's or host's identity.
-///
-/// This is either just a key or a certificate.
-/// An identity is `Unknown` if it is not implemented and cannot be interpreted by us.
-#[derive(Clone, Debug, PartialEq)]
-pub enum HostIdentity {
-    Ed25519Cert(<SshEd25519Cert as AuthenticationAlgorithm>::Identity),
-    Ed25519Key(<SshEd25519 as AuthenticationAlgorithm>::Identity),
-    RsaKey(<SshRsa as AuthenticationAlgorithm>::Identity),
-    Unknown(UnknownIdentity),
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub enum PublicKey {
-    Ed25519(SshEd25519PublicKey), // FIXME: Add other algos
-}
-
-impl PublicKey {
-    pub fn decode<'a, D: Decoder<'a>>(d: &mut D, algo: &str) -> Option<PublicKey> {
-        match algo {
-            <SshEd25519 as AuthenticationAlgorithm>::NAME => {
-                Decode::decode(d).map(PublicKey::Ed25519)
-            }
-            _ => None,
-        }
-    }
-}
-
-impl HostIdentity {
-    /// For a given identity, yield the corresponding algorithm name.
-    ///
-    /// NOTE: This is implies that the relation is a bijection which might turn out as a wrong
-    /// assumption in the future. Feel free to fix this as necessary.
-    pub fn algorithm(&self) -> &str {
-        match self {
-            Self::Ed25519Cert(_) => <SshEd25519Cert as AuthenticationAlgorithm>::NAME,
-            Self::Ed25519Key(_) => <SshEd25519 as AuthenticationAlgorithm>::NAME,
-            Self::RsaKey(_) => <SshRsa as AuthenticationAlgorithm>::NAME,
-            Self::Unknown(x) => x.algo.as_str(),
-        }
-    }
-
-    pub fn is_valid_cert(&self, cakey: &PublicKey) -> bool {
-        match (self, cakey) {
-            (Self::Ed25519Cert(_), PublicKey::Ed25519(_)) => false, // FIXME
-            _ => false,
-        }
-    }
-
-    pub fn is_pubkey(&self, pubkey: &PublicKey) -> bool {
-        match (self, pubkey) {
-            (Self::Ed25519Key(x), PublicKey::Ed25519(y)) => x == y,
-            //(Self::RsaKey(x), Self::RsaKey(y)) => x == y, FIXME
-            _ => false,
-        }
-    }
-}
-
-impl Encode for HostIdentity {
-    fn size(&self) -> usize {
-        match self {
-            Self::Ed25519Cert(x) => Encode::size(x),
-            Self::Ed25519Key(x) => Encode::size(x),
-            Self::RsaKey(x) => Encode::size(x),
-            Self::Unknown(x) => Encode::size(x),
-        }
-    }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        match self {
-            Self::Ed25519Cert(x) => Encode::encode(x, e),
-            Self::Ed25519Key(x) => Encode::encode(x, e),
-            Self::RsaKey(x) => Encode::encode(x, e),
-            Self::Unknown(x) => Encode::encode(x, e),
-        }
-    }
-}
-
-impl Decode for HostIdentity {
-    // FIXME
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        None.or_else(|| {
-            let mut d_ = d.clone();
-            let r = d_.isolate_u32be(|x| DecodeRef::decode(x).map(Self::Ed25519Key));
-            if r.is_some() {
-                *d = d_;
-                log::error!("HKJHKJH");
-            };
-            r
-        })
-        .or_else(|| {
-            let mut d_ = d.clone();
-            let r = DecodeRef::decode(&mut d_).map(Self::Ed25519Cert);
-            if r.is_some() {
-                *d = d_
-            };
-            r
-        })
-        .or_else(|| {
-            let mut d_ = d.clone();
-            let r = DecodeRef::decode(&mut d_).map(Self::RsaKey);
-            if r.is_some() {
-                *d = d_
-            };
-            r
-        })
-        .or_else(|| {
-            let mut d_ = d.clone();
-            let r = Decode::decode(&mut d_).map(Self::Unknown);
-            if r.is_some() {
-                *d = d_
-            };
-            r
-        })
-    }
-}
-
-/// A user's or host's signature.
-#[derive(Clone, Debug, PartialEq)]
-pub enum HostSignature {
-    Ed25519Signature(<SshEd25519 as AuthenticationAlgorithm>::Signature),
-}
-
-impl HostSignature {
-    /// Verify a signature by given identity over given data.
-    ///
-    /// Returns error in case the algorithms do not match or the signature is invalid.
-    pub fn verify(&self, id: &HostIdentity, data: &[u8]) -> Result<(), SignatureError> {
-        match (self, id) {
-            (Self::Ed25519Signature(s), HostIdentity::Ed25519Key(i)) => {
-                use ed25519_dalek::{PublicKey, Signature};
-                let key = PublicKey::from_bytes(&i.0[..])
-                    .map_err(|_| SignatureError::InvalidSignature)?;
-                let sig = Signature::from_bytes(&s.0[..])
-                    .map_err(|_| SignatureError::InvalidSignature)?;
-                key.verify(data, &sig)
-                    .map_err(|_| SignatureError::InvalidSignature)
-            }
-            _ => Err(SignatureError::AlgorithmMismatch),
-        }
-    }
 }
 
 impl Encode for HostSignature {
@@ -241,40 +103,33 @@ mod tests {
         }
     }
 
-    fn example_unknown_identity() -> UnknownIdentity {
-        UnknownIdentity {
-            algo: "unknown".into(),
-            data: Vec::from(&b"data"[..]),
-        }
-    }
-
     #[test]
     fn test_algorithm_01() {
-        let key = HostIdentity::Ed25519Key(example_ed25519_key());
+        let key = Identity::Ed25519Key(example_ed25519_key());
         assert_eq!(key.algorithm(), "ssh-ed25519");
     }
 
     #[test]
     fn test_algorithm_02() {
-        let key = HostIdentity::Ed25519Cert(example_ed25519_cert());
+        let key = Identity::Ed25519Cert(example_ed25519_cert());
         assert_eq!(key.algorithm(), "ssh-ed25519-cert-v01@openssh.com");
     }
 
     #[test]
     fn test_algorithm_03() {
-        let key = HostIdentity::RsaKey(example_rsa_key());
+        let key = Identity::RsaKey(example_rsa_key());
         assert_eq!(key.algorithm(), "ssh-rsa");
     }
 
     #[test]
     fn test_algorithm_04() {
-        let key = HostIdentity::Unknown(example_unknown_identity());
+        let key = Identity::Other("unknown".into());
         assert_eq!(key.algorithm(), "unknown");
     }
 
     #[test]
     fn test_encode_01() {
-        let key = HostIdentity::Ed25519Key(example_ed25519_key());
+        let key = Identity::Ed25519Key(example_ed25519_key());
         let actual = BEncoder::encode(&key);
         let expected = [
             0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 32,
@@ -286,7 +141,7 @@ mod tests {
 
     #[test]
     fn test_encode_02() {
-        let key = HostIdentity::Ed25519Cert(example_ed25519_cert());
+        let key = Identity::Ed25519Cert(example_ed25519_cert());
         let actual = BEncoder::encode(&key);
         let expected = [
             0, 0, 1, 130, 0, 0, 0, 32, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 45, 99,
@@ -311,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_encode_03() {
-        let key = HostIdentity::RsaKey(example_rsa_key());
+        let key = Identity::RsaKey(example_rsa_key());
         let actual = BEncoder::encode(&key);
         let expected = [
             0, 0, 1, 23, 0, 0, 0, 7, 115, 115, 104, 45, 114, 115, 97, 0, 0, 0, 3, 1, 0, 1, 0, 0, 1,
@@ -334,19 +189,9 @@ mod tests {
     }
 
     #[test]
-    fn test_encode_04() {
-        let key = HostIdentity::Unknown(example_unknown_identity());
-        let actual = BEncoder::encode(&key);
-        let expected = [
-            0, 0, 0, 7, 117, 110, 107, 110, 111, 119, 110, 0, 0, 0, 4, 100, 97, 116, 97,
-        ];
-        assert_eq!(&actual[..], &expected[..]);
-    }
-
-    #[test]
     fn test_decode_01() {
-        let expected = HostIdentity::Ed25519Key(example_ed25519_key());
-        let actual: HostIdentity = BDecoder::decode(
+        let expected = Identity::Ed25519Key(example_ed25519_key());
+        let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
                 32, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
@@ -359,8 +204,8 @@ mod tests {
 
     #[test]
     fn test_decode_02() {
-        let expected = HostIdentity::Ed25519Cert(example_ed25519_cert());
-        let actual: HostIdentity = BDecoder::decode(
+        let expected = Identity::Ed25519Cert(example_ed25519_cert());
+        let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 1, 130, 0, 0, 0, 32, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 45, 99,
                 101, 114, 116, 45, 118, 48, 49, 64, 111, 112, 101, 110, 115, 115, 104, 46, 99, 111,
@@ -387,8 +232,8 @@ mod tests {
 
     #[test]
     fn test_decode_03() {
-        let expected = HostIdentity::RsaKey(example_rsa_key());
-        let actual: HostIdentity = BDecoder::decode(
+        let expected = Identity::RsaKey(example_rsa_key());
+        let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 1, 23, 0, 0, 0, 7, 115, 115, 104, 45, 114, 115, 97, 0, 0, 0, 3, 1, 0, 1, 0,
                 0, 1, 1, 0, 194, 205, 87, 61, 222, 98, 233, 30, 34, 253, 109, 213, 213, 97, 222,
@@ -414,10 +259,11 @@ mod tests {
 
     #[test]
     fn test_decode_04() {
-        let expected = HostIdentity::Unknown(example_unknown_identity());
-        let actual: HostIdentity = BDecoder::decode(
+        let expected = Identity::Other("unknown".into());
+        let actual: Identity = BDecoder::decode(
             &[
-                0, 0, 0, 7, 117, 110, 107, 110, 111, 119, 110, 0, 0, 0, 4, 100, 97, 116, 97,
+                0, 0, 0, 19, 0, 0, 0, 7, 117, 110, 107, 110, 111, 119, 110, 0, 0, 0, 4, 100, 97,
+                116, 97,
             ][..],
         )
         .unwrap();
@@ -454,7 +300,7 @@ mod tests {
 
     #[test]
     fn test_signature_verify_valid_01() {
-        let id = HostIdentity::Ed25519Key(SshEd25519PublicKey([
+        let id = Identity::Ed25519Key(SshEd25519PublicKey([
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
@@ -473,7 +319,7 @@ mod tests {
 
     #[test]
     fn test_signature_verify_invalid_01() {
-        let id = HostIdentity::Ed25519Key(SshEd25519PublicKey([
+        let id = Identity::Ed25519Key(SshEd25519PublicKey([
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
@@ -496,10 +342,7 @@ mod tests {
 
     #[test]
     fn test_signature_verify_mismatch_01() {
-        let id = HostIdentity::Unknown(UnknownIdentity {
-            algo: "unknown".into(),
-            data: vec![],
-        });
+        let id = Identity::Other("unknown".into());
         let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
@@ -512,6 +355,7 @@ mod tests {
             _ => panic!(),
         }
     }
+
     #[test]
     fn test_signature_error_debug_01() {
         assert_eq!(

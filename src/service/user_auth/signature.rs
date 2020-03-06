@@ -5,17 +5,17 @@ use crate::codec::*;
 use crate::message::*;
 use crate::transport::SessionId;
 
-pub struct SignatureData<'a, S: AuthenticationAlgorithm> {
+pub struct SignatureData<'a, S: AuthAlgorithm> {
     pub session_id: &'a SessionId,
     pub user_name: &'a str,
     pub service_name: &'a str,
-    pub public_key: S::Identity,
+    pub public_key: S::AuthIdentity,
 }
 
-impl<'a, S: AuthenticationAlgorithm> Encode for SignatureData<'a, S>
+impl<'a, S: AuthAlgorithm> Encode for SignatureData<'a, S>
 where
-    S::Identity: Encode,
-    S::Signature: Encode,
+    S::AuthIdentity: Encode,
+    S::AuthSignature: Encode,
 {
     fn size(&self) -> usize {
         Encode::size(&self.session_id)
@@ -42,7 +42,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::algorithm::authentication::*;
+    use crate::algorithm::auth::*;
 
     #[test]
     fn test_encode_01() {

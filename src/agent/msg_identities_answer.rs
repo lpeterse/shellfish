@@ -1,10 +1,10 @@
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug, PartialEq)]
 pub struct MsgIdentitiesAnswer {
-    pub identities: Vec<(HostIdentity, String)>,
+    pub identities: Vec<(Identity, String)>,
 }
 
 impl Message for MsgIdentitiesAnswer {
@@ -64,7 +64,7 @@ mod tests {
         let actual: Vec<u8> = BEncoder::encode(&MsgIdentitiesAnswer {
             identities: vec![
                 (
-                    HostIdentity::RsaKey(SshRsaPublicKey {
+                    Identity::RsaKey(SshRsaPublicKey {
                         public_e: BigUint::new(vec![65537]),
                         public_n: BigUint::new(vec![
                             1536924887, 1797284974, 3382208288, 91659320, 2738779923, 2905806383,
@@ -83,7 +83,7 @@ mod tests {
                     "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so".into(),
                 ),
                 (
-                    HostIdentity::Ed25519Key(SshEd25519PublicKey([
+                    Identity::Ed25519Key(SshEd25519PublicKey([
                         111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178,
                         182, 197, 240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63,
                     ])),
@@ -123,7 +123,7 @@ mod tests {
         let expected = Some(MsgIdentitiesAnswer {
             identities: vec![
                 (
-                    HostIdentity::RsaKey(SshRsaPublicKey {
+                    Identity::RsaKey(SshRsaPublicKey {
                         public_e: BigUint::new(vec![65537]),
                         public_n: BigUint::new(vec![
                             1536924887, 1797284974, 3382208288, 91659320, 2738779923, 2905806383,
@@ -142,7 +142,7 @@ mod tests {
                     "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so".into(),
                 ),
                 (
-                    HostIdentity::Ed25519Key(SshEd25519PublicKey([
+                    Identity::Ed25519Key(SshEd25519PublicKey([
                         111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178,
                         182, 197, 240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63,
                     ])),

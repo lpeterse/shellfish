@@ -11,10 +11,10 @@ impl SshEd25519 {
     const SIG_SIZE: u32 = 64;
 }
 
-impl AuthenticationAlgorithm for SshEd25519 {
-    type Identity = SshEd25519PublicKey;
-    type Signature = SshEd25519Signature;
-    type SignatureFlags = SshEd25519SignatureFlags;
+impl AuthAlgorithm for SshEd25519 {
+    type AuthIdentity = SshEd25519PublicKey;
+    type AuthSignature = SshEd25519Signature;
+    type AuthSignatureFlags = SshEd25519SignatureFlags;
 
     const NAME: &'static str = SshEd25519::NAME;
 }

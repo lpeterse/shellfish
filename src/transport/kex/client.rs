@@ -638,7 +638,7 @@ mod tests {
     /// Shall go into HostKeyVerification state when MSG_ECDH_REPLY with valid signature is pushed
     #[test]
     fn test_client_kex_push_ecdh_reply_01() {
-        use crate::algorithm::authentication::*;
+        use crate::algorithm::auth::*;
         use ed25519_dalek::Keypair;
 
         let keypair = Keypair::from_bytes(
@@ -666,7 +666,7 @@ mod tests {
         si.cookie = KexCookie([2; 16]);
 
         let host_key = keypair.public.to_bytes().clone();
-        let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey(host_key));
+        let host_key = Identity::Ed25519Key(SshEd25519PublicKey(host_key));
         let client_dh_secret = X25519::new();
         let client_dh_public = X25519::public(&client_dh_secret);
         let server_dh_secret = X25519::new();
@@ -716,7 +716,7 @@ mod tests {
     /// Shall return error when MSG_ECDH_REPLY with invalid signature is pushed
     #[test]
     fn test_client_kex_push_ecdh_reply_02() {
-        use crate::algorithm::authentication::*;
+        use crate::algorithm::auth::*;
 
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
@@ -726,7 +726,7 @@ mod tests {
         let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
-        let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([8; 32]));
+        let host_key = Identity::Ed25519Key(SshEd25519PublicKey([8; 32]));
         let client_dh_secret = X25519::new();
         let server_dh_secret = X25519::new();
         let server_dh_public = X25519::public(&server_dh_secret);
@@ -756,7 +756,7 @@ mod tests {
     /// Shall return error when MSG_ECDH_REPLY is pushed onto incompatible state
     #[test]
     fn test_client_kex_push_ecdh_reply_03() {
-        use crate::algorithm::authentication::*;
+        use crate::algorithm::auth::*;
 
         let config = ClientConfig::default();
         let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
@@ -766,7 +766,7 @@ mod tests {
         let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
-        let host_key = HostIdentity::Ed25519Key(SshEd25519PublicKey([8; 32]));
+        let host_key = Identity::Ed25519Key(SshEd25519PublicKey([8; 32]));
         let server_dh_secret = X25519::new();
         let server_dh_public = X25519::public(&server_dh_secret);
 

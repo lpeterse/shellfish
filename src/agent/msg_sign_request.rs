@@ -3,20 +3,20 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgSignRequest<'a, S: AuthenticationAlgorithm, D: Encode> {
-    pub key: &'a S::Identity,
+pub struct MsgSignRequest<'a, S: AuthAlgorithm, D: Encode> {
+    pub key: &'a S::AuthIdentity,
     pub data: &'a D,
-    pub flags: S::SignatureFlags,
+    pub flags: S::AuthSignatureFlags,
 }
 
-impl<'a, S: AuthenticationAlgorithm, D: Encode> Message for MsgSignRequest<'a, S, D> {
+impl<'a, S: AuthAlgorithm, D: Encode> Message for MsgSignRequest<'a, S, D> {
     const NUMBER: u8 = 13;
 }
 
-impl<'a, S: AuthenticationAlgorithm, D: Encode> Encode for MsgSignRequest<'a, S, D>
+impl<'a, S: AuthAlgorithm, D: Encode> Encode for MsgSignRequest<'a, S, D>
 where
-    S::Identity: Encode,
-    S::Signature: Encode,
+    S::AuthIdentity: Encode,
+    S::AuthSignature: Encode,
 {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>()
@@ -40,12 +40,12 @@ mod tests {
 
     pub struct Foobar {}
 
-    impl AuthenticationAlgorithm for Foobar {
+    impl AuthAlgorithm for Foobar {
         const NAME: &'static str = "foobar";
 
-        type Identity = ();
-        type Signature = ();
-        type SignatureFlags = u32;
+        type AuthIdentity = ();
+        type AuthSignature = ();
+        type AuthSignatureFlags = u32;
     }
 
     #[test]

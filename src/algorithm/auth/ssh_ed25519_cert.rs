@@ -26,10 +26,10 @@ impl SshEd25519Cert {
     const NAME: &'static str = "ssh-ed25519-cert-v01@openssh.com";
 }
 
-impl AuthenticationAlgorithm for SshEd25519Cert {
-    type Identity = SshEd25519Certificate;
-    type Signature = SshEd25519Signature;
-    type SignatureFlags = SshEd25519SignatureFlags;
+impl AuthAlgorithm for SshEd25519Cert {
+    type AuthIdentity = SshEd25519Certificate;
+    type AuthSignature = SshEd25519Signature;
+    type AuthSignatureFlags = SshEd25519SignatureFlags;
 
     const NAME: &'static str = SshEd25519Cert::NAME;
 }
@@ -55,7 +55,7 @@ impl Encode for SshEd25519Certificate {
     fn size(&self) -> usize {
         let mut n: usize = 0;
         n += 4;
-        n += Encode::size(&<SshEd25519Cert as AuthenticationAlgorithm>::NAME);
+        n += Encode::size(&<SshEd25519Cert as AuthAlgorithm>::NAME);
         n += Encode::size(&self.nonce[..]);
         n += Encode::size(&self.pk.0[..]);
         n += 8 + 4;
@@ -71,7 +71,7 @@ impl Encode for SshEd25519Certificate {
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         Encode::encode(&((Encode::size(self) - 4) as u32), e);
-        Encode::encode(&<SshEd25519Cert as AuthenticationAlgorithm>::NAME, e);
+        Encode::encode(&<SshEd25519Cert as AuthAlgorithm>::NAME, e);
         Encode::encode(&self.nonce[..], e);
         Encode::encode(&self.pk.0[..], e);
         Encode::encode(&self.serial, e);
@@ -92,7 +92,7 @@ impl Decode for SshEd25519Certificate {
     fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.take_u32be().map(drop)?;
         let _: &str = DecodeRef::decode(c)
-            .filter(|x| *x == <SshEd25519Cert as AuthenticationAlgorithm>::NAME)?;
+            .filter(|x| *x == <SshEd25519Cert as AuthAlgorithm>::NAME)?;
         Self {
             nonce: {
                 c.expect_u32be(32)?;

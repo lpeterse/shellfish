@@ -1,15 +1,15 @@
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 
 use futures::future::FutureExt;
 use std::future::Future;
 use std::ops::Deref;
 
 pub trait HostKeyVerifier: Send + Sync + 'static {
-    fn verify(&self, name: &str, identity: &HostIdentity) -> VerificationFuture;
+    fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture;
 }
 
 impl HostKeyVerifier for Box<dyn HostKeyVerifier> {
-    fn verify(&self, name: &str, identity: &HostIdentity) -> VerificationFuture {
+    fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture {
         self.deref().verify(name, identity)
     }
 }
@@ -27,7 +27,7 @@ pub enum VerificationError {
 pub struct AcceptingVerifier {}
 
 impl HostKeyVerifier for AcceptingVerifier {
-    fn verify(&self, name: &str, identity: &HostIdentity) -> VerificationFuture {
+    fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture {
         log::warn!(
             "DANGER: Blindly accepting host key {:?} for {}",
             identity,
@@ -40,7 +40,7 @@ impl HostKeyVerifier for AcceptingVerifier {
 pub struct RejectingVerifier {}
 
 impl HostKeyVerifier for RejectingVerifier {
-    fn verify(&self, name: &str, identity: &HostIdentity) -> VerificationFuture {
+    fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture {
         log::error!("DANGER: Rejecting host key {:?} for {}", identity, name);
         futures::future::ready(Err(VerificationError::KeyNotFound)).boxed()
     }

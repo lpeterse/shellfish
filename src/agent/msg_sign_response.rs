@@ -1,19 +1,19 @@
+use crate::algorithm::*;
 use crate::codec::*;
 use crate::message::*;
-use crate::algorithm::*;
 
 #[derive(Debug, PartialEq)]
-pub struct MsgSignResponse<S: AuthenticationAlgorithm> {
-    pub signature: S::Signature,
+pub struct MsgSignResponse<S: AuthAlgorithm> {
+    pub signature: S::AuthSignature,
 }
 
-impl <S: AuthenticationAlgorithm> Message for MsgSignResponse<S> {
+impl<S: AuthAlgorithm> Message for MsgSignResponse<S> {
     const NUMBER: u8 = 14;
 }
 
-impl <S: AuthenticationAlgorithm> Encode for MsgSignResponse<S>
+impl<S: AuthAlgorithm> Encode for MsgSignResponse<S>
 where
-    S::Signature: Encode
+    S::AuthSignature: Encode,
 {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>() + Encode::size(&self.signature)
@@ -24,16 +24,17 @@ where
     }
 }
 
-impl <S: AuthenticationAlgorithm> Decode for MsgSignResponse<S>
+impl<S: AuthAlgorithm> Decode for MsgSignResponse<S>
 where
-    S::Signature: Decode
+    S::AuthSignature: Decode,
 {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         log::error!("*");
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            signature: DecodeRef::decode(d)?
-        }.into()
+            signature: DecodeRef::decode(d)?,
+        }
+        .into()
     }
 }
 
@@ -44,12 +45,12 @@ mod tests {
     #[derive(Debug, PartialEq)]
     pub struct Foobar {}
 
-    impl AuthenticationAlgorithm for Foobar {
+    impl AuthAlgorithm for Foobar {
         const NAME: &'static str = "foobar";
 
-        type Identity = ();
-        type Signature = String;
-        type SignatureFlags = u32;
+        type AuthIdentity = ();
+        type AuthSignature = String;
+        type AuthSignatureFlags = u32;
     }
 
     #[test]
@@ -68,7 +69,8 @@ mod tests {
         let msg: MsgSignResponse<Foobar> = MsgSignResponse {
             signature: "SIGNATURE".into(),
         };
-        assert_eq!(Some(msg),
+        assert_eq!(
+            Some(msg),
             BDecoder::decode(&[14, 0, 0, 0, 9, 83, 73, 71, 78, 65, 84, 85, 82, 69][..])
         );
     }

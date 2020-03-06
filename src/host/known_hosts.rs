@@ -1,5 +1,5 @@
 use super::verification::{HostKeyVerifier, VerificationError, VerificationFuture};
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 use crate::codec::*;
 use crate::glob::*;
 use crate::util::*;
@@ -19,7 +19,7 @@ impl KnownHosts {
     pub async fn verify(
         &self,
         name: &str,
-        identity: &HostIdentity,
+        identity: &Identity,
     ) -> Result<(), VerificationError> {
         for path in &self.paths {
             log::debug!("Looking for {} in {:?}", name, path);
@@ -36,7 +36,7 @@ impl KnownHosts {
     pub async fn verify_path(
         path: &PathBuf,
         name: &str,
-        identity: &HostIdentity,
+        identity: &Identity,
     ) -> Result<(), VerificationError> {
         let e = |e: std::io::Error| VerificationError::FileError(e.kind());
         let file = File::open(path).await.map_err(e)?;
@@ -46,7 +46,7 @@ impl KnownHosts {
     pub async fn verify_file<T: Read + Unpin>(
         file: T,
         name: &str,
-        identity: &HostIdentity,
+        identity: &Identity,
     ) -> Result<(), VerificationError> {
         let mut lines = BufReader::new(file).lines().enumerate();
         while let Some(line) = lines.next().await {
@@ -74,7 +74,7 @@ impl KnownHosts {
 }
 
 impl HostKeyVerifier for KnownHosts {
-    fn verify(&self, name: &str, identity: &HostIdentity) -> VerificationFuture {
+    fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture {
         let self_ = self.clone();
         let name: String = name.into();
         let identity = identity.clone();
@@ -146,7 +146,7 @@ impl Line {
         })
     }
 
-    pub fn verify(self, name: &str, identity: &HostIdentity) -> Result<(), VerificationError> {
+    pub fn verify(self, name: &str, identity: &Identity) -> Result<(), VerificationError> {
         let e = VerificationError::KeyNotFound;
         // Check whether this line is applicable for the host
         assume(self.name.test(name)).ok_or(e)?;

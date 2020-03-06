@@ -5,10 +5,10 @@ use num_bigint::BigUint;
 
 pub struct SshRsa {}
 
-impl AuthenticationAlgorithm for SshRsa {
-    type Identity = SshRsaPublicKey;
-    type Signature = ();
-    type SignatureFlags = SshRsaSignatureFlags;
+impl AuthAlgorithm for SshRsa {
+    type AuthIdentity = SshRsaPublicKey;
+    type AuthSignature = ();
+    type AuthSignatureFlags = SshRsaSignatureFlags;
 
     const NAME: &'static str = "ssh-rsa";
 }
@@ -21,13 +21,13 @@ pub struct SshRsaPublicKey {
 
 impl Encode for SshRsaPublicKey {
     fn size(&self) -> usize {
-        4 + Encode::size(&<SshRsa as AuthenticationAlgorithm>::NAME)
+        4 + Encode::size(&<SshRsa as AuthAlgorithm>::NAME)
             + Encode::size(&self.public_e)
             + Encode::size(&self.public_n)
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u32be((Encode::size(self) - 4) as u32);
-        Encode::encode(&<SshRsa as AuthenticationAlgorithm>::NAME, c);
+        Encode::encode(&<SshRsa as AuthAlgorithm>::NAME, c);
         Encode::encode(&self.public_e, c);
         Encode::encode(&self.public_n, c);
     }
@@ -37,7 +37,7 @@ impl<'a> DecodeRef<'a> for SshRsaPublicKey {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let _len = c.take_u32be()?; // TODO: use
         let _: &str =
-            DecodeRef::decode(c).filter(|x| *x == <SshRsa as AuthenticationAlgorithm>::NAME)?;
+            DecodeRef::decode(c).filter(|x| *x == <SshRsa as AuthAlgorithm>::NAME)?;
         let e = DecodeRef::decode(c)?;
         let n = DecodeRef::decode(c)?;
         Some(SshRsaPublicKey {

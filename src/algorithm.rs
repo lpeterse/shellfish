@@ -1,9 +1,9 @@
-pub mod authentication;
+pub mod auth;
 pub mod compression;
 pub mod encryption;
 pub mod kex;
 
-pub use self::authentication::AuthenticationAlgorithm;
+pub use self::auth::AuthAlgorithm;
 pub use self::compression::CompressionAlgorithm;
 pub use self::encryption::EncryptionAlgorithm;
 pub use self::kex::KexAlgorithm;
@@ -14,7 +14,7 @@ pub(crate) const KEX_ALGORITHMS: [&'static str; 2] = [
 ];
 
 pub(crate) const HOST_KEY_ALGORITHMS: [&'static str; 1] =
-    [<self::authentication::SshEd25519 as AuthenticationAlgorithm>::NAME];
+    [<self::auth::SshEd25519 as AuthAlgorithm>::NAME];
 
 pub(crate) const MAC_ALGORITHMS: [&'static str; 0] = [];
 

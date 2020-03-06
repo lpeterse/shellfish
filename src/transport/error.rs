@@ -1,6 +1,6 @@
 use super::*;
 
-use crate::algorithm::authentication::*;
+use crate::algorithm::auth::*;
 use crate::host::*;
 use crate::transport::msg_disconnect::Reason;
 
