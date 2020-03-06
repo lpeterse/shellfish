@@ -35,6 +35,22 @@ pub enum HostIdentity {
     Unknown(UnknownIdentity),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum PublicKey {
+    Ed25519(SshEd25519PublicKey), // FIXME: Add other algos
+}
+
+impl PublicKey {
+    pub fn decode<'a, D: Decoder<'a>>(d: &mut D, algo: &str) -> Option<PublicKey> {
+        match algo {
+            <SshEd25519 as AuthenticationAlgorithm>::NAME => {
+                Decode::decode(d).map(PublicKey::Ed25519)
+            }
+            _ => None,
+        }
+    }
+}
+
 impl HostIdentity {
     /// For a given identity, yield the corresponding algorithm name.
     ///
@@ -49,18 +65,18 @@ impl HostIdentity {
         }
     }
 
-    pub fn is_valid_cert(&self, cakey: &HostIdentity) -> bool {
+    pub fn is_valid_cert(&self, cakey: &PublicKey) -> bool {
         match (self, cakey) {
-            (Self::Ed25519Cert(_), Self::Ed25519Key(_)) => false, // FIXME
-            _ => false
+            (Self::Ed25519Cert(_), PublicKey::Ed25519(_)) => false, // FIXME
+            _ => false,
         }
     }
 
-    pub fn is_pubkey(&self, pubkey: &HostIdentity) -> bool {
+    pub fn is_pubkey(&self, pubkey: &PublicKey) -> bool {
         match (self, pubkey) {
-            (Self::Ed25519Key(x), Self::Ed25519Key(y)) => x == y,
-            (Self::RsaKey(x), Self::RsaKey(y)) => x == y,
-            _ => false
+            (Self::Ed25519Key(x), PublicKey::Ed25519(y)) => x == y,
+            //(Self::RsaKey(x), Self::RsaKey(y)) => x == y, FIXME
+            _ => false,
         }
     }
 }
@@ -85,12 +101,14 @@ impl Encode for HostIdentity {
 }
 
 impl Decode for HostIdentity {
+    // FIXME
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         None.or_else(|| {
             let mut d_ = d.clone();
-            let r = DecodeRef::decode(&mut d_).map(Self::Ed25519Key);
+            let r = d_.isolate_u32be(|x| DecodeRef::decode(x).map(Self::Ed25519Key));
             if r.is_some() {
-                *d = d_
+                *d = d_;
+                log::error!("HKJHKJH");
             };
             r
         })
@@ -494,10 +512,15 @@ mod tests {
             _ => panic!(),
         }
     }
-    
     #[test]
     fn test_signature_error_debug_01() {
-        assert_eq!(format!("{:?}", SignatureError::InvalidSignature), "InvalidSignature");
-        assert_eq!(format!("{:?}", SignatureError::AlgorithmMismatch), "AlgorithmMismatch");
+        assert_eq!(
+            format!("{:?}", SignatureError::InvalidSignature),
+            "InvalidSignature"
+        );
+        assert_eq!(
+            format!("{:?}", SignatureError::AlgorithmMismatch),
+            "AlgorithmMismatch"
+        );
     }
 }

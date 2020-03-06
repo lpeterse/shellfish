@@ -127,7 +127,7 @@ impl Decode for SshEd25519Certificate {
                 let len = c.take_u32be()?;
                 Vec::from(c.take_bytes(len as usize)?)
             },
-            signature_key: Decode::decode(c)?,
+            signature_key: c.isolate_u32be(|x| DecodeRef::decode(x))?,
             signature: Decode::decode(c)?,
         }
         .into()

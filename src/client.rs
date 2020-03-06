@@ -66,7 +66,7 @@ impl Default for Client {
                 .or_else(|_| std::env::var("USER"))
                 .ok(),
             agent: Agent::new_env(),
-            hostkey_verifier: Arc::new(Box::new(AcceptingVerifier {})),
+            hostkey_verifier: Arc::new(Box::new(KnownHosts::default())),
         }
     }
 }

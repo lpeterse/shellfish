@@ -38,7 +38,7 @@ impl Encode for SshEd25519PublicKey {
 impl Decode for SshEd25519PublicKey {
     fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let mut k = [0; 32];
-        c.expect_u32be(4 + SshEd25519::NAME_SIZE + 4 + SshEd25519::KEY_SIZE)?;
+        //c.expect_u32be(4 + SshEd25519::NAME_SIZE + 4 + SshEd25519::KEY_SIZE)?;
         c.expect_u32be(SshEd25519::NAME_SIZE)?;
         c.expect_bytes(&SshEd25519::NAME)?;
         c.expect_u32be(SshEd25519::KEY_SIZE)?;

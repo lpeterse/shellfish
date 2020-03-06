@@ -64,7 +64,7 @@ impl UserAuth {
         agent: &Agent,
         service: &str,
         user: &str,
-        id: A::Identity,
+        identity: A::Identity,
     ) -> Result<bool, UserAuthError>
     where
         A: AuthenticationAlgorithm,
@@ -76,9 +76,9 @@ impl UserAuth {
             session_id,
             user_name: user,
             service_name: service,
-            public_key: id.clone(),
+            public_key: identity.clone(),
         };
-        let signature = agent.sign::<A, _>(&id, &data, Default::default()).await?;
+        let signature = agent.sign::<A, _>(&identity, &data, Default::default()).await?;
         let signature = match signature {
             None => return Ok(false),
             Some(s) => s,
@@ -87,7 +87,7 @@ impl UserAuth {
             user_name: user,
             service_name: service,
             method: PublicKeyMethod {
-                public_key: id,
+                identity,
                 signature: Some(signature),
             },
         };

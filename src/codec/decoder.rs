@@ -24,10 +24,22 @@ pub trait Decoder<'a>: Clone {
     fn expect_true(&mut self) -> Option<()>;
     fn expect_false(&mut self) -> Option<()>;
     fn expect_bytes<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
+
+    fn isolate_u32be<T, F>(&mut self, f: F) -> Option<T>
+    where
+        F: FnOnce(&mut BDecoder<'a>) -> Option<T>,
+    {
+        let len = self.take_u32be()?;
+        let bytes = self.take_bytes(len as usize)?;
+        let mut inner = BDecoder(bytes);
+        let result = f(&mut inner)?;
+        inner.take_eoi()?;
+        Some(result)
+    }
 }
 
 /// The `BDecoder` is just a shrinking slice of input.
-/// 
+///
 /// The state of the decoder is undefined after it failed unless a specific decoder function states
 /// something else (no backtracking by default).
 #[derive(Copy, Clone, Debug)]

@@ -1,8 +1,8 @@
 use super::*;
 
 use crate::algorithm::authentication::*;
-use crate::transport::msg_disconnect::Reason;
 use crate::host::*;
+use crate::transport::msg_disconnect::Reason;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TransportError {
@@ -12,7 +12,7 @@ pub enum TransportError {
     ProtocolError,
     BadPacketLength,
     InvalidSignature,
-    HostKeyVerificationError(HostKeyVerificationError),
+    HostKeyVerificationError(VerificationError),
     MessageIntegrity,
     MessageUnexpected,
     MessageUnimplemented,
@@ -38,8 +38,8 @@ impl From<SignatureError> for TransportError {
     }
 }
 
-impl From<HostKeyVerificationError> for TransportError {
-    fn from(e: HostKeyVerificationError) -> Self {
+impl From<VerificationError> for TransportError {
+    fn from(e: VerificationError) -> Self {
         Self::HostKeyVerificationError(e)
     }
 }

@@ -3,7 +3,7 @@ use crate::algorithm::*;
 
 #[derive(Debug)]
 pub struct PublicKeyMethod<S: AuthenticationAlgorithm> {
-    pub public_key: S::Identity,
+    pub identity: S::Identity,
     pub signature: Option<S::Signature>,
 }
 
@@ -18,7 +18,7 @@ where
 {
     fn size(&self) -> usize {
         1 + Encode::size(&S::NAME)
-            + Encode::size(&self.public_key)
+            + Encode::size(&self.identity)
             + match self.signature {
                 None => 0,
                 Some(ref x) => Encode::size(x),
@@ -27,7 +27,7 @@ where
     fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u8(self.signature.is_some() as u8);
         Encode::encode(&S::NAME, e);
-        Encode::encode(&self.public_key, e);
+        Encode::encode(&self.identity, e);
         match self.signature {
             None => (),
             Some(ref x) => Encode::encode(x, e),
@@ -43,10 +43,10 @@ where
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         let b = d.take_u8()? != 0;
         let _: &str = DecodeRef::decode(d).filter(|x| *x == S::NAME)?;
-        let public_key = DecodeRef::decode(d)?;
+        let identity = d.isolate_u32be(|x| DecodeRef::decode(x))?;
         let signature = if b { Some(DecodeRef::decode(d)?) } else { None };
         PublicKeyMethod {
-            public_key,
+            identity,
             signature,
         }
         .into()
@@ -63,17 +63,17 @@ mod tests {
         let pk = SshEd25519PublicKey([2; 32]);
         let sg = SshEd25519Signature([3; 64]);
         let x: PublicKeyMethod<SshEd25519> = PublicKeyMethod {
-            public_key: pk,
+            identity: pk,
             signature: Some(sg),
         };
-        assert_eq!(format!("{:?}", x), "PublicKeyMethod { public_key: SshEd25519PublicKey([2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]), signature: Some(SshEd25519Signature([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])) }");
+        assert_eq!(format!("{:?}", x), "PublicKeyMethod { identity: SshEd25519PublicKey([2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]), signature: Some(SshEd25519Signature([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])) }");
     }
 
     #[test]
     fn test_encode_01() {
         let pk = SshEd25519PublicKey([2; 32]);
         let x: PublicKeyMethod<SshEd25519> = PublicKeyMethod {
-            public_key: pk,
+            identity: pk,
             signature: None,
         };
         let actual = BEncoder::encode(&x);
@@ -90,7 +90,7 @@ mod tests {
         let pk = SshEd25519PublicKey([2; 32]);
         let sg = SshEd25519Signature([3; 64]);
         let x: PublicKeyMethod<SshEd25519> = PublicKeyMethod {
-            public_key: pk,
+            identity: pk,
             signature: Some(sg),
         };
         let actual = BEncoder::encode(&x);
@@ -117,7 +117,7 @@ mod tests {
             ][..],
         )
         .unwrap();
-        assert_eq!(x.public_key.0, pk.0);
+        assert_eq!(x.identity.0, pk.0);
         assert_eq!(x.signature, None);
     }
 
@@ -137,7 +137,7 @@ mod tests {
             ][..],
         )
         .unwrap();
-        assert_eq!(x.public_key.0, pk.0);
+        assert_eq!(x.identity.0, pk.0);
         assert_eq!(x.signature.unwrap().0[..], sg.0[..]);
     }
 }

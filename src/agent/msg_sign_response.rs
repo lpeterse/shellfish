@@ -29,6 +29,7 @@ where
     S::Signature: Decode
 {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        log::error!("*");
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             signature: DecodeRef::decode(d)?

@@ -252,7 +252,7 @@ impl Kex for ClientKex {
                         }
                     }
                     State::HostKeyVerification((verified, enc, dec)) => {
-                        ready!(verified.poll_unpin(cx))?;
+                        ready!(core::pin::Pin::as_mut(verified).poll(cx))?;
                         self.state = Some(Box::new(State::NewKeys((enc.clone(), dec.clone()))));
                         continue;
                     }
