@@ -151,7 +151,7 @@ impl Kex for ClientKex {
                     .sha256();
                     log::error!("{:?} {:?} {:?}", k, dh_public, msg.dh_public);
                     // Verify the host key signature
-                    msg.signature.verify(&msg.host_key, &h[..])?;
+                    msg.signature.verify(&msg.host_key.public_key(), &h[..])?;
                     // The session id is only computed during first kex and constant afterwards
                     self.session_id.update(h);
                     let keys = KeyStreams::new_sha256(k, &h, &self.session_id);
@@ -666,7 +666,7 @@ mod tests {
         si.cookie = KexCookie([2; 16]);
 
         let host_key = keypair.public.to_bytes().clone();
-        let host_key = Identity::Ed25519Key(SshEd25519PublicKey(host_key));
+        let host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey(host_key)));
         let client_dh_secret = X25519::new();
         let client_dh_public = X25519::public(&client_dh_secret);
         let server_dh_secret = X25519::new();
@@ -726,7 +726,7 @@ mod tests {
         let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
-        let host_key = Identity::Ed25519Key(SshEd25519PublicKey([8; 32]));
+        let host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([8; 32])));
         let client_dh_secret = X25519::new();
         let server_dh_secret = X25519::new();
         let server_dh_public = X25519::public(&server_dh_secret);
@@ -766,7 +766,7 @@ mod tests {
         let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
-        let host_key = Identity::Ed25519Key(SshEd25519PublicKey([8; 32]));
+        let host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([8; 32])));
         let server_dh_secret = X25519::new();
         let server_dh_public = X25519::public(&server_dh_secret);
 

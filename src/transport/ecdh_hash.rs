@@ -95,10 +95,10 @@ mod tests {
             languages_server_to_client: vec![],
             first_packet_follows: false,
         };
-        let server_host_key = Identity::Ed25519Key(SshEd25519PublicKey([
+        let server_host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([
             106, 114, 105, 46, 246, 21, 248, 172, 243, 187, 200, 45, 247, 246, 225, 218, 206, 250,
             145, 15, 246, 140, 131, 40, 234, 255, 135, 177, 8, 161, 128, 79,
-        ]));
+        ])));
         let dh_client_key = x25519_dalek::PublicKey::from([
             163, 184, 73, 53, 101, 235, 117, 249, 31, 97, 178, 63, 135, 35, 65, 5, 189, 180, 255,
             250, 242, 232, 76, 164, 186, 212, 21, 0, 223, 144, 162, 77,

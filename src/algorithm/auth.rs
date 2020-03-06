@@ -1,3 +1,4 @@
+mod certificate;
 mod identity;
 mod public_key;
 mod signature;
@@ -5,6 +6,7 @@ mod ssh_ed25519;
 mod ssh_ed25519_cert;
 mod ssh_rsa;
 
+pub use self::certificate::*;
 pub use self::identity::*;
 pub use self::public_key::*;
 pub use self::signature::*;
@@ -105,31 +107,31 @@ mod tests {
 
     #[test]
     fn test_algorithm_01() {
-        let key = Identity::Ed25519Key(example_ed25519_key());
+        let key = Identity::PublicKey(PublicKey::Ed25519(example_ed25519_key()));
         assert_eq!(key.algorithm(), "ssh-ed25519");
     }
 
     #[test]
     fn test_algorithm_02() {
-        let key = Identity::Ed25519Cert(example_ed25519_cert());
+        let key = Identity::Certificate(Certificate::Ed25519(example_ed25519_cert()));
         assert_eq!(key.algorithm(), "ssh-ed25519-cert-v01@openssh.com");
     }
 
     #[test]
     fn test_algorithm_03() {
-        let key = Identity::RsaKey(example_rsa_key());
+        let key = Identity::PublicKey(PublicKey::Rsa(example_rsa_key()));
         assert_eq!(key.algorithm(), "ssh-rsa");
     }
 
     #[test]
     fn test_algorithm_04() {
-        let key = Identity::Other("unknown".into());
+        let key = Identity::PublicKey(PublicKey::Other("unknown".into()));
         assert_eq!(key.algorithm(), "unknown");
     }
 
     #[test]
     fn test_encode_01() {
-        let key = Identity::Ed25519Key(example_ed25519_key());
+        let key = Identity::PublicKey(PublicKey::Ed25519(example_ed25519_key()));
         let actual = BEncoder::encode(&key);
         let expected = [
             0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 32,
@@ -141,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_encode_02() {
-        let key = Identity::Ed25519Cert(example_ed25519_cert());
+        let key = Identity::Certificate(Certificate::Ed25519(example_ed25519_cert()));
         let actual = BEncoder::encode(&key);
         let expected = [
             0, 0, 1, 130, 0, 0, 0, 32, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 45, 99,
@@ -166,7 +168,7 @@ mod tests {
 
     #[test]
     fn test_encode_03() {
-        let key = Identity::RsaKey(example_rsa_key());
+        let key = Identity::PublicKey(PublicKey::Rsa(example_rsa_key()));
         let actual = BEncoder::encode(&key);
         let expected = [
             0, 0, 1, 23, 0, 0, 0, 7, 115, 115, 104, 45, 114, 115, 97, 0, 0, 0, 3, 1, 0, 1, 0, 0, 1,
@@ -190,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_decode_01() {
-        let expected = Identity::Ed25519Key(example_ed25519_key());
+        let expected = Identity::PublicKey(PublicKey::Ed25519(example_ed25519_key()));
         let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
@@ -204,7 +206,7 @@ mod tests {
 
     #[test]
     fn test_decode_02() {
-        let expected = Identity::Ed25519Cert(example_ed25519_cert());
+        let expected = Identity::Certificate(Certificate::Ed25519(example_ed25519_cert()));
         let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 1, 130, 0, 0, 0, 32, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 45, 99,
@@ -232,7 +234,7 @@ mod tests {
 
     #[test]
     fn test_decode_03() {
-        let expected = Identity::RsaKey(example_rsa_key());
+        let expected = Identity::PublicKey(PublicKey::Rsa(example_rsa_key()));
         let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 1, 23, 0, 0, 0, 7, 115, 115, 104, 45, 114, 115, 97, 0, 0, 0, 3, 1, 0, 1, 0,
@@ -259,7 +261,7 @@ mod tests {
 
     #[test]
     fn test_decode_04() {
-        let expected = Identity::Other("unknown".into());
+        let expected = Identity::PublicKey(PublicKey::Other("unknown".into()));
         let actual: Identity = BDecoder::decode(
             &[
                 0, 0, 0, 19, 0, 0, 0, 7, 117, 110, 107, 110, 111, 119, 110, 0, 0, 0, 4, 100, 97,
@@ -300,7 +302,7 @@ mod tests {
 
     #[test]
     fn test_signature_verify_valid_01() {
-        let id = Identity::Ed25519Key(SshEd25519PublicKey([
+        let pk = PublicKey::Ed25519(SshEd25519PublicKey([
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
@@ -314,12 +316,12 @@ mod tests {
             78, 0, 134, 150, 89, 178, 20, 41, 42, 222, 78, 127, 161, 158, 105, 59, 33, 37, 222,
             103, 4, 44, 156, 174, 112, 125, 167, 190, 71, 199, 166, 114,
         ];
-        assert!(sig.verify(&id, &data[..]).is_ok());
+        assert!(sig.verify(&pk, &data[..]).is_ok());
     }
 
     #[test]
     fn test_signature_verify_invalid_01() {
-        let id = Identity::Ed25519Key(SshEd25519PublicKey([
+        let pk = PublicKey::Ed25519(SshEd25519PublicKey([
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
@@ -334,7 +336,7 @@ mod tests {
             103, 4, 44, 156, 174, 112, 125, 167, 190, 71, 199, 166,
             115, // last byte different!
         ];
-        match sig.verify(&id, &data[..]) {
+        match sig.verify(&pk, &data[..]) {
             Err(SignatureError::InvalidSignature) => (),
             _ => panic!(),
         }
@@ -342,7 +344,7 @@ mod tests {
 
     #[test]
     fn test_signature_verify_mismatch_01() {
-        let id = Identity::Other("unknown".into());
+        let pk = PublicKey::Other("unknown".into());
         let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
@@ -350,7 +352,7 @@ mod tests {
             244, 106, 208, 68, 88, 123, 26, 8,
         ]));
         let data = [];
-        match sig.verify(&id, &data[..]) {
+        match sig.verify(&pk, &data[..]) {
             Err(SignatureError::AlgorithmMismatch) => (),
             _ => panic!(),
         }

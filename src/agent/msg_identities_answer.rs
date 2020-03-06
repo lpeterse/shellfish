@@ -64,7 +64,7 @@ mod tests {
         let actual: Vec<u8> = BEncoder::encode(&MsgIdentitiesAnswer {
             identities: vec![
                 (
-                    Identity::RsaKey(SshRsaPublicKey {
+                    Identity::PublicKey(PublicKey::Rsa(SshRsaPublicKey {
                         public_e: BigUint::new(vec![65537]),
                         public_n: BigUint::new(vec![
                             1536924887, 1797284974, 3382208288, 91659320, 2738779923, 2905806383,
@@ -79,14 +79,14 @@ mod tests {
                             1517143872, 1165089994, 3059788424, 86980362, 1256028572, 1213756191,
                             3579960868, 587034069, 3731024158, 3268237117,
                         ]),
-                    }),
+                    })),
                     "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so".into(),
                 ),
                 (
-                    Identity::Ed25519Key(SshEd25519PublicKey([
+                    Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([
                         111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178,
                         182, 197, 240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63,
-                    ])),
+                    ]))),
                     "rssh-example".into(),
                 ),
             ],
@@ -123,7 +123,7 @@ mod tests {
         let expected = Some(MsgIdentitiesAnswer {
             identities: vec![
                 (
-                    Identity::RsaKey(SshRsaPublicKey {
+                    Identity::PublicKey(PublicKey::Rsa(SshRsaPublicKey {
                         public_e: BigUint::new(vec![65537]),
                         public_n: BigUint::new(vec![
                             1536924887, 1797284974, 3382208288, 91659320, 2738779923, 2905806383,
@@ -138,14 +138,14 @@ mod tests {
                             1517143872, 1165089994, 3059788424, 86980362, 1256028572, 1213756191,
                             3579960868, 587034069, 3731024158, 3268237117,
                         ]),
-                    }),
+                    })),
                     "/usr/lib/x86_64-linux-gnu/opensc-pkcs11.so".into(),
                 ),
                 (
-                    Identity::Ed25519Key(SshEd25519PublicKey([
+                    Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([
                         111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178,
                         182, 197, 240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63,
-                    ])),
+                    ]))),
                     "rssh-example".into(),
                 ),
             ],

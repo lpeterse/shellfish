@@ -10,9 +10,9 @@ impl HostSignature {
     /// Verify a signature by given identity over given data.
     ///
     /// Returns error in case the algorithms do not match or the signature is invalid.
-    pub fn verify(&self, id: &Identity, data: &[u8]) -> Result<(), SignatureError> {
+    pub fn verify(&self, id: &PublicKey, data: &[u8]) -> Result<(), SignatureError> {
         match (self, id) {
-            (Self::Ed25519Signature(s), Identity::Ed25519Key(i)) => {
+            (Self::Ed25519Signature(s), PublicKey::Ed25519(i)) => {
                 use ed25519_dalek::{PublicKey, Signature};
                 let key = PublicKey::from_bytes(&i.0[..])
                     .map_err(|_| SignatureError::InvalidSignature)?;

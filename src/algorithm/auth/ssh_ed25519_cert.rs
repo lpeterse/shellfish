@@ -51,6 +51,12 @@ pub struct SshEd25519Certificate {
     pub signature: SshEd25519Signature,
 }
 
+impl SshEd25519Certificate {
+    pub fn public_key(&self) -> PublicKey {
+        PublicKey::Ed25519(self.pk.clone())
+    }
+}
+
 impl Encode for SshEd25519Certificate {
     fn size(&self) -> usize {
         let mut n: usize = 0;

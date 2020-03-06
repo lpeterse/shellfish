@@ -83,7 +83,7 @@ mod tests {
     fn test_encode_01() {
         let es = TestAlgorithm::new();
         let ep = TestAlgorithm::public(&es);
-        let host_key: Identity = Identity::Ed25519Key(SshEd25519PublicKey([23; 32]));
+        let host_key: Identity = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([23; 32])));
         let host_signature: HostSignature =
             HostSignature::Ed25519Signature(SshEd25519Signature([47; 64]));
         let msg = MsgKexEcdhReply::<TestAlgorithm> {
@@ -111,7 +111,7 @@ mod tests {
     fn test_decode_01() {
         let es = TestAlgorithm::new();
         let ep = TestAlgorithm::public(&es);
-        let host_key: Identity = Identity::Ed25519Key(SshEd25519PublicKey([23; 32]));
+        let host_key: Identity = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([23; 32])));
         let host_signature: HostSignature =
             HostSignature::Ed25519Signature(SshEd25519Signature([47; 64]));
 

@@ -43,10 +43,10 @@ impl UserAuth {
         for (id, comment) in identities {
             log::debug!("Trying identity {}: {}", comment, id.algorithm());
             let success = match id {
-                Identity::Ed25519Key(x) => {
+                Identity::PublicKey(PublicKey::Ed25519(x)) => {
                     Self::try_pubkey::<S, SshEd25519>(&mut t, &agent, service, user, x).await?
                 }
-                Identity::Ed25519Cert(x) => {
+                Identity::Certificate(Certificate::Ed25519(x)) => {
                     Self::try_pubkey::<S, SshEd25519Cert>(&mut t, &agent, service, user, x).await?
                 }
                 _ => false,
