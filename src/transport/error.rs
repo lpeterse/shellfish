@@ -32,12 +32,6 @@ impl From<std::io::Error> for TransportError {
     }
 }
 
-impl From<SignatureError> for TransportError {
-    fn from(_: SignatureError) -> Self {
-        Self::InvalidSignature
-    }
-}
-
 impl From<VerificationError> for TransportError {
     fn from(e: VerificationError) -> Self {
         Self::HostKeyVerificationError(e)

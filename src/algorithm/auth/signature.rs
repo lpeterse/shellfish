@@ -2,26 +2,44 @@ use super::*;
 
 /// A user's or host's signature.
 #[derive(Clone, Debug, PartialEq)]
-pub enum HostSignature {
+pub enum Signature {
     Ed25519Signature(<SshEd25519 as AuthAlgorithm>::AuthSignature),
 }
 
-impl HostSignature {
-    /// Verify a signature by given identity over given data.
+impl Signature {
+    /// Verify a signature for given public key over given data.
     ///
     /// Returns error in case the algorithms do not match or the signature is invalid.
-    pub fn verify(&self, id: &PublicKey, data: &[u8]) -> Result<(), SignatureError> {
+    pub fn verify(&self, id: &PublicKey, data: &[u8]) -> Option<()> {
         match (self, id) {
             (Self::Ed25519Signature(s), PublicKey::Ed25519(i)) => {
                 use ed25519_dalek::{PublicKey, Signature};
-                let key = PublicKey::from_bytes(&i.0[..])
-                    .map_err(|_| SignatureError::InvalidSignature)?;
-                let sig = Signature::from_bytes(&s.0[..])
-                    .map_err(|_| SignatureError::InvalidSignature)?;
-                key.verify(data, &sig)
-                    .map_err(|_| SignatureError::InvalidSignature)
+                let key = PublicKey::from_bytes(&i.0[..]).ok()?;
+                let sig = Signature::from_bytes(&s.0[..]).ok()?;
+                key.verify(data, &sig).ok()
             }
-            _ => Err(SignatureError::AlgorithmMismatch),
+            _ => None
         }
+    }
+}
+
+impl Encode for Signature {
+    fn size(&self) -> usize {
+        match self {
+            Self::Ed25519Signature(k) => k.size(),
+        }
+    }
+    fn encode<E: Encoder>(&self, c: &mut E) {
+        match self {
+            Self::Ed25519Signature(k) => {
+                Encode::encode(k, c);
+            }
+        }
+    }
+}
+
+impl<'a> DecodeRef<'a> for Signature {
+    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+        Some(Self::Ed25519Signature(DecodeRef::decode(d)?))
     }
 }

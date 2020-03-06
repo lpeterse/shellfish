@@ -29,32 +29,7 @@ pub trait AuthAlgorithm {
     const NAME: &'static str;
 }
 
-impl Encode for HostSignature {
-    fn size(&self) -> usize {
-        match self {
-            Self::Ed25519Signature(k) => k.size(),
-        }
-    }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        match self {
-            Self::Ed25519Signature(k) => {
-                Encode::encode(k, c);
-            }
-        }
-    }
-}
 
-impl<'a> DecodeRef<'a> for HostSignature {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        Some(Self::Ed25519Signature(DecodeRef::decode(d)?))
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum SignatureError {
-    InvalidSignature,
-    AlgorithmMismatch,
-}
 
 #[cfg(test)]
 mod tests {
@@ -274,7 +249,7 @@ mod tests {
 
     #[test]
     fn test_signature_encode_01() {
-        let sig = HostSignature::Ed25519Signature(example_ed25519_signature());
+        let sig = Signature::Ed25519Signature(example_ed25519_signature());
         let actual = BEncoder::encode(&sig);
         let expected = [
             0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 64,
@@ -287,8 +262,8 @@ mod tests {
 
     #[test]
     fn test_signature_decode_01() {
-        let expected = HostSignature::Ed25519Signature(example_ed25519_signature());
-        let actual: HostSignature = BDecoder::decode(
+        let expected = Signature::Ed25519Signature(example_ed25519_signature());
+        let actual: Signature = BDecoder::decode(
             &[
                 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
                 64, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
@@ -306,7 +281,7 @@ mod tests {
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
-        let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
+        let sig = Signature::Ed25519Signature(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
             16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
@@ -316,7 +291,7 @@ mod tests {
             78, 0, 134, 150, 89, 178, 20, 41, 42, 222, 78, 127, 161, 158, 105, 59, 33, 37, 222,
             103, 4, 44, 156, 174, 112, 125, 167, 190, 71, 199, 166, 114,
         ];
-        assert!(sig.verify(&pk, &data[..]).is_ok());
+        assert!(sig.verify(&pk, &data[..]).is_some());
     }
 
     #[test]
@@ -325,7 +300,7 @@ mod tests {
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
-        let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
+        let sig = Signature::Ed25519Signature(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
             16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
@@ -336,37 +311,19 @@ mod tests {
             103, 4, 44, 156, 174, 112, 125, 167, 190, 71, 199, 166,
             115, // last byte different!
         ];
-        match sig.verify(&pk, &data[..]) {
-            Err(SignatureError::InvalidSignature) => (),
-            _ => panic!(),
-        }
+        assert!(sig.verify(&pk, &data[..]).is_none());
     }
 
     #[test]
     fn test_signature_verify_mismatch_01() {
         let pk = PublicKey::Other("unknown".into());
-        let sig = HostSignature::Ed25519Signature(SshEd25519Signature([
+        let sig = Signature::Ed25519Signature(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
             16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
             244, 106, 208, 68, 88, 123, 26, 8,
         ]));
         let data = [];
-        match sig.verify(&pk, &data[..]) {
-            Err(SignatureError::AlgorithmMismatch) => (),
-            _ => panic!(),
-        }
-    }
-
-    #[test]
-    fn test_signature_error_debug_01() {
-        assert_eq!(
-            format!("{:?}", SignatureError::InvalidSignature),
-            "InvalidSignature"
-        );
-        assert_eq!(
-            format!("{:?}", SignatureError::AlgorithmMismatch),
-            "AlgorithmMismatch"
-        );
+        assert!(sig.verify(&pk, &data[..]).is_none());
     }
 }
