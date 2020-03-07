@@ -1,20 +1,17 @@
-use crate::algorithm::*;
+use crate::algorithm::auth::*;
 use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug, PartialEq)]
-pub struct MsgSignResponse<S: AuthAlgorithm> {
-    pub signature: S::AuthSignature,
+pub struct MsgSignResponse {
+    pub signature: Signature,
 }
 
-impl<S: AuthAlgorithm> Message for MsgSignResponse<S> {
+impl Message for MsgSignResponse {
     const NUMBER: u8 = 14;
 }
 
-impl<S: AuthAlgorithm> Encode for MsgSignResponse<S>
-where
-    S::AuthSignature: Encode,
-{
+impl Encode for MsgSignResponse {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>() + Encode::size(&self.signature)
     }
@@ -24,12 +21,8 @@ where
     }
 }
 
-impl<S: AuthAlgorithm> Decode for MsgSignResponse<S>
-where
-    S::AuthSignature: Decode,
-{
+impl Decode for MsgSignResponse {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        log::error!("*");
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             signature: DecodeRef::decode(d)?,
@@ -42,36 +35,37 @@ where
 mod tests {
     use super::*;
 
-    #[derive(Debug, PartialEq)]
-    pub struct Foobar {}
-
-    impl AuthAlgorithm for Foobar {
-        const NAME: &'static str = "foobar";
-
-        type AuthIdentity = ();
-        type AuthSignature = String;
-        type AuthSignatureFlags = u32;
-    }
-
     #[test]
     fn test_encode_01() {
-        let msg: MsgSignResponse<Foobar> = MsgSignResponse {
-            signature: "SIGNATURE".into(),
+        let msg = MsgSignResponse {
+            signature: Signature::Ed25519(SshEd25519Signature([3; 64])),
         };
         assert_eq!(
-            vec![14, 0, 0, 0, 9, 83, 73, 71, 78, 65, 84, 85, 82, 69],
+            vec![
+                14, 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0,
+                0, 0, 64, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+            ],
             BEncoder::encode(&msg)
         );
     }
 
     #[test]
     fn test_decode_01() {
-        let msg: MsgSignResponse<Foobar> = MsgSignResponse {
-            signature: "SIGNATURE".into(),
+        let msg = MsgSignResponse {
+            signature: Signature::Ed25519(SshEd25519Signature([3; 64])),
         };
         assert_eq!(
             Some(msg),
-            BDecoder::decode(&[14, 0, 0, 0, 9, 83, 73, 71, 78, 65, 84, 85, 82, 69][..])
+            BDecoder::decode(
+                &[
+                    14, 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57,
+                    0, 0, 0, 64, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
+                    3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
+                ][..]
+            )
         );
     }
 }

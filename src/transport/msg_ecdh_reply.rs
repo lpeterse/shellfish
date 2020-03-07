@@ -85,7 +85,7 @@ mod tests {
         let ep = TestAlgorithm::public(&es);
         let host_key: Identity = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([23; 32])));
         let host_signature: Signature =
-            Signature::Ed25519Signature(SshEd25519Signature([47; 64]));
+            Signature::Ed25519(SshEd25519Signature([47; 64]));
         let msg = MsgKexEcdhReply::<TestAlgorithm> {
             host_key,
             dh_public: ep,
@@ -113,7 +113,7 @@ mod tests {
         let ep = TestAlgorithm::public(&es);
         let host_key: Identity = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([23; 32])));
         let host_signature: Signature =
-            Signature::Ed25519Signature(SshEd25519Signature([47; 64]));
+            Signature::Ed25519(SshEd25519Signature([47; 64]));
 
         let input: [u8; 163] = [
             31, 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,

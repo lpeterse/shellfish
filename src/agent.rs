@@ -1,5 +1,6 @@
 mod error;
 mod frame;
+mod local;
 mod msg_failure;
 mod msg_identities_answer;
 mod msg_identities_request;
@@ -9,6 +10,8 @@ mod msg_success;
 mod transmitter;
 
 pub use self::error::*;
+pub use self::local::*;
+
 use self::frame::*;
 use self::msg_failure::*;
 use self::msg_identities_answer::*;
@@ -19,71 +22,26 @@ use self::transmitter::*;
 
 use crate::algorithm::auth::*;
 use crate::codec::*;
+use crate::util::*;
 
-use std::convert::TryFrom;
-use std::path::{Path, PathBuf};
-use async_std::os::unix::net::UnixStream;
-
-/// An interface to the local `ssh-agent`.
-#[derive(Clone)]
-pub struct Agent {
-    path: PathBuf,
+pub trait AuthAgent: Send + Sync + 'static {
+    fn identities(&self) -> BoxFuture<Result<Vec<(Identity, String)>, AuthAgentError>>;
+    fn signature(
+        &self,
+        identity: &Identity,
+        data: &[u8],
+    ) -> BoxFuture<Result<Option<Signature>, AuthAgentError>>;
 }
 
-impl Agent {
-    const SSH_AUTH_SOCK: &'static str = "SSH_AUTH_SOCK";
-
-    /// Create a new agent client by path designating the unix domain socket.
-    pub fn new(path: &Path) -> Self {
-        Self { path: path.into() }
+impl AuthAgent for () {
+    fn identities(&self) -> BoxFuture<Result<Vec<(Identity, String)>, AuthAgentError>> {
+        Box::pin(async { Ok(vec![]) })
     }
-
-    /// Create a new agent client with the value of `SSH_AUTH_SOCK` as path.
-    pub fn new_env() -> Option<Self> {
-        let s = std::env::var_os(Self::SSH_AUTH_SOCK)?;
-        Self {
-            path: TryFrom::try_from(s).ok()?,
-        }
-        .into()
-    }
-
-    /// Request a list of identities from the agent.
-    pub async fn identities(&self) -> Result<Vec<(Identity, String)>, AgentError> {
-        let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
-        t.send(&MsgIdentitiesRequest {}).await?;
-        t.receive::<MsgIdentitiesAnswer>()
-            .await
-            .map(|x| x.identities)
-    }
-
-    /// Sign a digest with the corresponding private key known to be owned be the agent.
-    ///
-    /// Returns `Ok(None)` in case the agent refused to sign.
-    pub async fn sign<S, D>(
+    fn signature(
         &self,
-        identity: &S::AuthIdentity,
-        data: &D,
-        flags: S::AuthSignatureFlags,
-    ) -> Result<Option<S::AuthSignature>, AgentError>
-    where
-        S: AuthAlgorithm,
-        S::AuthIdentity: Encode,
-        S::AuthSignature: Encode + Decode,
-        D: Encode,
-    {
-        let msg: MsgSignRequest<S, D> = MsgSignRequest {
-            key: identity,
-            data,
-            flags,
-        };
-        let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
-        t.send(&msg).await?;
-        match t
-            .receive::<Result<MsgSignResponse<S>, MsgFailure>>()
-            .await?
-        {
-            Ok(x) => Ok(Some(x.signature)),
-            Err(_) => Ok(None),
-        }
+        _: &Identity,
+        _: &[u8],
+    ) -> BoxFuture<Result<Option<Signature>, AuthAgentError>> {
+        Box::pin(async { Ok(None) })
     }
 }

@@ -1,11 +1,11 @@
 #[derive(Debug)]
-pub enum AgentError {
+pub enum AuthAgentError {
     IoError(std::io::Error),
     FrameError,
     DecoderError,
 }
 
-impl From<std::io::Error> for AgentError {
+impl From<std::io::Error> for AuthAgentError {
     fn from(e: std::io::Error) -> Self {
         Self::IoError(e)
     }
@@ -17,15 +17,15 @@ mod tests {
 
     #[test]
     fn test_debug_01() {
-        assert_eq!("FrameError", format!("{:?}", AgentError::FrameError));
+        assert_eq!("FrameError", format!("{:?}", AuthAgentError::FrameError));
     }
 
     #[test]
     fn test_from_io_error() {
         let e = std::io::Error::new(std::io::ErrorKind::Other, "");
-        let e: AgentError = e.into();
+        let e: AuthAgentError = e.into();
         match e {
-            AgentError::IoError(_) => (),
+            AuthAgentError::IoError(_) => (),
             _ => panic!()
         }
     }

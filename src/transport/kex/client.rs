@@ -149,7 +149,6 @@ impl Kex for ClientKex {
                         dh_secret: k,
                     }
                     .sha256();
-                    log::error!("{:?} {:?} {:?}", k, dh_public, msg.dh_public);
                     // Verify the host key signature
                     msg.signature
                         .verify(&msg.host_key.public_key(), &h[..])
@@ -698,7 +697,7 @@ mod tests {
         }
         .sha256();
         let signature = SshEd25519Signature(keypair.sign(&h[..]).to_bytes());
-        let signature = Signature::Ed25519Signature(signature);
+        let signature = Signature::Ed25519(signature);
         let ecdh_reply = MsgKexEcdhReply {
             host_key,
             dh_public: server_dh_public,
@@ -746,7 +745,7 @@ mod tests {
         let ecdh_reply = MsgKexEcdhReply {
             host_key,
             dh_public: server_dh_public,
-            signature: Signature::Ed25519Signature(SshEd25519Signature([7; 64])),
+            signature: Signature::Ed25519(SshEd25519Signature([7; 64])),
         };
 
         match kex.push_ecdh_reply(ecdh_reply) {
@@ -775,7 +774,7 @@ mod tests {
         let ecdh_reply = MsgKexEcdhReply {
             host_key,
             dh_public: server_dh_public,
-            signature: Signature::Ed25519Signature(SshEd25519Signature([7; 64])),
+            signature: Signature::Ed25519(SshEd25519Signature([7; 64])),
         };
 
         match kex.push_ecdh_reply(ecdh_reply) {

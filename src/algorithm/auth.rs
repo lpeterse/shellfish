@@ -29,8 +29,6 @@ pub trait AuthAlgorithm {
     const NAME: &'static str;
 }
 
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -249,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_signature_encode_01() {
-        let sig = Signature::Ed25519Signature(example_ed25519_signature());
+        let sig = Signature::Ed25519(example_ed25519_signature());
         let actual = BEncoder::encode(&sig);
         let expected = [
             0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 64,
@@ -262,7 +260,7 @@ mod tests {
 
     #[test]
     fn test_signature_decode_01() {
-        let expected = Signature::Ed25519Signature(example_ed25519_signature());
+        let expected = Signature::Ed25519(example_ed25519_signature());
         let actual: Signature = BDecoder::decode(
             &[
                 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
@@ -281,7 +279,7 @@ mod tests {
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
-        let sig = Signature::Ed25519Signature(SshEd25519Signature([
+        let sig = Signature::Ed25519(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
             16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
@@ -300,7 +298,7 @@ mod tests {
             75, 51, 174, 250, 168, 148, 30, 47, 57, 178, 223, 0, 217, 160, 197, 192, 229, 244, 195,
             102, 205, 139, 167, 208, 134, 184, 170, 190, 192, 44, 177, 47,
         ]));
-        let sig = Signature::Ed25519Signature(SshEd25519Signature([
+        let sig = Signature::Ed25519(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
             16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,
@@ -317,7 +315,7 @@ mod tests {
     #[test]
     fn test_signature_verify_mismatch_01() {
         let pk = PublicKey::Other("unknown".into());
-        let sig = Signature::Ed25519Signature(SshEd25519Signature([
+        let sig = Signature::Ed25519(SshEd25519Signature([
             218, 91, 229, 121, 129, 106, 140, 188, 38, 182, 150, 75, 211, 82, 149, 5, 148, 185, 91,
             129, 31, 63, 30, 137, 187, 234, 165, 246, 130, 222, 222, 145, 233, 157, 119, 106, 129,
             16, 4, 174, 11, 40, 119, 151, 24, 56, 192, 12, 112, 89, 70, 172, 163, 89, 183, 123,

@@ -18,6 +18,8 @@ use crate::role::*;
 use crate::service::Service;
 use crate::transport::*;
 
+use std::sync::Arc;
+
 /// The `ssh-userauth` service negotiates and performs methods of user authentication between
 /// client and server.
 ///
@@ -33,25 +35,15 @@ impl UserAuth {
         transport: Transport<Client, S>,
         config: &<Client as Role>::Config,
         user: &str,
-        agent: Option<Agent>,
+        agent: &Arc<Box<dyn AuthAgent>>,
     ) -> Result<T, UserAuthError> {
         let mut t = transport.request_service(Self::NAME).await?;
         let service = <T as Service<Client>>::NAME;
-        let agent = agent.ok_or(UserAuthError::NoMoreAuthMethods)?;
         let identities = agent.identities().await?;
 
         for (id, comment) in identities {
-            log::debug!("Trying identity {}: {}", comment, id.algorithm());
-            let success = match id {
-                Identity::PublicKey(PublicKey::Ed25519(x)) => {
-                    Self::try_pubkey::<S, SshEd25519>(&mut t, &agent, service, user, x).await?
-                }
-                Identity::Certificate(Certificate::Ed25519(x)) => {
-                    Self::try_pubkey::<S, SshEd25519Cert>(&mut t, &agent, service, user, x).await?
-                }
-                _ => false,
-            };
-            if success {
+            log::debug!("Trying identity: {} ({})", comment, id.algorithm());
+            if Self::try_pubkey::<S>(&mut t, &agent, service, user, id).await? {
                 return Ok(<T as Service<Client>>::new(config, t));
             }
         }
@@ -59,50 +51,39 @@ impl UserAuth {
         Err(UserAuthError::NoMoreAuthMethods)
     }
 
-    async fn try_pubkey<S: Socket, A>(
+    async fn try_pubkey<S: Socket>(
         transport: &mut Transport<Client, S>,
-        agent: &Agent,
+        agent: &Arc<Box<dyn AuthAgent>>,
         service: &str,
         user: &str,
-        identity: A::AuthIdentity,
-    ) -> Result<bool, UserAuthError>
-    where
-        A: AuthAlgorithm,
-        A::AuthIdentity: Clone + Encode,
-        A::AuthSignature: Encode + Decode,
-    {
+        identity: Identity,
+    ) -> Result<bool, UserAuthError> {
         let session_id = &transport.session_id();
-        let data: SignatureData<A> = SignatureData {
+        let data = BEncoder::encode(&SignatureData {
             session_id,
             user_name: user,
             service_name: service,
-            public_key: identity.clone(),
-        };
-        let signature = agent
-            .sign::<A, _>(&identity, &data, Default::default())
-            .await?;
-        let signature = match signature {
-            None => return Ok(false),
-            Some(s) => s,
-        };
-        let msg = MsgUserAuthRequest::<PublicKeyMethod<A>> {
+            identity: &identity,
+        });
+        let signature = agent.signature(&identity, &data).await?;
+        if signature.is_none() {
+            return Ok(false);
+        }
+        let msg = MsgUserAuthRequest::<PublicKeyMethod> {
             user_name: user,
             service_name: service,
             method: PublicKeyMethod {
                 identity,
-                signature: Some(signature),
+                signature,
             },
         };
         transport.send(&msg).await?;
         transport.flush().await?;
         transport.receive().await?;
-        match transport.decode() {
-            Some(x) => {
-                let _: MsgSuccess = x;
-                transport.consume();
-                return Ok(true);
-            }
-            None => (),
+        if let Some(x) = transport.decode() {
+            let _: MsgSuccess = x;
+            transport.consume();
+            return Ok(true);
         }
         let _: MsgFailure = transport.decode_ref().ok_or(TransportError::DecoderError)?;
         transport.consume();
@@ -113,13 +94,13 @@ impl UserAuth {
 #[derive(Debug)]
 pub enum UserAuthError {
     NoMoreAuthMethods,
-    AgentError(AgentError),
+    AuthAgentError(AuthAgentError),
     TransportError(TransportError),
 }
 
-impl From<AgentError> for UserAuthError {
-    fn from(e: AgentError) -> Self {
-        Self::AgentError(e)
+impl From<AuthAgentError> for UserAuthError {
+    fn from(e: AuthAgentError) -> Self {
+        Self::AuthAgentError(e)
     }
 }
 
