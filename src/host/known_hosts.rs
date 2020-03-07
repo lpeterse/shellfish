@@ -155,8 +155,8 @@ impl Line {
         let pubkey = PublicKey::decode(&mut BDecoder::from(&pubkey), &self.algo).ok_or(e)?;
         // Check the local public key against the supplied identity (key or certificate)
         match self.mark {
-            Mark::Regular if identity.is_pubkey(&pubkey) => Ok(()),
-            Mark::Revoked if identity.is_pubkey(&pubkey) => Err(VerificationError::KeyRevoked),
+            Mark::Regular if identity.public_key() == pubkey => Ok(()),
+            Mark::Revoked if identity.public_key() == pubkey => Err(VerificationError::KeyRevoked),
             Mark::CertAuthority if identity.is_valid_cert(&pubkey) => Ok(()), // FIXME
             _ => Err(VerificationError::KeyNotFound),
         }
@@ -198,9 +198,9 @@ impl Patterns {
     fn test(&self, name: &str) -> bool {
         // Test all globs. Stop immediately on negated match or try all.
         let mut result = false;
-        for (forbidden, glob) in &self.0 {
+        for (negated, glob) in &self.0 {
             if glob.test(name) {
-                if *forbidden {
+                if *negated {
                     // Return early: This line must not be used for this host
                     return false;
                 } else {

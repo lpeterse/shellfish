@@ -2,7 +2,7 @@ use super::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Certificate {
-    Ed25519(<SshEd25519Cert as AuthAlgorithm>::AuthIdentity),
+    Ed25519(SshEd25519Certificate),
 }
 
 impl Certificate {

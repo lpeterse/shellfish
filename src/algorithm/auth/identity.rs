@@ -3,7 +3,6 @@ use super::*;
 /// A user's or host's identity.
 ///
 /// This is either just a key or a certificate.
-/// An identity is `Other` if it is not implemented and cannot be interpreted by us.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Identity {
     PublicKey(PublicKey),
@@ -11,10 +10,7 @@ pub enum Identity {
 }
 
 impl Identity {
-    /// For a given identity, yield the corresponding algorithm name.
-    ///
-    /// NOTE: This is implies that the relation is a bijection which might turn out as a wrong
-    /// assumption in the future. Feel free to fix this as necessary.
+    /// The associated algorithm's name.
     pub fn algorithm(&self) -> &str {
         match self {
             Self::PublicKey(x) => x.algorithm(),
@@ -22,6 +18,7 @@ impl Identity {
         }
     }
 
+    /// The associated public key (the one certified if it's a certificate).
     pub fn public_key(&self) -> PublicKey {
         match self {
             Self::PublicKey(x) => x.clone(),
@@ -32,13 +29,6 @@ impl Identity {
     pub fn is_valid_cert(&self, cakey: &PublicKey) -> bool {
         match (self, cakey) {
             (Self::Certificate(_), PublicKey::Ed25519(_)) => false, // FIXME
-            _ => false,
-        }
-    }
-
-    pub fn is_pubkey(&self, pubkey: &PublicKey) -> bool { // FIXME
-        match self {
-            Self::PublicKey(x) => x == pubkey,
             _ => false,
         }
     }

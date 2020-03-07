@@ -5,12 +5,16 @@ authors = ["Lars Petersen <info@lars-petersen.net>"]
 edition = "2018"
 
 [dependencies]
-env_logger = "0.7.1"
 async-std = "1.5.0"
+base64 = "0.11.0"
 chacha20 = { version = "0.3.4", features = ["legacy"] }
+dirs = "2.0.2"
+ed25519-dalek = "1.0.0-pre.3"
+env_logger = "0.7.1"
 futures = "0.3.4"
 futures-timer = "3.0.2"
 generic-array = "0.12.3"
+hmac = "0.7.1"
 log = "0.4.8"
 num-bigint = "0.2.6"
 poly1305 = "0.5.2"
@@ -18,13 +22,9 @@ rand = "0.7.3"
 sha-1 = "0.8.2"
 sha2 = "0.8.1"
 x25519-dalek = "0.6.0"
-ed25519-dalek = "1.0.0-pre.3"
-base64 = "0.11.0"
-dirs = "2.0.2"
-hmac = "0.7.1"
 
 [profile.release]
 lto = true
-panic = "abort"
-opt-level = "z"
-codegen-units = 1
+#panic = "abort"
+#opt-level = "z"
+#codegen-units = 1
