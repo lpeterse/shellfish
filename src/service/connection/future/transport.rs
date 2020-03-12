@@ -16,7 +16,7 @@ use super::{ConnectionError, Session};
 
 use crate::transport::*;
 
-use futures::task::{Context, Poll};
+use async_std::task::{Context, Poll};
 use std::sync::{Arc, Mutex};
 
 pub fn poll<R: Role, T: Socket>(
@@ -37,7 +37,7 @@ pub fn poll<R: Role, T: Socket>(
                     let mut state = st.lock().unwrap();
                     let written = state.stdout.write(msg.data);
                     assert!(written == msg.data.len());
-                    state.outer_waker.wake();
+                    //state.outer_waker.wake();
                 }
             }
             x.transport.consume();
@@ -60,7 +60,7 @@ pub fn poll<R: Role, T: Socket>(
                     let mut state = st.lock().unwrap();
                     let written = state.stderr.write(msg.data);
                     assert!(written == msg.data.len());
-                    state.outer_waker.wake();
+                    //state.outer_waker.wake();
                 }
             }
             x.transport.consume();
@@ -90,7 +90,7 @@ pub fn poll<R: Role, T: Socket>(
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     state.is_remote_eof = true;
-                    state.outer_waker.wake();
+                    //state.outer_waker.wake();
                 }
             }
             x.transport.consume();
@@ -113,7 +113,7 @@ pub fn poll<R: Role, T: Socket>(
                         };
                         ready!(x.transport.poll_send(cx, &msg))?;
                         state.is_closed = true;
-                        state.outer_waker.wake();
+                        //state.outer_waker.wake();
                     }
                 }
             }
@@ -223,7 +223,7 @@ pub fn poll<R: Role, T: Socket>(
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     state.request.success()?;
-                    state.outer_waker.wake();
+                    //state.outer_waker.wake();
                 }
             }
             x.transport.consume();
@@ -241,7 +241,7 @@ pub fn poll<R: Role, T: Socket>(
                 SharedState::Session(ref st) => {
                     let mut state = st.lock().unwrap();
                     state.request.failure()?;
-                    state.outer_waker.wake();
+                    //state.outer_waker.wake();
                 }
             }
             x.transport.consume();

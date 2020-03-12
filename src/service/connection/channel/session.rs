@@ -11,8 +11,8 @@ use super::*;
 use crate::codec::*;
 use crate::buffer::*;
 
-use futures::task::AtomicWaker;
-use futures::task::Poll;
+//use futures_util::task::AtomicWaker;
+use async_std::task::Poll;
 use std::sync::{Arc, Mutex};
 
 pub struct Session {
@@ -23,7 +23,7 @@ impl Drop for Session {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap();
         state.outer_error = Some(());
-        state.inner_waker.wake();
+        //state.inner_waker.wake();
     }
 }
 
@@ -55,11 +55,11 @@ impl Session {
     async fn request(&mut self, request: SessionRequest) -> Result<(), ConnectionError> {
         let mut state = self.state.lock().unwrap();
         state.request = RequestState::Open(request);
-        state.inner_waker.wake();
+        //state.inner_waker.wake();
         drop(state);
-        futures::future::poll_fn(|cx| {
+        async_std::future::poll_fn(|cx| {
             let mut state = self.state.lock().unwrap();
-            state.outer_waker.register(cx.waker());
+            //state.outer_waker.register(cx.waker());
             match state.request {
                 RequestState::Success => {
                     state.request = RequestState::None;
@@ -89,9 +89,9 @@ pub struct SessionState {
     pub is_closed: bool,
     pub is_local_eof: bool,
     pub is_remote_eof: bool,
-    pub inner_waker: AtomicWaker,
+    pub inner_waker: (), //AtomicWaker,
     pub inner_error: Option<ConnectionError>,
-    pub outer_waker: AtomicWaker,
+    pub outer_waker: (), //AtomicWaker,
     pub outer_error: Option<()>,
     pub env: Vec<(String, String)>,
     pub exit: Option<Exit>,
@@ -104,17 +104,17 @@ pub struct SessionState {
 impl SessionState {
     pub fn add_env(&mut self, env: (String, String)) {
         self.env.push(env);
-        self.outer_waker.wake();
+        //self.outer_waker.wake();
     }
 
     pub fn set_exit_status(&mut self, status: ExitStatus) {
         self.exit = Some(Exit::Status(status));
-        self.outer_waker.wake();
+        //self.outer_waker.wake();
     }
 
     pub fn set_exit_signal(&mut self, signal: ExitSignal) {
         self.exit = Some(Exit::Signal(signal));
-        self.outer_waker.wake();
+        //self.outer_waker.wake();
     }
 }
 
@@ -124,9 +124,9 @@ impl Default for SessionState {
             is_closed: false,
             is_local_eof: false,
             is_remote_eof: false,
-            inner_waker: AtomicWaker::new(),
+            inner_waker: (), //AtomicWaker::new(),
             inner_error: None,
-            outer_waker: AtomicWaker::new(),
+            outer_waker: (), //AtomicWaker::new(),
             outer_error: None,
             env: Vec::new(),
             exit: None,
@@ -141,6 +141,6 @@ impl Default for SessionState {
 impl SpecificState for SessionState {
     fn terminate(&mut self, e: ConnectionError) {
         self.inner_error = Some(e);
-        self.outer_waker.wake();
+        //self.outer_waker.wake();
     }
 }

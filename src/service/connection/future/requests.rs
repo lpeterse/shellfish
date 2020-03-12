@@ -7,8 +7,7 @@ use crate::transport::msg_disconnect::*;
 use crate::transport::Socket;
 use crate::role::*;
 
-use futures::ready;
-use futures::task::{Context, Poll};
+use async_std::task::{ready, Context, Poll};
 
 pub fn poll<R: Role, S: Socket>(
     x: &mut ConnectionFuture<R,S>,

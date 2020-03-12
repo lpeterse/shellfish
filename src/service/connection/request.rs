@@ -1,14 +1,17 @@
 use super::*;
-use futures::channel::oneshot;
-use futures::future::Future;
-use futures::ready;
-use futures::task::{Context, Poll};
+use async_std::future::Future;
+use async_std::task::{ready, Context, Poll};
+//use futures_channel::oneshot;
+use crate::oneshot;
 use std::pin::Pin;
 
 pub trait IsRequest: Sized {
     type Response;
     fn try_from(r: Request) -> Option<Transaction<Self>>;
-    fn into_request(self, sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>) -> Request;
+    fn into_request(
+        self,
+        sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>,
+    ) -> Request;
 }
 
 pub enum Request {
@@ -37,8 +40,14 @@ impl IsRequest for DisconnectRequest {
             _ => None,
         }
     }
-    fn into_request(self, sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>) -> Request {
-        Request::Disconnect(Transaction { input: self, output: sender})
+    fn into_request(
+        self,
+        sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>,
+    ) -> Request {
+        Request::Disconnect(Transaction {
+            input: self,
+            output: sender,
+        })
     }
 }
 
@@ -60,8 +69,14 @@ impl IsRequest for ChannelOpenRequest {
             _ => None,
         }
     }
-    fn into_request(self, sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>) -> Request {
-        Request::ChannelOpen(Transaction { input: self, output: sender})
+    fn into_request(
+        self,
+        sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>,
+    ) -> Request {
+        Request::ChannelOpen(Transaction {
+            input: self,
+            output: sender,
+        })
     }
 }
 
@@ -89,10 +104,12 @@ impl RequestSender {
             Self::Terminated(e) => {
                 *self = Self::Terminated(e);
                 Err(e)
-            },
+            }
             Self::Ready(x) => {
-                x.send(IsRequest::into_request(req, s)).map_err(|_| ConnectionError::RequestReceiverDropped)?;
-                let (response, sender) = r.await.map_err(|_| ConnectionError::RequestReceiverDropped)??;
+                x.send(IsRequest::into_request(req, s));
+                //    .map_err(|_| ConnectionError::RequestReceiverDropped)?; FIXME
+                let (response, sender) =
+                    r.await.ok_or(ConnectionError::RequestReceiverDropped)??;
                 *self = sender;
                 Ok(response)
             }
@@ -110,7 +127,7 @@ impl RequestReceiver {
                     *self = Self::Processing((
                         false,
                         ready!(Pin::new(r).poll(cx))
-                            .map_err(|_| ConnectionError::RequestSenderDropped)?,
+                            .ok_or(ConnectionError::RequestSenderDropped)?,
                     ))
                 }
                 Self::Processing((accepted, r)) if !*accepted => return Poll::Ready(Ok(r)),
@@ -142,9 +159,8 @@ impl RequestReceiver {
                 None => return Err(ConnectionError::RequestUnexpectedResponse),
                 Some(r) => {
                     let (response, t) = f(r.input)?;
-                    r.output
-                        .send(Ok((response, sender)))
-                        .map_err(|_| ConnectionError::RequestSenderDropped)?;
+                    r.output.send(Ok((response, sender)));
+                    //.map_err(|_| ConnectionError::RequestSenderDropped)?; // FIXME
                     Ok(t)
                 }
             },
@@ -155,8 +171,8 @@ impl RequestReceiver {
     pub fn terminate(&mut self, e: ConnectionError) {
         match std::mem::replace(self, Self::Terminated) {
             Self::Processing((_, x)) => match x {
-                Request::ChannelOpen(x) => x.output.send(Err(e)).unwrap_or(()),
-                Request::Disconnect(x) => x.output.send(Err(e)).unwrap_or(()),
+                Request::ChannelOpen(x) => x.output.send(Err(e)),
+                Request::Disconnect(x) => x.output.send(Err(e)),
             },
             _ => (),
         }

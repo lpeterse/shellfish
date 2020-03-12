@@ -6,7 +6,7 @@ use rssh::algorithm::*;
 fn main() {
     env_logger::init();
 
-    futures::executor::block_on(async move {
+    async_std::executor::block_on(async move {
         let mut agent = Agent::new_env().expect("");
         let digest: [u8;3] = [0,1,2];
         

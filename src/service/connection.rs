@@ -29,11 +29,13 @@ use super::*;
 
 use crate::client::*;
 use crate::codec::*;
+use crate::oneshot;
 use crate::role::*;
 use crate::transport::*;
 
-use futures::channel::oneshot;
-use futures::future::{Future, FutureExt};
+use async_std::future::Future;
+use async_std::task::ready;
+//use futures_channel::oneshot;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -54,9 +56,11 @@ where
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = channel();
         let (s3, r3) = channel();
-        async_std::task::spawn(
-            ConnectionFuture::new(config, transport, s3, r2).map(|r| s1.send(r).unwrap_or(())),
-        );
+        let future = ConnectionFuture::new(config, transport, s3, r2);
+        async_std::task::spawn(async {
+            let r = future.await;
+            s1.send(r)
+        });
         Connection {
             phantom: std::marker::PhantomData,
             request_sender: s2,
@@ -101,9 +105,9 @@ impl<R: Role> Future for Connection<R> {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let x = Pin::into_inner(self);
-        Pin::new(&mut x.result).poll(cx).map(|r| match r {
-            Err(_) => Err(ConnectionError::Terminated),
-            Ok(r) => r,
+        Poll::Ready(match ready!(Pin::new(&mut x.result).poll(cx)) {
+            None => Err(ConnectionError::Terminated),
+            Some(r) => r,
         })
     }
 }

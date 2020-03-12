@@ -10,11 +10,10 @@ pub use self::msg_ecdh_reply::*;
 pub use self::msg_kex_init::*;
 pub use self::msg_new_keys::*;
 pub use self::server::*;
-pub use super::transmitter::*;
 
 use super::*;
 
-use futures::task::Poll;
+use async_std::task::Poll;
 
 /// A state machine for key exchange.
 pub trait Kex {

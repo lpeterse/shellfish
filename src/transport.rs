@@ -1,5 +1,5 @@
-pub(crate) mod buffered_receiver;
-pub(crate) mod buffered_sender;
+pub(crate) mod buffer;
+pub(crate) mod buffered;
 pub(crate) mod cipher;
 pub(crate) mod config;
 pub(crate) mod cookie;
@@ -22,16 +22,16 @@ pub(crate) mod msg_unimplemented;
 pub(crate) mod packet;
 pub(crate) mod session_id;
 pub(crate) mod socket;
-pub(crate) mod transmitter;
+pub(crate) mod transceiver;
 
+pub use self::buffer::*;
+pub use self::buffered::*;
 pub use self::config::*;
 pub use self::error::*;
 pub use self::identification::*;
 pub use self::session_id::*;
 pub use self::socket::*;
 
-use self::buffered_receiver::*;
-use self::buffered_sender::*;
 use self::cipher::*;
 use self::kex::*;
 use self::key_streams::*;
@@ -42,6 +42,7 @@ use self::msg_service_accept::*;
 use self::msg_service_request::*;
 use self::msg_unimplemented::*;
 use self::packet::*;
+use self::transceiver::*;
 
 use crate::client::Client;
 use crate::codec::*;
@@ -49,13 +50,9 @@ use crate::host::*;
 use crate::role::*;
 use crate::server::Server;
 
+use async_std::future::poll_fn;
 use async_std::net::TcpStream;
-use futures::future::poll_fn;
-use futures::future::FutureExt;
-use futures::io::{ReadHalf, WriteHalf};
-use futures::ready;
-use futures::task::Context;
-use futures::task::Poll;
+use async_std::task::{ready, Context, Poll};
 use futures_timer::Delay;
 use std::convert::From;
 use std::option::Option;
@@ -69,7 +66,7 @@ use std::sync::Arc;
 /// The only difference between client and server is the key exchange mechanism and the
 /// implementation is chosen at compile time dependant on the role parameter.
 pub struct Transport<R: Role, S: Socket = TcpStream> {
-    transmitter: Transmitter<S>,
+    trx: Transceiver<S>,
     kex: <R as Role>::Kex,
 }
 
@@ -84,11 +81,11 @@ impl<S: Socket> Transport<Client, S> {
         hostname: String,
         socket: S,
     ) -> Result<Self, TransportError> {
-        let verifier = verifier.clone();
-        let transmitter = Transmitter::new(config, socket).await?;
-        let id = transmitter.remote_id().clone();
-        let kex = ClientKex::new(config, verifier, id, hostname);
-        let mut transport = Self { transmitter, kex };
+        let mut trx = Transceiver::new(config, socket);
+        trx.send_id(config.identification()).await?;
+        let id = trx.receive_id().await?;
+        let kex = ClientKex::new(config, verifier.clone(), id, hostname);
+        let mut transport = Self { trx, kex };
         transport.rekey().await?;
         Ok(transport)
     }
@@ -114,9 +111,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
     }
 
     /// Check whether the transport is flushed (output buffer empty).
-    /// FIXME: necessary?
-    pub fn is_flushed(&self) -> bool {
-        self.transmitter.flushed()
+    pub fn flushed(&self) -> bool {
+        self.trx.flushed()
     }
 
     /// Initiate a rekeying and wait for it to complete.
@@ -125,7 +121,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
         poll_fn(|cx| {
             while self.kex.is_active() {
                 ready!(self.poll_kex(cx))?;
-                ready!(self.transmitter.poll_receive(cx))?;
+                ready!(self.trx.poll_receive(cx))?;
                 if !self.consume_transport_message()? {
                     return self.poll_send_unimplemented(cx);
                 }
@@ -166,7 +162,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
 
     /// Try to decode the current message (only after `receive` or `poll_receive`).
     pub fn decode<Msg: Decode>(&mut self) -> Option<Msg> {
-        self.transmitter.decode()
+        self.trx.decode()
     }
 
     /// Try to decode the current message (only after `receive` or `poll_receive`).
@@ -175,14 +171,14 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// the receive buffer and may be used to avoid temporary heap allocations. Unfortunately,
     /// this borrows the transport reference which cannot be used until the message gets dropped.
     pub fn decode_ref<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
-        self.transmitter.decode()
+        self.trx.decode()
     }
 
     /// Consumes the current message (only after `receive` or `poll_receive`).
     ///
     /// The message shall have been decoded and processed before being cosumed.
     pub fn consume(&mut self) {
-        self.transmitter.consume()
+        self.trx.consume()
     }
 
     /// Try to send a message.
@@ -198,10 +194,10 @@ impl<R: Role, S: Socket> Transport<R, S> {
     ) -> Poll<Result<(), TransportError>> {
         // The next call does nothing unless the keep-alive timeout triggers.
         // When it triggers, it tries to send a message ignore which might pend.
-        ready!(self.transmitter.poll_keepalive(cx))?;
+        ready!(self.trx.poll_keepalive(cx))?;
         // The next call does nothing unless the remote inactivity timeout triggers.
         // When it triggers, it returns an error.
-        ready!(self.transmitter.poll_inactivity(cx))?;
+        ready!(self.trx.poll_inactivity(cx))?;
         // In case a running kex forbids sending no-kex packets we need to drive
         // kex to completion first. This requires dispatching transport messages.
         // It might happen that kex can be completed non-blocking and sending the
@@ -209,14 +205,14 @@ impl<R: Role, S: Socket> Transport<R, S> {
         loop {
             ready!(self.poll_kex(cx))?;
             if self.kex.is_sending_critical() {
-                ready!(self.transmitter.poll_receive(cx))?;
+                ready!(self.trx.poll_receive(cx))?;
                 if self.consume_transport_message()? {
                     continue;
                 } else {
                     return self.poll_send_unimplemented(cx);
                 }
             }
-            return self.transmitter.poll_send(cx, &msg);
+            return self.trx.poll_send(cx, &msg);
         }
     }
 
@@ -228,8 +224,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// NB: Polling drives kex to completion.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         // See `poll_send` concerning the next two calls.
-        ready!(self.transmitter.poll_keepalive(cx))?;
-        ready!(self.transmitter.poll_inactivity(cx))?;
+        ready!(self.trx.poll_keepalive(cx))?;
+        ready!(self.trx.poll_inactivity(cx))?;
         // Transport messages are handled internally by this function. In such a case the loop
         // will iterate more than once but always terminate with either Ready or Pending.
         // In case a running kex forbids receiving non-kex packets we need to drive kex to
@@ -237,7 +233,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
         // will cause an error.
         loop {
             ready!(self.poll_kex(cx))?;
-            ready!(self.transmitter.poll_receive(cx))?;
+            ready!(self.trx.poll_receive(cx))?;
             if self.consume_transport_message()? {
                 continue;
             }
@@ -250,8 +246,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
 
     /// Try to flush all pending operations and output buffers.
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        ready!(self.transmitter.poll_inactivity(cx))?;
-        self.transmitter.poll_flush(cx)
+        ready!(self.trx.poll_inactivity(cx))?;
+        self.trx.poll_flush(cx)
     }
 
     /// Try to send MSG_UNIMPLEMENTED and return `MessageUnexpected` error
@@ -262,17 +258,17 @@ impl<R: Role, S: Socket> Transport<R, S> {
         cx: &mut Context,
     ) -> Poll<Result<(), TransportError>> {
         let msg = MsgUnimplemented {
-            packet_number: self.transmitter.packets_received() as u32,
+            packet_number: self.trx.packets_received() as u32,
         };
-        let _ = self.transmitter.poll_send(cx, &msg);
-        let _ = self.transmitter.poll_flush(cx);
+        let _ = self.trx.poll_send(cx, &msg);
+        let _ = self.trx.poll_flush(cx);
         Poll::Ready(Err(TransportError::MessageUnexpected))
     }
 
     /// This function is Ready unless sending an eventual kex message blocks.
     fn poll_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         let k = &mut self.kex;
-        let t = &mut self.transmitter;
+        let t = &mut self.trx;
         // `poll` determines whether a kex is necessary or in progress and uses the lambda to send
         // as many messages as necessary. It returns Pending in case sending blocks. The next
         // invocation of this function will then proceed right where it blocked before.
@@ -369,10 +365,10 @@ impl<R: Role, S: Socket> Transport<R, S> {
             Some(msg) => {
                 log::debug!("Received MSG_NEWKEYS");
                 let _: MsgNewKeys = msg;
-                let sent = self.transmitter.bytes_sent();
-                let rcvd = self.transmitter.bytes_received();
+                let sent = self.trx.bytes_sent();
+                let rcvd = self.trx.bytes_received();
                 let dec = self.kex.push_new_keys(sent, rcvd)?;
-                let r = self.transmitter.decryption_ctx().update(dec);
+                let r = self.trx.decryption_ctx().update(dec);
                 r.ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 self.consume();
                 return Ok(true);

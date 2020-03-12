@@ -1,6 +1,5 @@
 use crate::algorithm::auth::*;
 
-use futures::future::FutureExt;
 use std::future::Future;
 use std::ops::Deref;
 
@@ -24,6 +23,7 @@ pub enum VerificationError {
     KeyNotFound,
 }
 
+/*
 pub struct AcceptingVerifier {}
 
 impl HostKeyVerifier for AcceptingVerifier {
@@ -33,7 +33,7 @@ impl HostKeyVerifier for AcceptingVerifier {
             identity,
             name
         );
-        futures::future::ready(Ok(())).boxed()
+        ready(Ok(())).boxed()
     }
 }
 
@@ -42,6 +42,7 @@ pub struct RejectingVerifier {}
 impl HostKeyVerifier for RejectingVerifier {
     fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture {
         log::error!("DANGER: Rejecting host key {:?} for {}", identity, name);
-        futures::future::ready(Err(VerificationError::KeyNotFound)).boxed()
+        Box::pin(|ready(Err(VerificationError::KeyNotFound)).boxed()
     }
 }
+*/

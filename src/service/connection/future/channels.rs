@@ -4,7 +4,7 @@ use super::{ConnectionError, ConnectionFuture};
 
 use crate::transport::*;
 
-use futures::task::Context;
+use async_std::task::Context;
 
 pub fn poll<R: Role, T: Socket>(
     x: &mut ConnectionFuture<R,T>,
@@ -21,7 +21,7 @@ pub fn poll<R: Role, T: Socket>(
         match channel.shared() {
             SharedState::Session(ref st) => {
                 let mut state = st.lock().unwrap();
-                state.inner_waker.register(cx.waker());
+                //state.inner_waker.register(cx.waker());
                 match state.request {
                     RequestState::Open(ref r) => {
                         let msg = MsgChannelRequest {

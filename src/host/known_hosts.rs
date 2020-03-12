@@ -90,7 +90,7 @@ impl Default for KnownHosts {
             path.push("/etc/ssh/ssh_known_hosts");
             paths.push(path)
         }
-        if let Some(mut path) = dirs::home_dir() {
+        if let Some(mut path) = std::env::home_dir() {
             path.push(".ssh");
             path.push("known_hosts");
             paths.push(path)

@@ -9,10 +9,6 @@ pub struct ClientConfig {
     ///
     /// Defaults to `SSH-2.0-${CARGO_PKG_NAME}_${CARGO_PKG_VERSION}`.
     pub identification: Identification<&'static str>,
-    /// The timespan within which the remote identification string must have been received.
-    ///
-    /// Defaults to 10s.
-    pub identification_timeout: Duration,
     /// The maximum number of bytes (inbound or outbound) after which a rekeying is initiated.
     ///
     /// Defaults to 1GB (may be capped to an arbitrary value if encryption algorithm demands).
@@ -62,7 +58,6 @@ impl Default for ClientConfig {
     fn default() -> Self {
         Self {
             identification: Identification::default(),
-            identification_timeout: Duration::from_secs(10),
             kex_interval_bytes: 1024 * 1024 * 1024,
             kex_interval_duration: Duration::from_secs(3600),
             alive_interval: Duration::from_secs(300),
@@ -80,9 +75,6 @@ impl Default for ClientConfig {
 impl TransportConfig for ClientConfig {
     fn identification(&self) -> &Identification<&'static str> {
         &self.identification
-    }
-    fn identification_timeout(&self) -> Duration {
-        self.identification_timeout
     }
     fn kex_interval_bytes(&self) -> u64 {
         self.kex_interval_bytes
@@ -127,7 +119,6 @@ mod tests {
     fn test_default_01() {
         let c = ClientConfig::default();
         assert_eq!(c.identification(), &Identification::default());
-        assert_eq!(c.identification_timeout(), Duration::from_secs(10));
         assert_eq!(c.kex_interval_bytes(), 1024 * 1024 * 1024);
         assert_eq!(c.kex_interval_duration(), Duration::from_secs(3600));
         assert_eq!(c.alive_interval(), Duration::from_secs(300));

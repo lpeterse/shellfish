@@ -1,14 +1,12 @@
 use super::*;
 use crate::util::assume;
 
-use async_std::future::timeout;
+use async_std::future::Future;
 
-/// The `Transmitter` handles the low-level part of the wire-protocol including framing and cipher.
-pub struct Transmitter<S> {
-    sender: BufferedSender<WriteHalf<S>>,
-    receiver: BufferedReceiver<ReadHalf<S>>,
+/// The `Transceiver` handles the low-level part of the wire-protocol including framing and cipher.
+pub struct Transceiver<S: Socket> {
+    socket: Buffered<S>,
     receiver_state: ReceiverState,
-    remote_id: Identification,
     bytes_sent: u64,
     packets_sent: u64,
     bytes_received: u64,
@@ -21,31 +19,15 @@ pub struct Transmitter<S> {
     remote_inactivity_timeout: std::time::Duration,
 }
 
-impl<S: Socket> Transmitter<S> {
-    /// Create a new transmitter.
+impl<S: Socket> Transceiver<S> {
+    /// Create a new transceiver.
     ///
     /// This function also performs the identification string exchange which may fail for different
     /// reasons. An error is returned in this case.
-    pub async fn new<C: TransportConfig>(config: &C, socket: S) -> Result<Self, TransportError> {
-        let (rh, wh) = futures::io::AsyncReadExt::split(socket);
-        let mut sender = BufferedSender::new(wh);
-        let mut receiver = BufferedReceiver::new(rh);
-
-        // Both parties send their identification string simultaneously.
-        // This process times out in order to avoid denial of service by unserved connections.
-        let local_id = config.identification();
-        let remote_id = timeout(config.identification_timeout(), async {
-            Self::send_id(&mut sender, local_id).await?;
-            Self::receive_id(&mut receiver).await
-        })
-        .await
-        .map_err(|_| TransportError::IdentificationTimeout)??;
-
-        Ok(Self {
-            sender,
-            receiver,
+    pub fn new<C: TransportConfig>(config: &C, socket: S) -> Self {
+        Self {
+            socket: Buffered::new(socket),
             receiver_state: ReceiverState::new(),
-            remote_id,
             bytes_sent: 0,
             packets_sent: 0,
             bytes_received: 0,
@@ -56,19 +38,11 @@ impl<S: Socket> Transmitter<S> {
             local_inactivity_timeout: config.alive_interval(),
             remote_inactivity_timer: Delay::new(config.inactivity_timeout()),
             remote_inactivity_timeout: config.inactivity_timeout(),
-        })
-    }
-
-    pub fn remote_id(&self) -> &Identification<String> {
-        &self.remote_id
+        }
     }
 
     pub fn bytes_sent(&self) -> u64 {
         self.bytes_sent
-    }
-
-    pub fn packets_sent(&self) -> u64 {
-        self.packets_sent
     }
 
     pub fn bytes_received(&self) -> u64 {
@@ -79,24 +53,24 @@ impl<S: Socket> Transmitter<S> {
         self.packets_received
     }
 
-    /// Get mutable access to the encryption context used by the transmitter.
+    /// Get mutable access to the encryption context used by the transceiver.
     pub fn encryption_ctx(&mut self) -> &mut CipherContext {
         &mut self.encryption_ctx
     }
 
-    /// Get mutable access to the decryption context used by the transmitter.
+    /// Get mutable access to the decryption context used by the transceiver.
     pub fn decryption_ctx(&mut self) -> &mut CipherContext {
         &mut self.decryption_ctx
     }
 
     /// Ask whether the sender contains unsent data.
     pub fn flushed(&self) -> bool {
-        self.sender.flushed()
+        self.socket.flushed()
     }
 
     /// Poll the sender to flush any unsent data.
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        ready!(self.sender.poll_flush(cx))?;
+        ready!(self.socket.poll_flush(cx))?;
         Poll::Ready(Ok(()))
     }
 
@@ -110,7 +84,7 @@ impl<S: Socket> Transmitter<S> {
         msg: &Msg,
     ) -> Poll<Result<(), TransportError>> {
         let packet = self.encryption_ctx.packet(msg);
-        let buffer: &mut [u8] = ready!(self.sender.poll_reserve(cx, packet.size()))?;
+        let buffer: &mut [u8] = ready!(self.socket.poll_extend(cx, packet.size()))?;
         packet.encode(&mut BEncoder::from(&mut buffer[..]));
         self.encryption_ctx.encrypt(self.packets_sent, buffer);
         self.packets_sent += 1;
@@ -124,16 +98,16 @@ impl<S: Socket> Transmitter<S> {
     /// When `Ready`, `decode` and `consume` shall be used to process the message.
     pub fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         let s = self;
-        let mut r = Pin::new(&mut s.receiver);
+        let mut r = Pin::new(&mut s.socket);
         // Case 1: The packet len has not yet been decrypted
         if s.receiver_state.buffer_len == 0 {
             // Receive at least 8 bytes instead of the required 4
             // in order to impede traffic analysis (as recommended by RFC).
-            ready!(r.as_mut().poll_fetch(cx, 2 * 4))?;
+            ready!(r.as_mut().poll_fill_exact(cx, 2 * 4))?;
             // Decrypt the buffer len. Leave the original packet len field encrypted
             // as it is required in encrypted form for message intergrity check.
             let mut len = [0; 4];
-            len.copy_from_slice(&r.window()[..4]);
+            len.copy_from_slice(&Buffered::as_ref(&r)[..4]);
             s.receiver_state.buffer_len = s
                 .decryption_ctx
                 .decrypt_len(s.packets_received, len)
@@ -142,9 +116,9 @@ impl<S: Socket> Transmitter<S> {
         // Case 2: The packet len but not the packet has been decrypted
         if s.receiver_state.packet_len == 0 {
             // Wait for the whole packet to arrive (including MAC etc)
-            ready!(r.as_mut().poll_fetch(cx, s.receiver_state.buffer_len))?;
+            ready!(r.as_mut().poll_fill_exact(cx, s.receiver_state.buffer_len))?;
             // Try to decrypt the packet.
-            let packet = &mut r.window_mut()[..s.receiver_state.buffer_len];
+            let packet = &mut Buffered::as_mut(&mut r)[..s.receiver_state.buffer_len];
             let packet_len = s
                 .decryption_ctx
                 .decrypt(s.packets_received, packet)
@@ -163,7 +137,7 @@ impl<S: Socket> Transmitter<S> {
     pub fn decode<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
         let packet_len = self.receiver_state.packet_len;
         assert!(packet_len != 0);
-        let packet = &self.receiver.window()[4..][..packet_len];
+        let packet = &self.socket.as_ref()[4..][..packet_len];
         let padding: usize = *packet.get(0)? as usize;
         assume(packet_len >= 1 + padding)?;
         let payload = &packet[1..][..packet_len - 1 - padding];
@@ -178,7 +152,7 @@ impl<S: Socket> Transmitter<S> {
         assert!(buffer_len != 0);
         self.packets_received += 1;
         self.bytes_received += buffer_len as u64;
-        self.receiver.consume(buffer_len);
+        self.socket.consume(buffer_len);
         self.receiver_state.reset();
     }
 
@@ -186,7 +160,7 @@ impl<S: Socket> Transmitter<S> {
     /// Like above, the call registers the timer for wakeup. The alive timer is reset
     /// automatically when the message has been sent successfully.
     pub fn poll_keepalive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        match self.local_inactivity_timer.poll_unpin(cx) {
+        match Future::poll(Pin::new(&mut self.local_inactivity_timer), cx) {
             Poll::Pending => (),
             Poll::Ready(()) => {
                 ready!(self.poll_send(cx, &MsgIgnore::new()))?;
@@ -200,7 +174,7 @@ impl<S: Socket> Transmitter<S> {
     /// The inactivity check causes an error in case of timeout and falls through else.
     /// Calling it also registers the timer for wakeup (consider this when reordering code).
     pub fn poll_inactivity(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        match self.remote_inactivity_timer.poll_unpin(cx) {
+        match Future::poll(Pin::new(&mut self.remote_inactivity_timer), cx) {
             Poll::Pending => (),
             Poll::Ready(()) => Err(TransportError::InactivityTimeout)?,
         }
@@ -208,37 +182,51 @@ impl<S: Socket> Transmitter<S> {
     }
 
     /// Send the local identification string.
-    async fn send_id(
-        socket: &mut BufferedSender<WriteHalf<S>>,
+    pub async fn send_id(
+        &mut self,
         id: &Identification<&'static str>,
     ) -> Result<(), TransportError> {
-        let mut enc = BEncoder::from(socket.reserve(Encode::size(id) + 2).await?);
-        Encode::encode(id, &mut enc);
-        enc.push_u8('\r' as u8);
-        enc.push_u8('\n' as u8);
-        socket.flush().await?;
+        let len = Encode::size(id) + 2;
+        poll_fn(|cx| {
+            let buf = ready!(self.socket.poll_extend(cx, len))?;
+            let mut enc = BEncoder::from(buf);
+            Encode::encode(id, &mut enc);
+            enc.push_u8('\r' as u8);
+            enc.push_u8('\n' as u8);
+            Poll::Ready(Ok::<(), TransportError>(()))
+        })
+        .await?;
+        self.socket.flush().await?;
         Ok(())
     }
 
     /// Receive the remote identification string.
-    async fn receive_id(
-        socket: &mut BufferedReceiver<ReadHalf<S>>,
-    ) -> Result<Identification<String>, TransportError> {
+    pub async fn receive_id(&mut self) -> Result<Identification, TransportError> {
         // Drop lines until remote SSH-2.0- version string is recognized
+        let mut len = 0;
         loop {
-            let line: &[u8] = socket.read_line(Identification::<String>::MAX_LEN).await?;
-            match Decode::decode(&mut BDecoder::from(&line)) {
-                None => (),
-                Some(id) => return Ok(id),
+            match self.socket.as_ref().get(len + 1) {
+                Some(0x0a) if self.socket.as_ref().starts_with(b"SSH-2.0") => break,
+                Some(0x0a) => {
+                    self.socket.consume(len + 2);
+                    len = 0;
+                }
+                Some(_) => len += 1,
+                None if self.socket.as_ref().len() < 255 => self.socket.fill().await?,
+                None => Err(TransportError::DecoderError)?,
             }
         }
+        let mut d = BDecoder(&self.socket.as_ref()[..len]);
+        let id = Decode::decode(&mut d).ok_or(TransportError::DecoderError)?;
+        self.socket.consume(len + 2);
+        Ok(id)
     }
 
     /// Resets the local inactivity timer to the configured timespan and registers it for wakeup.
     fn reset_local_inactivity_timer(&mut self, cx: &mut Context) -> Result<(), TransportError> {
         self.local_inactivity_timer
             .reset(self.local_inactivity_timeout);
-        match self.local_inactivity_timer.poll_unpin(cx) {
+        match Future::poll(Pin::new(&mut self.local_inactivity_timer), cx) {
             Poll::Pending => Ok(()),
             // Shall not happen, but if it does we rather convert it to an error instead of a panic
             _ => Err(TransportError::InactivityTimeout),
@@ -249,7 +237,7 @@ impl<S: Socket> Transmitter<S> {
     fn reset_remote_inactivity_timer(&mut self, cx: &mut Context) -> Result<(), TransportError> {
         self.remote_inactivity_timer
             .reset(self.remote_inactivity_timeout);
-        match self.remote_inactivity_timer.poll_unpin(cx) {
+        match Future::poll(Pin::new(&mut self.remote_inactivity_timer), cx) {
             Poll::Pending => Ok(()),
             // Shall not happen, but if it does we rather convert it to an error instead of a panic
             _ => Err(TransportError::InactivityTimeout),

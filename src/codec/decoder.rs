@@ -43,7 +43,7 @@ pub trait Decoder<'a>: Clone {
 /// The state of the decoder is undefined after it failed unless a specific decoder function states
 /// something else (no backtracking by default).
 #[derive(Copy, Clone, Debug)]
-pub struct BDecoder<'a>(&'a [u8]);
+pub struct BDecoder<'a>(pub &'a [u8]);
 
 impl<'a> BDecoder<'a> {
     /// Try to decode the given input as `T`.

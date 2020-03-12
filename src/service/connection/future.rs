@@ -8,9 +8,8 @@ use super::*;
 
 use crate::transport::*;
 
-use futures::future::Future;
-use futures::ready;
-use futures::task::{Context, Poll};
+use async_std::future::Future;
+use async_std::task::{ready, Context, Poll};
 use std::pin::*;
 
 pub struct ConnectionFuture<R: Role, S: Socket> {
@@ -20,10 +19,10 @@ pub struct ConnectionFuture<R: Role, S: Socket> {
     pub channels: ChannelMap<Channel>,
 }
 
-impl<R: Role, T: Socket> ConnectionFuture<R,T> {
+impl<R: Role, T: Socket> ConnectionFuture<R, T> {
     pub fn new<C: ConnectionConfig>(
         config: &C,
-        transport: Transport<R,T>,
+        transport: Transport<R, T>,
         request_sender: RequestSender,
         request_receiver: RequestReceiver,
     ) -> Self {
@@ -80,7 +79,7 @@ impl<R: Role, T: Socket> ConnectionFuture<R,T> {
             // again. This is somewhat unlikely and will not occur unless the transport is under
             // heavy load, but it is necessary to consider this for correctness or the connection
             // will stop making progress as soon as single notification gets lost.
-            if !self.transport.is_flushed() {
+            if !self.transport.flushed() {
                 ready!(self.transport.poll_flush(cx))?;
                 continue;
             }
@@ -91,7 +90,7 @@ impl<R: Role, T: Socket> ConnectionFuture<R,T> {
     }
 }
 
-impl<R: Role, T> Future for ConnectionFuture<R,T>
+impl<R: Role, T> Future for ConnectionFuture<R, T>
 where
     T: Unpin + Socket,
 {

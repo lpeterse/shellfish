@@ -1,8 +1,6 @@
 use super::*;
 use crate::codec::*;
 
-use num_bigint::BigUint;
-
 pub struct SshRsa {}
 
 impl AuthAlgorithm for SshRsa {
@@ -15,21 +13,23 @@ impl AuthAlgorithm for SshRsa {
 
 #[derive(PartialEq, Clone, Debug)]
 pub struct SshRsaPublicKey {
-    pub public_e: BigUint,
-    pub public_n: BigUint,
+    pub public_e: Vec<u8>,
+    pub public_n: Vec<u8>,
 }
 
 impl Encode for SshRsaPublicKey {
     fn size(&self) -> usize {
         4 + Encode::size(&<SshRsa as AuthAlgorithm>::NAME)
-            + Encode::size(&self.public_e)
-            + Encode::size(&self.public_n)
+            + 4 + self.public_e.len()
+            + 4 + self.public_n.len()
     }
     fn encode<E: Encoder>(&self, c: &mut E) {
         c.push_u32be((Encode::size(self) - 4) as u32);
         Encode::encode(&<SshRsa as AuthAlgorithm>::NAME, c);
-        Encode::encode(&self.public_e, c);
-        Encode::encode(&self.public_n, c);
+        c.push_u32be(self.public_e.len() as u32);
+        c.push_bytes(&self.public_e);
+        c.push_u32be(self.public_n.len() as u32);
+        c.push_bytes(&self.public_n);
     }
 }
 
@@ -38,8 +38,10 @@ impl<'a> DecodeRef<'a> for SshRsaPublicKey {
         let _len = c.take_u32be()?; // TODO: use
         let _: &str =
             DecodeRef::decode(c).filter(|x| *x == <SshRsa as AuthAlgorithm>::NAME)?;
-        let e = DecodeRef::decode(c)?;
-        let n = DecodeRef::decode(c)?;
+        let l = c.take_u32be()?;
+        let e = Vec::from(c.take_bytes(l as usize)?);
+        let l = c.take_u32be()?;
+        let n = Vec::from(c.take_bytes(l as usize)?);
         Some(SshRsaPublicKey {
             public_e: e,
             public_n: n,
@@ -50,7 +52,7 @@ impl<'a> DecodeRef<'a> for SshRsaPublicKey {
 #[derive(Copy, Clone, Debug)]
 pub struct SshRsaSignatureFlags {
     // SSH_AGENT_RSA_SHA2_256
-// SSH_AGENT_RSA_SHA2_512
+    // SSH_AGENT_RSA_SHA2_512
 }
 
 impl Default for SshRsaSignatureFlags {

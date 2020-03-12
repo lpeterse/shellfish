@@ -4,6 +4,7 @@ use crate::algorithm::kex::*;
 use crate::algorithm::*;
 
 use std::time::Duration;
+use async_std::future::Future;
 
 /// The client side state machine for key exchange.
 pub struct ClientKex {
@@ -212,7 +213,7 @@ impl Kex for ClientKex {
     ) -> Poll<Result<(), TransportError>> {
         // Determine whether kex is required according to timeout or traffic.
         // This might evaluate to true even if kex is already in progress, but is harmless.
-        let a = self.next_at.poll_unpin(cx).is_ready();
+        let a = Pin::new(&mut self.next_at).poll(cx).is_ready();
         let b = self.next_at_bytes_sent <= bytes_sent;
         let c = self.next_at_bytes_received <= bytes_received;
         if a || b || c {

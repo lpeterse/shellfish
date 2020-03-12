@@ -1,6 +1,6 @@
 use super::*;
-use futures::io::AsyncRead;
-use futures::task::{Context, Poll};
+use async_std::io::Read;
+use async_std::task::{Context, Poll};
 use std::pin::Pin;
 
 pub struct Process(Session);
@@ -23,7 +23,7 @@ impl Process {
     }
 }
 
-impl AsyncRead for Process {
+impl Read for Process {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context,
@@ -37,7 +37,7 @@ pub struct Stdin<'a>(&'a mut Process);
 
 pub struct Stdout<'a>(&'a mut Process);
 
-impl<'a> AsyncRead for Stdout<'a> {
+impl<'a> Read for Stdout<'a> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -58,14 +58,14 @@ impl<'a> AsyncRead for Stdout<'a> {
         if channel.is_remote_eof {
             return Poll::Ready(Ok(0));
         }
-        channel.outer_waker.register(cx.waker());
+        //channel.outer_waker.register(cx.waker());
         return Poll::Pending;
     }
 }
 
 pub struct Stderr<'a>(&'a mut Process);
 
-impl<'a> AsyncRead for Stderr<'a> {
+impl<'a> Read for Stderr<'a> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -86,7 +86,7 @@ impl<'a> AsyncRead for Stderr<'a> {
         if channel.is_remote_eof {
             return Poll::Ready(Ok(0));
         }
-        channel.outer_waker.register(cx.waker());
+        //channel.outer_waker.register(cx.waker());
         return Poll::Pending;
     }
 }
