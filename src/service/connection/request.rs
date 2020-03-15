@@ -1,104 +1,92 @@
 use super::*;
+use crate::util::oneshot;
+
 use async_std::future::Future;
 use async_std::task::{ready, Context, Poll};
-//use futures_channel::oneshot;
-use crate::oneshot;
 use std::pin::Pin;
 
-pub trait IsRequest: Sized {
-    type Response;
+pub(crate) enum Request {
+    OpenSession(Transaction<OpenRequest<Session>>),
+    OpenDirectTcpIp(Transaction<OpenRequest<DirectTcpIp>>),
+}
+
+pub(crate) struct Transaction<R: IsRequest> {
+    pub input: R,
+    pub output: oneshot::Sender<Result<(R::Result, RequestSender), ConnectionError>>,
+}
+
+pub(crate) struct OpenRequest<T: Channel> {
+    pub initial_window_size: u32,
+    pub max_packet_size: u32,
+    pub specific: <T as Channel>::Open,
+}
+
+pub(crate) trait IsRequest: Sized {
+    type Result: Sized;
     fn try_from(r: Request) -> Option<Transaction<Self>>;
     fn into_request(
         self,
-        sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>,
+        sender: oneshot::Sender<Result<(Self::Result, RequestSender), ConnectionError>>,
     ) -> Request;
 }
 
-pub enum Request {
-    ChannelOpen(Transaction<ChannelOpenRequest>),
-    Disconnect(Transaction<DisconnectRequest>),
-}
-
-pub struct Transaction<R: IsRequest> {
-    pub input: R,
-    output: oneshot::Sender<Result<(R::Response, RequestSender), ConnectionError>>,
-}
-
-pub struct DisconnectRequest {}
-
-impl Into<Request> for DisconnectRequest {
-    fn into(self) -> Request {
-        panic!("")
-    }
-}
-
-impl IsRequest for DisconnectRequest {
-    type Response = ();
+impl IsRequest for OpenRequest<Session> {
+    type Result = Result<Session, ChannelOpenFailureReason>;
     fn try_from(r: Request) -> Option<Transaction<Self>> {
         match r {
-            Request::Disconnect(x) => Some(x),
+            Request::OpenSession(x) => Some(x),
             _ => None,
         }
     }
     fn into_request(
         self,
-        sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>,
+        sender: oneshot::Sender<Result<(Self::Result, RequestSender), ConnectionError>>,
     ) -> Request {
-        Request::Disconnect(Transaction {
+        Request::OpenSession(Transaction {
             input: self,
             output: sender,
         })
     }
 }
 
-pub struct ChannelOpenRequest {
-    pub initial_window_size: u32,
-    pub max_packet_size: u32,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct ChannelOpenFailure {
-    pub reason: Reason,
-}
-
-impl IsRequest for ChannelOpenRequest {
-    type Response = Result<Session, ChannelOpenFailure>;
+impl IsRequest for OpenRequest<DirectTcpIp> {
+    type Result = Result<DirectTcpIp, ChannelOpenFailureReason>;
     fn try_from(r: Request) -> Option<Transaction<Self>> {
         match r {
-            Request::ChannelOpen(x) => Some(x),
-            _ => None,
+            Request::OpenDirectTcpIp(x) => Some(x),
+            _ => None
         }
     }
     fn into_request(
         self,
-        sender: oneshot::Sender<Result<(Self::Response, RequestSender), ConnectionError>>,
+        sender: oneshot::Sender<Result<(Self::Result, RequestSender), ConnectionError>>,
     ) -> Request {
-        Request::ChannelOpen(Transaction {
+        Request::OpenDirectTcpIp(Transaction {
             input: self,
             output: sender,
         })
     }
 }
 
-pub fn channel() -> (RequestSender, RequestReceiver) {
+pub(crate) fn channel() -> (RequestSender, RequestReceiver) {
     let (s, r) = oneshot::channel();
     (RequestSender::Ready(s), RequestReceiver::Waiting(r))
 }
 
-pub enum RequestSender {
+pub(crate) enum RequestSender {
     Terminated(ConnectionError),
     Ready(oneshot::Sender<Request>),
     Pending,
 }
 
-pub enum RequestReceiver {
+pub(crate) enum RequestReceiver {
     Terminated,
     Waiting(oneshot::Receiver<Request>),
     Processing((bool, Request)),
 }
 
 impl RequestSender {
-    pub async fn request<R: IsRequest>(&mut self, req: R) -> Result<R::Response, ConnectionError> {
+    pub async fn request<R: IsRequest>(&mut self, req: R) -> Result<R::Result, ConnectionError> {
         let (s, r) = oneshot::channel();
         match std::mem::replace(self, Self::Pending) {
             Self::Terminated(e) => {
@@ -107,11 +95,9 @@ impl RequestSender {
             }
             Self::Ready(x) => {
                 x.send(IsRequest::into_request(req, s));
-                //    .map_err(|_| ConnectionError::RequestReceiverDropped)?; FIXME
-                let (response, sender) =
-                    r.await.ok_or(ConnectionError::RequestReceiverDropped)??;
+                let (result, sender) = r.await.ok_or(ConnectionError::RequestReceiverDropped)??;
                 *self = sender;
-                Ok(response)
+                Ok(result)
             }
             Self::Pending => panic!("illegal state"),
         }
@@ -145,23 +131,17 @@ impl RequestReceiver {
         }
     }
 
-    pub fn complete<F, R, T>(&mut self, f: F) -> Result<T, ConnectionError>
-    where
-        R: IsRequest,
-        F: FnOnce(R) -> Result<(R::Response, T), ConnectionError>,
-    {
+    pub fn resolve<R: IsRequest>(&mut self, result: R::Result) -> Result<(), ConnectionError> {
         let (s, r) = oneshot::channel();
         let sender = RequestSender::Ready(s);
         let receiver = RequestReceiver::Waiting(r);
         match std::mem::replace(self, receiver) {
             Self::Terminated => return Err(ConnectionError::Terminated),
-            Self::Processing((true, x)) => match IsRequest::try_from(x) {
+            Self::Processing((true, x)) => match <R as IsRequest>::try_from(x) {
                 None => return Err(ConnectionError::RequestUnexpectedResponse),
                 Some(r) => {
-                    let (response, t) = f(r.input)?;
-                    r.output.send(Ok((response, sender)));
-                    //.map_err(|_| ConnectionError::RequestSenderDropped)?; // FIXME
-                    Ok(t)
+                    r.output.send(Ok((result, sender)));
+                    Ok(())
                 }
             },
             _ => return Err(ConnectionError::RequestUnexpectedResponse),
@@ -169,12 +149,13 @@ impl RequestReceiver {
     }
 
     pub fn terminate(&mut self, e: ConnectionError) {
+        // FIXME
+        /*
         match std::mem::replace(self, Self::Terminated) {
             Self::Processing((_, x)) => match x {
                 Request::ChannelOpen(x) => x.output.send(Err(e)),
-                Request::Disconnect(x) => x.output.send(Err(e)),
             },
             _ => (),
-        }
+        }*/
     }
 }

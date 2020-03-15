@@ -1,8 +1,6 @@
 use super::*;
 
-use crate::algorithm::auth::*;
-use crate::host::*;
-use crate::transport::msg_disconnect::Reason;
+use crate::transport::msg_disconnect::DisconnectReason;
 
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TransportError {
@@ -12,7 +10,7 @@ pub enum TransportError {
     ProtocolError,
     BadPacketLength,
     InvalidSignature,
-    HostKeyVerificationError(VerificationError),
+    HostKeyUnverifiable,
     MessageIntegrity,
     MessageUnexpected,
     MessageUnimplemented,
@@ -22,19 +20,13 @@ pub enum TransportError {
     NoCommonKexAlgorithm,
     NoCommonMacAlgorith,
     InactivityTimeout,
-    DisconnectByUs(Reason),
-    DisconnectByPeer(Reason),
+    DisconnectByUs(DisconnectReason),
+    DisconnectByPeer(DisconnectReason),
 }
 
 impl From<std::io::Error> for TransportError {
     fn from(e: std::io::Error) -> Self {
         Self::IoError(e.kind())
-    }
-}
-
-impl From<VerificationError> for TransportError {
-    fn from(e: VerificationError) -> Self {
-        Self::HostKeyVerificationError(e)
     }
 }
 
@@ -54,12 +46,18 @@ mod tests {
     #[test]
     fn test_debug_01() {
         assert_eq!(
-            "DisconnectByUs(Reason::MAC_ERROR)",
-            format!("{:?}", TransportError::DisconnectByUs(Reason::MAC_ERROR))
+            "DisconnectByUs(DisconnectReason::MAC_ERROR)",
+            format!(
+                "{:?}",
+                TransportError::DisconnectByUs(DisconnectReason::MAC_ERROR)
+            )
         );
         assert_eq!(
-            "DisconnectByPeer(Reason::MAC_ERROR)",
-            format!("{:?}", TransportError::DisconnectByPeer(Reason::MAC_ERROR))
+            "DisconnectByPeer(DisconnectReason::MAC_ERROR)",
+            format!(
+                "{:?}",
+                TransportError::DisconnectByPeer(DisconnectReason::MAC_ERROR)
+            )
         );
     }
 }

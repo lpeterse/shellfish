@@ -1,4 +1,3 @@
-use super::msg_channel_request::*;
 use super::*;
 use super::{ConnectionError, ConnectionFuture};
 
@@ -6,11 +5,12 @@ use crate::transport::*;
 
 use async_std::task::Context;
 
-pub fn poll<R: Role, T: Socket>(
+pub (crate) fn poll<R: Role, T: Socket>(
     x: &mut ConnectionFuture<R,T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     for channel in x.channels.iter() {
+        /*
         // Nothing to do if channel is closing.
         // We're expecting the peer's close message any moment..
         // The channel remove logic is located in the disconnect
@@ -19,9 +19,14 @@ pub fn poll<R: Role, T: Socket>(
             continue;
         }
         match channel.shared() {
+            // stdout
+            // stderr
+            // requests
+            // env
+            // signals
             SharedState::Session(ref st) => {
                 let mut state = st.lock().unwrap();
-                //state.inner_waker.register(cx.waker());
+                state.inner_register(cx);
                 match state.request {
                     RequestState::Open(ref r) => {
                         let msg = MsgChannelRequest {
@@ -37,6 +42,7 @@ pub fn poll<R: Role, T: Socket>(
                 }
             }
         }
+        */
     }
 
     Poll::Pending

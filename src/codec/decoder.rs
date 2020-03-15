@@ -1,4 +1,4 @@
-use super::DecodeRef;
+use super::{Decode, DecodeRef};
 use crate::util::*;
 
 use std::convert::TryInto;
@@ -19,6 +19,9 @@ pub trait Decoder<'a>: Clone {
     fn take_while<F>(&mut self, pred: F) -> Option<&'a [u8]>
     where
         F: FnMut(u8) -> bool + Sized;
+    fn take_decode<T: Decode>(&mut self) -> Option<T> {
+        Decode::decode(self)
+    }
     fn expect_u8(&mut self, x: u8) -> Option<()>;
     fn expect_u32be(&mut self, x: u32) -> Option<()>;
     fn expect_true(&mut self) -> Option<()>;

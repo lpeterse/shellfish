@@ -3,8 +3,8 @@ use super::kex::*;
 use crate::algorithm::kex::*;
 use crate::algorithm::*;
 
-use std::time::Duration;
 use async_std::future::Future;
+use std::time::Duration;
 
 /// The client side state machine for key exchange.
 pub struct ClientKex {
@@ -254,7 +254,8 @@ impl Kex for ClientKex {
                         }
                     }
                     State::HostKeyVerification((verified, enc, dec)) => {
-                        ready!(core::pin::Pin::as_mut(verified).poll(cx))?;
+                        ready!(core::pin::Pin::as_mut(verified).poll(cx))
+                            .map_err(|_| TransportError::HostKeyUnverifiable)?;
                         self.state = Some(Box::new(State::NewKeys((enc.clone(), dec.clone()))));
                         continue;
                     }

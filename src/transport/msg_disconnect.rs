@@ -3,13 +3,13 @@ use crate::message::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgDisconnect<'a> {
-    pub reason: Reason,
+    pub reason: DisconnectReason,
     pub description: &'a str,
     pub language: &'a str,
 }
 
 impl<'a> MsgDisconnect<'a> {
-    pub fn new(reason: Reason) -> Self {
+    pub fn new(reason: DisconnectReason) -> Self {
         Self {
             reason,
             description: "",
@@ -49,9 +49,9 @@ impl<'a> DecodeRef<'a> for MsgDisconnect<'a> {
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-pub struct Reason(u32);
+pub struct DisconnectReason(u32);
 
-impl Reason {
+impl DisconnectReason {
     pub const HOST_NOT_ALLOWED_TO_CONNECT: Self = Self(1);
     pub const PROTOCOL_ERROR: Self = Self(2);
     pub const KEY_EXCHANGE_FAILED: Self = Self(3);
@@ -69,7 +69,13 @@ impl Reason {
     pub const ILLEGAL_USER_NAME: Self = Self(15);
 }
 
-impl Encode for Reason {
+impl Default for DisconnectReason {
+    fn default() -> Self {
+        Self::BY_APPLICATION
+    }
+}
+
+impl Encode for DisconnectReason {
     fn size(&self) -> usize {
         4
     }
@@ -78,35 +84,35 @@ impl Encode for Reason {
     }
 }
 
-impl<'a> DecodeRef<'a> for Reason {
+impl<'a> DecodeRef<'a> for DisconnectReason {
     fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        c.take_u32be().map(Reason)
+        c.take_u32be().map(DisconnectReason)
     }
 }
 
-impl std::fmt::Debug for Reason {
+impl std::fmt::Debug for DisconnectReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &Self::HOST_NOT_ALLOWED_TO_CONNECT => write!(f, "Reason::HOST_NOT_ALLOWED_TO_CONNECT"),
-            &Self::PROTOCOL_ERROR => write!(f, "Reason::PROTOCOL_ERROR"),
-            &Self::KEY_EXCHANGE_FAILED => write!(f, "Reason::KEY_EXCHANGE_FAILED"),
-            &Self::RESERVED => write!(f, "Reason::RESERVED"),
-            &Self::MAC_ERROR => write!(f, "Reason::MAC_ERROR"),
-            &Self::COMPRESSION_ERROR => write!(f, "Reason::COMPRESSION_ERROR"),
-            &Self::SERVICE_NOT_AVAILABLE => write!(f, "Reason::SERVICE_NOT_AVAILABLE"),
+            &Self::HOST_NOT_ALLOWED_TO_CONNECT => write!(f, "DisconnectReason::HOST_NOT_ALLOWED_TO_CONNECT"),
+            &Self::PROTOCOL_ERROR => write!(f, "DisconnectReason::PROTOCOL_ERROR"),
+            &Self::KEY_EXCHANGE_FAILED => write!(f, "DisconnectReason::KEY_EXCHANGE_FAILED"),
+            &Self::RESERVED => write!(f, "DisconnectReason::RESERVED"),
+            &Self::MAC_ERROR => write!(f, "DisconnectReason::MAC_ERROR"),
+            &Self::COMPRESSION_ERROR => write!(f, "DisconnectReason::COMPRESSION_ERROR"),
+            &Self::SERVICE_NOT_AVAILABLE => write!(f, "DisconnectReason::SERVICE_NOT_AVAILABLE"),
             &Self::PROTOCOL_VERSION_NOT_SUPPORTED => {
-                write!(f, "Reason::PROTOCOL_VERSION_NOT_SUPPORTED")
+                write!(f, "DisconnectReason::PROTOCOL_VERSION_NOT_SUPPORTED")
             }
-            &Self::HOST_KEY_NOT_VERIFIABLE => write!(f, "Reason::HOST_KEY_NOT_VERIFIABLE"),
-            &Self::CONNECTION_LOST => write!(f, "Reason::CONNECTION_LOST"),
-            &Self::BY_APPLICATION => write!(f, "Reason::BY_APPLICATION"),
-            &Self::TOO_MANY_CONNECTIONS => write!(f, "Reason::TOO_MANY_CONNECTIONS"),
-            &Self::AUTH_CANCELLED_BY_USER => write!(f, "Reason::AUTH_CANCELLED_BY_USER"),
+            &Self::HOST_KEY_NOT_VERIFIABLE => write!(f, "DisconnectReason::HOST_KEY_NOT_VERIFIABLE"),
+            &Self::CONNECTION_LOST => write!(f, "DisconnectReason::CONNECTION_LOST"),
+            &Self::BY_APPLICATION => write!(f, "DisconnectReason::BY_APPLICATION"),
+            &Self::TOO_MANY_CONNECTIONS => write!(f, "DisconnectReason::TOO_MANY_CONNECTIONS"),
+            &Self::AUTH_CANCELLED_BY_USER => write!(f, "DisconnectReason::AUTH_CANCELLED_BY_USER"),
             &Self::NO_MORE_AUTH_METHODS_AVAILABLE => {
-                write!(f, "Reason::NO_MORE_AUTH_METHODS_AVAILABLE")
+                write!(f, "DisconnectReason::NO_MORE_AUTH_METHODS_AVAILABLE")
             }
-            &Self::ILLEGAL_USER_NAME => write!(f, "Reason::ILLEGAL_USER_NAME"),
-            _ => write!(f, "Reason({})", self.0),
+            &Self::ILLEGAL_USER_NAME => write!(f, "DisconnectReason::ILLEGAL_USER_NAME"),
+            _ => write!(f, "DisconnectReason({})", self.0),
         }
     }
 }
@@ -118,16 +124,16 @@ mod tests {
     #[test]
     fn test_debug_01() {
         let msg = MsgDisconnect {
-            reason: Reason::MAC_ERROR,
+            reason: DisconnectReason::MAC_ERROR,
             description: "description",
             language: "language",
         };
-        assert_eq!("MsgDisconnect { reason: Reason::MAC_ERROR, description: \"description\", language: \"language\" }", format!("{:?}", msg));
+        assert_eq!("MsgDisconnect { reason: DisconnectReason::MAC_ERROR, description: \"description\", language: \"language\" }", format!("{:?}", msg));
     }
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgDisconnect::new(Reason::MAC_ERROR);
+        let msg = MsgDisconnect::new(DisconnectReason::MAC_ERROR);
         assert_eq!(
             &[1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0][..],
             &BEncoder::encode(&msg)[..]
@@ -137,7 +143,7 @@ mod tests {
     #[test]
     fn test_decode_01() {
         assert_eq!(
-            &Some(MsgDisconnect::new(Reason::MAC_ERROR)),
+            &Some(MsgDisconnect::new(DisconnectReason::MAC_ERROR)),
             &BDecoder::decode(&[1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0][..])
         );
     }
@@ -145,59 +151,59 @@ mod tests {
     #[test]
     fn test_reason_debug_01() {
         assert_eq!(
-            "Reason::HOST_NOT_ALLOWED_TO_CONNECT",
-            format!("{:?}", Reason::HOST_NOT_ALLOWED_TO_CONNECT)
+            "DisconnectReason::HOST_NOT_ALLOWED_TO_CONNECT",
+            format!("{:?}", DisconnectReason::HOST_NOT_ALLOWED_TO_CONNECT)
         );
         assert_eq!(
-            "Reason::PROTOCOL_ERROR",
-            format!("{:?}", Reason::PROTOCOL_ERROR)
+            "DisconnectReason::PROTOCOL_ERROR",
+            format!("{:?}", DisconnectReason::PROTOCOL_ERROR)
         );
         assert_eq!(
-            "Reason::KEY_EXCHANGE_FAILED",
-            format!("{:?}", Reason::KEY_EXCHANGE_FAILED)
+            "DisconnectReason::KEY_EXCHANGE_FAILED",
+            format!("{:?}", DisconnectReason::KEY_EXCHANGE_FAILED)
         );
-        assert_eq!("Reason::RESERVED", format!("{:?}", Reason::RESERVED));
-        assert_eq!("Reason::MAC_ERROR", format!("{:?}", Reason::MAC_ERROR));
+        assert_eq!("DisconnectReason::RESERVED", format!("{:?}", DisconnectReason::RESERVED));
+        assert_eq!("DisconnectReason::MAC_ERROR", format!("{:?}", DisconnectReason::MAC_ERROR));
         assert_eq!(
-            "Reason::COMPRESSION_ERROR",
-            format!("{:?}", Reason::COMPRESSION_ERROR)
-        );
-        assert_eq!(
-            "Reason::SERVICE_NOT_AVAILABLE",
-            format!("{:?}", Reason::SERVICE_NOT_AVAILABLE)
+            "DisconnectReason::COMPRESSION_ERROR",
+            format!("{:?}", DisconnectReason::COMPRESSION_ERROR)
         );
         assert_eq!(
-            "Reason::PROTOCOL_VERSION_NOT_SUPPORTED",
-            format!("{:?}", Reason::PROTOCOL_VERSION_NOT_SUPPORTED)
+            "DisconnectReason::SERVICE_NOT_AVAILABLE",
+            format!("{:?}", DisconnectReason::SERVICE_NOT_AVAILABLE)
         );
         assert_eq!(
-            "Reason::HOST_KEY_NOT_VERIFIABLE",
-            format!("{:?}", Reason::HOST_KEY_NOT_VERIFIABLE)
+            "DisconnectReason::PROTOCOL_VERSION_NOT_SUPPORTED",
+            format!("{:?}", DisconnectReason::PROTOCOL_VERSION_NOT_SUPPORTED)
         );
         assert_eq!(
-            "Reason::CONNECTION_LOST",
-            format!("{:?}", Reason::CONNECTION_LOST)
+            "DisconnectReason::HOST_KEY_NOT_VERIFIABLE",
+            format!("{:?}", DisconnectReason::HOST_KEY_NOT_VERIFIABLE)
         );
         assert_eq!(
-            "Reason::BY_APPLICATION",
-            format!("{:?}", Reason::BY_APPLICATION)
+            "DisconnectReason::CONNECTION_LOST",
+            format!("{:?}", DisconnectReason::CONNECTION_LOST)
         );
         assert_eq!(
-            "Reason::TOO_MANY_CONNECTIONS",
-            format!("{:?}", Reason::TOO_MANY_CONNECTIONS)
+            "DisconnectReason::BY_APPLICATION",
+            format!("{:?}", DisconnectReason::BY_APPLICATION)
         );
         assert_eq!(
-            "Reason::AUTH_CANCELLED_BY_USER",
-            format!("{:?}", Reason::AUTH_CANCELLED_BY_USER)
+            "DisconnectReason::TOO_MANY_CONNECTIONS",
+            format!("{:?}", DisconnectReason::TOO_MANY_CONNECTIONS)
         );
         assert_eq!(
-            "Reason::NO_MORE_AUTH_METHODS_AVAILABLE",
-            format!("{:?}", Reason::NO_MORE_AUTH_METHODS_AVAILABLE)
+            "DisconnectReason::AUTH_CANCELLED_BY_USER",
+            format!("{:?}", DisconnectReason::AUTH_CANCELLED_BY_USER)
         );
         assert_eq!(
-            "Reason::ILLEGAL_USER_NAME",
-            format!("{:?}", Reason::ILLEGAL_USER_NAME)
+            "DisconnectReason::NO_MORE_AUTH_METHODS_AVAILABLE",
+            format!("{:?}", DisconnectReason::NO_MORE_AUTH_METHODS_AVAILABLE)
         );
-        assert_eq!("Reason(16)", format!("{:?}", Reason(16)));
+        assert_eq!(
+            "DisconnectReason::ILLEGAL_USER_NAME",
+            format!("{:?}", DisconnectReason::ILLEGAL_USER_NAME)
+        );
+        assert_eq!("DisconnectReason(16)", format!("{:?}", DisconnectReason(16)));
     }
 }

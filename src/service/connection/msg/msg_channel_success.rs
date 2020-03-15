@@ -2,7 +2,7 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub struct MsgChannelSuccess {
+pub(crate) struct MsgChannelSuccess {
     pub recipient_channel: u32,
 }
 
@@ -24,8 +24,9 @@ impl Decode for MsgChannelSuccess {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            recipient_channel: d.take_u32be()?
-        }.into()
+            recipient_channel: d.take_u32be()?,
+        }
+        .into()
     }
 }
 
@@ -35,7 +36,9 @@ mod tests {
 
     #[test]
     fn test_debug_01() {
-        let msg = MsgChannelSuccess { recipient_channel: 23 };
+        let msg = MsgChannelSuccess {
+            recipient_channel: 23,
+        };
         assert_eq!(
             "MsgChannelSuccess { recipient_channel: 23 }",
             format!("{:?}", msg)
@@ -44,13 +47,15 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgChannelSuccess { recipient_channel: 23 };
-        assert_eq!(&[99,0,0,0,23][..], &BEncoder::encode(&msg)[..]);
+        let msg = MsgChannelSuccess {
+            recipient_channel: 23,
+        };
+        assert_eq!(&[99, 0, 0, 0, 23][..], &BEncoder::encode(&msg)[..]);
     }
 
     #[test]
     fn test_decode_01() {
-        let buf: [u8; 5] = [99,0,0,0,23];
+        let buf: [u8; 5] = [99, 0, 0, 0, 23];
         let msg: MsgChannelSuccess = BDecoder::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
     }

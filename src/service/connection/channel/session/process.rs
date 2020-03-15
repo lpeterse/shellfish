@@ -1,9 +1,16 @@
 use super::*;
 use async_std::io::Read;
+use async_std::stream::Stream;
 use async_std::task::{Context, Poll};
 use std::pin::Pin;
 
 pub struct Process(Session);
+
+#[derive(Debug, Clone)]
+pub enum ProcessEvent {
+    Data,
+    Exit(Exit),
+}
 
 impl Process {
     pub(super) fn new(x: Session) -> Self {
@@ -21,15 +28,27 @@ impl Process {
     pub fn stderr<'a>(&'a mut self) -> Stderr<'a> {
         Stderr(self)
     }
+
+    pub fn eof(&mut self) {}
+
+    pub fn kill(&mut self, signal: Signal) {}
 }
 
-impl Read for Process {
-    fn poll_read(
-        mut self: Pin<&mut Self>,
-        cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
-        Pin::new(&mut (self.stdout())).poll_read(cx, buf)
+impl Stream for Process {
+    type Item = Result<ProcessEvent, ConnectionError>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let mut state = ((self.0).0).0.lock().map_err(|_| ConnectionError::Terminated)?;
+        state.outer_task = None;
+
+        if let Some(exit) = state.exit.take() {
+            return Poll::Ready(Some(Ok(ProcessEvent::Exit(exit))))
+        }
+        if let Some(done) = state.inner_done.take() {
+            Err(done)?
+        }
+
+        Poll::Pending
     }
 }
 
@@ -43,10 +62,11 @@ impl<'a> Read for Stdout<'a> {
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<Result<usize, std::io::Error>> {
+        /*
         if buf.is_empty() {
             return Poll::Ready(Ok(0));
         }
-        let mut channel = (self.0).0.state.lock().unwrap();
+        let mut channel = ((self.0).0).0.lock().unwrap();
         if channel.is_closed {
             return Poll::Ready(Ok(0));
         }
@@ -59,6 +79,7 @@ impl<'a> Read for Stdout<'a> {
             return Poll::Ready(Ok(0));
         }
         //channel.outer_waker.register(cx.waker());
+        */
         return Poll::Pending;
     }
 }
@@ -71,10 +92,11 @@ impl<'a> Read for Stderr<'a> {
         cx: &mut Context,
         buf: &mut [u8],
     ) -> Poll<Result<usize, std::io::Error>> {
+        /*
         if buf.is_empty() {
             return Poll::Ready(Ok(0));
         }
-        let mut channel = (self.0).0.state.lock().unwrap();
+        let mut channel = ((self.0).0).0.lock().unwrap();
         if channel.is_closed {
             return Poll::Ready(Ok(0));
         }
@@ -87,6 +109,7 @@ impl<'a> Read for Stderr<'a> {
             return Poll::Ready(Ok(0));
         }
         //channel.outer_waker.register(cx.waker());
+        */
         return Poll::Pending;
     }
 }

@@ -10,7 +10,6 @@ base64 = "0.12.0"
 chacha20 = { version = "0.3.4", features = ["legacy"] }
 ed25519-dalek = "1.0.0-pre.3"
 env_logger = { version = "0.7.1", default-features = false }
-#futures-channel = "0.3.4"
 futures-timer = "3.0.2"
 generic-array = "0.12.3"
 hmac = "0.7.1"
@@ -24,5 +23,5 @@ x25519-dalek = "0.6.0"
 [profile.release]
 lto = true
 panic = "abort"
-opt-level = "z"
 codegen-units = 1
+opt-level = "z"

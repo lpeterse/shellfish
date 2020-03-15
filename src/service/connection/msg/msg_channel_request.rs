@@ -2,7 +2,7 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub struct MsgChannelRequest<'a, T> {
+pub(crate) struct MsgChannelRequest<'a, T> {
     pub recipient_channel: u32,
     pub request: &'a str,
     pub want_reply: bool,
@@ -72,16 +72,13 @@ mod tests {
 
     #[test]
     fn test_decode_01() {
-        let x = MsgChannelRequest {
-            recipient_channel: 23,
-            request: "request",
-            want_reply: true,
-            specific: "specific",
-        };
-        let x: MsgChannelRequest<&[u8]> = BDecoder::decode(&[
-            98, 0, 0, 0, 23, 0, 0, 0, 7, 114, 101, 113, 117, 101, 115, 116, 1, 0, 0, 0, 8, 115,
-            112, 101, 99, 105, 102, 105, 99,
-        ][..]).unwrap();
+        let x: MsgChannelRequest<&[u8]> = BDecoder::decode(
+            &[
+                98, 0, 0, 0, 23, 0, 0, 0, 7, 114, 101, 113, 117, 101, 115, 116, 1, 0, 0, 0, 8, 115,
+                112, 101, 99, 105, 102, 105, 99,
+            ][..],
+        )
+        .unwrap();
         assert_eq!(x.recipient_channel, 23);
         assert_eq!(x.request, "request");
         assert_eq!(x.want_reply, true);

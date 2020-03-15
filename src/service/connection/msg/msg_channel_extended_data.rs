@@ -2,7 +2,7 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub struct MsgChannelExtendedData<'a> {
+pub(crate) struct MsgChannelExtendedData<'a> {
     pub recipient_channel: u32,
     pub data_type_code: u32,
     pub data: &'a [u8],

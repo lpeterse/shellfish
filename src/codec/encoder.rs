@@ -1,11 +1,14 @@
 use super::Encode;
 use sha2::Digest;
 
-pub trait Encoder {
+pub trait Encoder: Sized {
     fn push_u8(&mut self, x: u8);
     fn push_u32be(&mut self, x: u32);
     fn push_u64be(&mut self, x: u64);
     fn push_bytes<T: AsRef<[u8]>>(&mut self, x: &T);
+    fn push_encode<T: Encode>(&mut self, x: &T) {
+        Encode::encode(x, self)
+    }
 }
 
 impl<D: Digest> Encoder for D {

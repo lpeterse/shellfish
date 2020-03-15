@@ -1,8 +1,8 @@
 use super::verification::{HostKeyVerifier, VerificationError, VerificationFuture};
 use crate::algorithm::auth::*;
 use crate::codec::*;
-use crate::glob::*;
 use crate::util::*;
+use crate::util::glob::*;
 
 use async_std::fs::File;
 use async_std::io::{BufReader, Read};

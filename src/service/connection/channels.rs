@@ -1,122 +1,103 @@
 use super::*;
+
 use std::slice::IterMut;
 
 #[derive(Debug)]
-pub struct ChannelMap<T> {
+pub(crate) struct Channels<T = Box<dyn ChannelState>> {
     capacity: usize,
-    elements: Vec<Slot<T>>,
+    elements: Vec<Option<T>>,
 }
 
-#[derive(Debug)]
-pub enum Slot<T> {
-    Empty,
-    Alloced,
-    Filled(T),
-}
-
-impl<T> ChannelMap<T> {
+impl<T> Channels<T> {
     pub fn new(capacity: u32) -> Self {
-        ChannelMap {
+        Channels {
             capacity: capacity as usize,
             elements: Vec::with_capacity(1),
         }
     }
 
-    pub fn len(&self) -> usize {
-        let mut len = 0;
-        for e in &self.elements {
-            match e {
-                Slot::Empty => (),
-                _ => len += 1,
-            }
-        }
-        len
-    }
-
     pub fn get(&mut self, id: u32) -> Result<&mut T, ConnectionError> {
         match self.elements.get_mut(id as usize) {
-            Some(Slot::Filled(t)) => Ok(t),
+            Some(Some(t)) => Ok(t),
             _ => Err(ConnectionError::ChannelIdInvalid),
         }
     }
 
-    pub fn alloc(&mut self) -> Option<u32> {
-        for (i, e) in self.elements.iter().enumerate() {
-            match e {
-                Slot::Empty => {
-                    self.elements[i] = Slot::Alloced;
-                    return Some(i as u32)
-                },
+    pub fn free_id(&mut self) -> Option<u32> {
+        Some(0) // FIXME
+    }
+
+    pub fn insert(&mut self, id: u32, channel: T) -> Result<(), ConnectionError> {
+        if let Some(x) = self.elements.get_mut(id as usize) {
+            if x.is_none() {
+                *x = Some(channel);
+                return Ok(());
+            }
+        }
+        Err(ConnectionError::ChannelIdInvalid)
+        /*
+        for id in 0..self.elements.len() {
+            match self.elements[id] {
+                None => {
+                    self.elements[id] = Some(f(id as u32));
+                    return Some(id as u32);
+                }
                 _ => (),
             }
         }
         if self.elements.len() < self.capacity {
-            let id = self.elements.len();
-            self.elements.push(Slot::Alloced);
-            return Some(id as u32);
+            let id = self.elements.len() as u32;
+            self.elements.push(Some(f(id)));
+            return Some(id);
         }
         None
-    }
-
-    pub fn insert(&mut self, id: u32, t: T) -> Result<(), ConnectionError> {
-        if (id as usize) < self.elements.len() {
-            match self.elements[id as usize] {
-                Slot::Alloced => {
-                    self.elements[id as usize] = Slot::Filled(t);
-                    return Ok(())
-                }
-                _ => ()
-            }
-        }
-        Err(ConnectionError::ChannelIdInvalid)
+        */
     }
 
     pub fn remove(&mut self, id: u32) -> Result<(), ConnectionError> {
-        if (id as usize) < self.elements.len() {
-            match self.elements[id as usize] {
-                Slot::Filled(_) => {
-                    self.elements[id as usize] = Slot::Empty;
-                    return Ok(())
-                }
-                Slot::Alloced => {
-                    self.elements[id as usize] = Slot::Empty;
-                    return Ok(())
-                }
-                _ => ()
+        if let Some(x) = self.elements.get_mut(id as usize) {
+            if x.is_some() {
+                *x = None;
+                return Ok(());
             }
         }
         Err(ConnectionError::ChannelIdInvalid)
     }
 
-    pub fn iter<'a>(&'a mut self) -> ChannelMapIterator<'a, T> {
-        ChannelMapIterator(self.elements.iter_mut())
+    pub fn iter<'a>(&'a mut self) -> ChannelsIterator<'a, T> {
+        ChannelsIterator(self.elements.iter_mut())
+    }
+
+    pub fn terminate(&mut self, _e: ConnectionError) {
+        // FIXME
+        todo!()
     }
 }
 
-pub struct ChannelMapIterator<'a, T>(IterMut<'a, Slot<T>>);
+pub struct ChannelsIterator<'a, T>(IterMut<'a, Option<T>>);
 
-impl<'a, T> Iterator for ChannelMapIterator<'a, T> {
+impl<'a, T> Iterator for ChannelsIterator<'a, T> {
     type Item = &'a mut T;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match self.0.next() {
                 None => return None,
-                Some(Slot::Empty) => continue,
-                Some(Slot::Alloced) => continue, // skip
-                Some(Slot::Filled(t)) => return Some(t),
+                Some(None) => continue,
+                Some(Some(t)) => return Some(t),
             }
         }
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn test_new_01() {
-        let m = ChannelMap::<()>::new(23);
+        let m = Channels::<()>::new(23);
         assert_eq!(m.capacity, 23);
         assert_eq!(m.elements.len(), 0);
         assert_eq!(m.elements.capacity(), 1);
@@ -124,13 +105,13 @@ mod tests {
 
     #[test]
     fn test_len_01() {
-        let m = ChannelMap::<()>::new(23);
+        let m = Channels::<()>::new(23);
         assert_eq!(m.len(), 0);
     }
 
     #[test]
     fn test_alloc_01() {
-        let mut m = ChannelMap::<()>::new(2);
+        let mut m = Channels::<()>::new(2);
         assert_eq!(m.alloc(), Some(0));
         assert_eq!(m.len(), 1);
         assert_eq!(m.alloc(), Some(1));
@@ -140,25 +121,25 @@ mod tests {
 
     #[test]
     fn test_get_01() {
-        let mut m = ChannelMap::<()>::new(2);
+        let mut m = Channels::<()>::new(2);
         assert_eq!(m.get(0), Err(ConnectionError::ChannelIdInvalid));
     }
 
     #[test]
     fn test_insert_01() {
-        let mut m = ChannelMap::<()>::new(2);
+        let mut m = Channels::<()>::new(2);
         assert_eq!(m.insert(0, ()), Err(ConnectionError::ChannelIdInvalid));
     }
 
     #[test]
     fn test_remove_01() {
-        let mut m = ChannelMap::<()>::new(2);
+        let mut m = Channels::<()>::new(2);
         assert_eq!(m.remove(0), Err(ConnectionError::ChannelIdInvalid));
     }
 
     #[test]
     fn test_alloc_remove_01() {
-        let mut m = ChannelMap::<()>::new(2);
+        let mut m = Channels::<()>::new(2);
         assert_eq!(m.alloc(), Some(0));
         assert_eq!(m.remove(0), Ok(()));
         assert_eq!(m.remove(0), Err(ConnectionError::ChannelIdInvalid));
@@ -166,7 +147,7 @@ mod tests {
 
     #[test]
     fn test_alloc_insert_get_01() {
-        let mut m = ChannelMap::<()>::new(2);
+        let mut m = Channels::<()>::new(2);
         assert_eq!(m.alloc(), Some(0));
         assert_eq!(m.insert(0, ()), Ok(()));
         assert_eq!(m.get(0), Ok(&mut ()));
@@ -174,7 +155,7 @@ mod tests {
 
     #[test]
     fn test_alloc_insert_get_02() {
-        let mut m = ChannelMap::<usize>::new(2);
+        let mut m = Channels::<usize>::new(2);
         assert_eq!(m.alloc(), Some(0));
         assert_eq!(m.insert(0, 23), Ok(()));
         assert_eq!(m.get(0), Ok(&mut 23));
@@ -185,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_alloc_insert_get_remove_01() {
-        let mut m = ChannelMap::<usize>::new(2);
+        let mut m = Channels::<usize>::new(2);
         assert_eq!(m.alloc(), Some(0));
         assert_eq!(m.insert(0, 23), Ok(()));
         assert_eq!(m.get(0), Ok(&mut 23));
@@ -201,7 +182,7 @@ mod tests {
 
     #[test]
     fn test_iter_01() {
-        let mut m = ChannelMap::<usize>::new(2);
+        let mut m = Channels::<usize>::new(2);
         assert_eq!(m.alloc(), Some(0));
         assert_eq!(m.alloc(), Some(1));
         assert_eq!(m.insert(1, 47), Ok(()));
@@ -214,3 +195,4 @@ mod tests {
         assert_eq!(n, 1);
     }
 }
+*/

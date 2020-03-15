@@ -1,11 +1,12 @@
 use super::*;
+use crate::transport::TransportError;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ConnectionError {
     Terminated,
     IoError(std::io::ErrorKind),
     TransportError(TransportError),
-    ChannelOpenFailure(ChannelOpenFailure),
+    ChannelOpenFailure(ChannelOpenFailureReason),
     ChannelIdInvalid,
     ChannelRequestFailure,
     ChannelFailureUnexpected,
@@ -29,8 +30,8 @@ impl From<TransportError> for ConnectionError {
     }
 }
 
-impl From<ChannelOpenFailure> for ConnectionError {
-    fn from(e: ChannelOpenFailure) -> Self {
+impl From<ChannelOpenFailureReason> for ConnectionError {
+    fn from(e: ChannelOpenFailureReason) -> Self {
         Self::ChannelOpenFailure(e)
     }
 }
@@ -51,15 +52,6 @@ mod tests {
             format!(
                 "{:?}",
                 ConnectionError::TransportError(TransportError::BadPacketLength)
-            )
-        );
-        assert_eq!(
-            "ChannelOpenFailure(ChannelOpenFailure { reason: Reason::ADMINISTRATIVELY_PROHIBITED })",
-            format!(
-                "{:?}",
-                ConnectionError::ChannelOpenFailure(ChannelOpenFailure {
-                    reason: Reason::ADMINISTRATIVELY_PROHIBITED
-                })
             )
         );
         assert_eq!(
@@ -112,17 +104,6 @@ mod tests {
     fn test_from_transport_error_01() {
         match TransportError::BadPacketLength.into() {
             ConnectionError::TransportError(_) => (),
-            _ => panic!(""),
-        }
-    }
-
-    #[test]
-    fn test_from_channel_open_failure_01() {
-        let x = ChannelOpenFailure {
-            reason: Reason::ADMINISTRATIVELY_PROHIBITED,
-        };
-        match x.into() {
-            ConnectionError::ChannelOpenFailure(_) => (),
             _ => panic!(""),
         }
     }

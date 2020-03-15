@@ -1,16 +1,20 @@
 use rssh::client::*;
 use rssh::service::connection::*;
 
+use async_std::stream::StreamExt;
+
 async fn foobar(mut conn: Connection<Client>) -> Result<(), ConnectionError> {
-    let _session = conn.session().await??;
-    //let mut process = session.exec("/bin/date".into()).await?;
+    let session = conn.session().await??;
+    let mut process = session.exec("for i in 1 2 3 4 5 6 7 8 9; do echo $i && sleep 1; done".into()).await?;
+    while let Some(i) = process.next().await {
+        log::error!("EVENT {:?}", i);
+    }
     //let mut buf: [u8;32] = [0;32];
     //process.read(&mut buf).await?;
     //log::info!("READ STDOUT {:?}", String::from_utf8(Vec::from(&buf[..])));
 
-    async_std::task::sleep(std::time::Duration::from_secs(60000)).await;
+    async_std::task::sleep(std::time::Duration::from_secs(30)).await;
     log::error!("FOO");
-    conn.disconnect().await;
     Ok(())
 }
 
@@ -19,7 +23,7 @@ fn main() {
 
     async_std::task::block_on(async move {
         let mut client = Client::default();
-        client.config().kex_interval_duration = std::time::Duration::from_millis(300);
+        //client.config().alive_interval = std::time::Duration::from_millis(300);
         match client.connect("localhost:22").await {
             Err(e) => log::error!("{:?}", e),
             Ok(conn) => match foobar(conn).await {
@@ -27,5 +31,6 @@ fn main() {
                 Err(e) => log::error!("Exit: {:?}", e),
             },
         }
+        async_std::task::sleep(std::time::Duration::from_secs(15)).await;
     })
 }

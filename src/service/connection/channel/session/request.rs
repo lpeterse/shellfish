@@ -1,30 +1,30 @@
 use super::*;
 
-pub enum RequestState<T> {
+pub(crate) enum RequestState<T> {
     None,
     Open(T),
     Progress,
     Success,
-    Failure
+    Failure,
 }
 
-impl <T> RequestState<T> {
+impl<T> RequestState<T> {
     pub fn success(&mut self) -> Result<(), ConnectionError> {
         match self {
             Self::Progress => return Ok(*self = Self::Success),
-            _ => return Err(ConnectionError::ChannelSuccessUnexpected)
+            _ => return Err(ConnectionError::ChannelSuccessUnexpected),
         }
     }
     pub fn failure(&mut self) -> Result<(), ConnectionError> {
         match self {
             Self::Progress => return Ok(*self = Self::Failure),
-            _ => return Err(ConnectionError::ChannelFailureUnexpected)
+            _ => return Err(ConnectionError::ChannelFailureUnexpected),
         }
     }
 }
 
 #[derive(Debug)]
-pub enum SessionRequest {
+pub(crate) enum SessionRequest {
     EnvRequest(EnvRequest),
     PtyRequest(PtyRequest),
     ExecRequest(ExecRequest),
@@ -66,7 +66,7 @@ impl Encode for SessionRequest {
 }
 
 #[derive(Debug)]
-pub struct EnvRequest {
+pub(crate) struct EnvRequest {
     name: String,
     value: String,
 }
@@ -79,8 +79,7 @@ impl ChannelRequest for EnvRequest {
 
 impl Encode for EnvRequest {
     fn size(&self) -> usize {
-        Encode::size(&self.name) +
-        Encode::size(&self.value)
+        Encode::size(&self.name) + Encode::size(&self.value)
     }
     fn encode<E: Encoder>(&self, e: &mut E) {
         Encode::encode(&self.name, e);
@@ -89,9 +88,7 @@ impl Encode for EnvRequest {
 }
 
 #[derive(Debug)]
-pub struct PtyRequest {
-
-}
+pub(crate) struct PtyRequest {}
 
 impl ChannelRequest for PtyRequest {
     fn name(&self) -> &'static str {
@@ -109,8 +106,8 @@ impl Encode for PtyRequest {
 }
 
 #[derive(Debug)]
-pub struct ExecRequest {
-    pub command: String
+pub(crate) struct ExecRequest {
+    pub command: String,
 }
 
 impl ChannelRequest for ExecRequest {
@@ -129,9 +126,7 @@ impl Encode for ExecRequest {
 }
 
 #[derive(Debug)]
-pub struct ShellRequest {
-
-}
+pub(crate) struct ShellRequest {}
 
 impl ChannelRequest for ShellRequest {
     fn name(&self) -> &'static str {
@@ -149,7 +144,7 @@ impl Encode for ShellRequest {
 }
 
 #[derive(Debug)]
-pub struct SubsystemRequest {
+pub(crate) struct SubsystemRequest {
     pub subsystem: String,
 }
 

@@ -2,7 +2,7 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub struct MsgRequestFailure;
+pub(crate) struct MsgRequestFailure;
 
 impl Message for MsgRequestFailure {
     const NUMBER: u8 = 82;
@@ -31,10 +31,7 @@ mod tests {
     #[test]
     fn test_debug_01() {
         let msg = MsgRequestFailure;
-        assert_eq!(
-            "MsgRequestFailure",
-            format!("{:?}", msg)
-        );
+        assert_eq!("MsgRequestFailure", format!("{:?}", msg));
     }
 
     #[test]

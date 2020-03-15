@@ -2,7 +2,7 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgChannelWindowAdjust {
+pub(crate) struct MsgChannelWindowAdjust {
     pub recipient_channel: u32,
     pub bytes_to_add: u32,
 }
@@ -11,7 +11,7 @@ impl Message for MsgChannelWindowAdjust {
     const NUMBER: u8 = 93;
 }
 
-impl  Encode for MsgChannelWindowAdjust {
+impl Encode for MsgChannelWindowAdjust {
     fn size(&self) -> usize {
         1 + 4 + 4
     }
@@ -28,7 +28,8 @@ impl Decode for MsgChannelWindowAdjust {
         MsgChannelWindowAdjust {
             recipient_channel: d.take_u32be()?,
             bytes_to_add: d.take_u32be()?,
-        }.into()
+        }
+        .into()
     }
 }
 
@@ -38,7 +39,10 @@ mod tests {
 
     #[test]
     fn test_debug_01() {
-        let msg = MsgChannelWindowAdjust { recipient_channel: 23, bytes_to_add: 47 };
+        let msg = MsgChannelWindowAdjust {
+            recipient_channel: 23,
+            bytes_to_add: 47,
+        };
         assert_eq!(
             "MsgChannelWindowAdjust { recipient_channel: 23, bytes_to_add: 47 }",
             format!("{:?}", msg)
@@ -47,8 +51,14 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgChannelWindowAdjust { recipient_channel: 23, bytes_to_add: 47 };
-        assert_eq!(&[93, 0, 0, 0, 23, 0, 0, 0, 47][..], &BEncoder::encode(&msg)[..]);
+        let msg = MsgChannelWindowAdjust {
+            recipient_channel: 23,
+            bytes_to_add: 47,
+        };
+        assert_eq!(
+            &[93, 0, 0, 0, 23, 0, 0, 0, 47][..],
+            &BEncoder::encode(&msg)[..]
+        );
     }
 
     #[test]

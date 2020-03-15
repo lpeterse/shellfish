@@ -36,7 +36,7 @@ use self::cipher::*;
 use self::kex::*;
 use self::key_streams::*;
 use self::msg_debug::*;
-use self::msg_disconnect::*;
+pub use self::msg_disconnect::*;
 use self::msg_ignore::*;
 use self::msg_service_accept::*;
 use self::msg_service_request::*;
@@ -123,7 +123,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 ready!(self.poll_kex(cx))?;
                 ready!(self.trx.poll_receive(cx))?;
                 if !self.consume_transport_message()? {
-                    return self.poll_send_unimplemented(cx);
+                    self.send_unimplemented(cx);
+                    return Poll::Ready(Err(TransportError::MessageUnexpected));
                 }
             }
             Poll::Ready(Ok(()))
@@ -209,7 +210,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 if self.consume_transport_message()? {
                     continue;
                 } else {
-                    return self.poll_send_unimplemented(cx);
+                    self.send_unimplemented(cx);
+                    return Poll::Ready(Err(TransportError::MessageUnexpected));
                 }
             }
             return self.trx.poll_send(cx, &msg);
@@ -238,7 +240,8 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 continue;
             }
             if self.kex.is_receiving_critical() {
-                return self.poll_send_unimplemented(cx);
+                self.send_unimplemented(cx);
+                return Poll::Ready(Err(TransportError::MessageUnexpected));
             }
             return Poll::Ready(Ok(()));
         }
@@ -253,16 +256,20 @@ impl<R: Role, S: Socket> Transport<R, S> {
     /// Try to send MSG_UNIMPLEMENTED and return `MessageUnexpected` error
     /// even in the presence of other errors (preserve the former).
     /// Does not block even if the message cannot be sent.
-    pub fn poll_send_unimplemented(
-        &mut self,
-        cx: &mut Context,
-    ) -> Poll<Result<(), TransportError>> {
+    pub fn send_unimplemented(&mut self, cx: &mut Context) {
         let msg = MsgUnimplemented {
             packet_number: self.trx.packets_received() as u32,
         };
         let _ = self.trx.poll_send(cx, &msg);
         let _ = self.trx.poll_flush(cx);
-        Poll::Ready(Err(TransportError::MessageUnexpected))
+    }
+
+    /// Try to send MSG_DISCONNECT.
+    /// Does not block even if the message cannot be sent.
+    pub fn poll_send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+        let msg = MsgDisconnect::new(reason);
+        let _ = self.trx.poll_send(cx, &msg);
+        let _ = self.trx.poll_flush(cx);
     }
 
     /// This function is Ready unless sending an eventual kex message blocks.

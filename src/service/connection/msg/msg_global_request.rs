@@ -2,7 +2,7 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub struct MsgGlobalRequest<'a> {
+pub(crate) struct MsgGlobalRequest<'a> {
     pub name: &'a str,
     pub want_reply: bool,
     pub data: &'a [u8],

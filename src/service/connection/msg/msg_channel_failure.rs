@@ -2,15 +2,15 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub struct MsgChannelEof {
+pub(crate) struct MsgChannelFailure {
     pub recipient_channel: u32,
 }
 
-impl Message for MsgChannelEof {
-    const NUMBER: u8 = 96;
+impl Message for MsgChannelFailure {
+    const NUMBER: u8 = 100;
 }
 
-impl Encode for MsgChannelEof {
+impl Encode for MsgChannelFailure {
     fn size(&self) -> usize {
         1 + 4
     }
@@ -20,7 +20,7 @@ impl Encode for MsgChannelEof {
     }
 }
 
-impl Decode for MsgChannelEof {
+impl Decode for MsgChannelFailure {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
@@ -35,23 +35,23 @@ mod tests {
 
     #[test]
     fn test_debug_01() {
-        let msg = MsgChannelEof { recipient_channel: 23 };
+        let msg = MsgChannelFailure { recipient_channel: 23 };
         assert_eq!(
-            "MsgChannelEof { recipient_channel: 23 }",
+            "MsgChannelFailure { recipient_channel: 23 }",
             format!("{:?}", msg)
         );
     }
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgChannelEof { recipient_channel: 23 };
-        assert_eq!(&[96,0,0,0,23][..], &BEncoder::encode(&msg)[..]);
+        let msg = MsgChannelFailure { recipient_channel: 23 };
+        assert_eq!(&[100,0,0,0,23][..], &BEncoder::encode(&msg)[..]);
     }
 
     #[test]
     fn test_decode_01() {
-        let buf: [u8; 5] = [96,0,0,0,23];
-        let msg: MsgChannelEof = BDecoder::decode(&buf[..]).unwrap();
+        let buf: [u8; 5] = [100,0,0,0,23];
+        let msg: MsgChannelFailure = BDecoder::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
     }
 }

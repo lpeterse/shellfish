@@ -2,6 +2,7 @@ use crate::algorithm::auth::*;
 
 use std::future::Future;
 use std::ops::Deref;
+use async_std::future::ready;
 
 pub trait HostKeyVerifier: Send + Sync + 'static {
     fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture;
@@ -23,7 +24,6 @@ pub enum VerificationError {
     KeyNotFound,
 }
 
-/*
 pub struct AcceptingVerifier {}
 
 impl HostKeyVerifier for AcceptingVerifier {
@@ -33,16 +33,6 @@ impl HostKeyVerifier for AcceptingVerifier {
             identity,
             name
         );
-        ready(Ok(())).boxed()
+        Box::pin(ready(Ok(())))
     }
 }
-
-pub struct RejectingVerifier {}
-
-impl HostKeyVerifier for RejectingVerifier {
-    fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture {
-        log::error!("DANGER: Rejecting host key {:?} for {}", identity, name);
-        Box::pin(|ready(Err(VerificationError::KeyNotFound)).boxed()
-    }
-}
-*/
