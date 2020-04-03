@@ -48,10 +48,18 @@ pub struct ClientConfig {
     ///
     /// Defaults to the empty list.
     pub mac_algorithms: Vec<&'static str>,
-    /// The maximum number of local channels.
+    /// The maximum number of local channels per connection.
     ///
     /// Defaults to 256.
-    pub channel_max_count: u32,
+    pub channel_max_count: usize,
+    /// The maximum size of input and output buffers (each).
+    ///
+    /// Defaults to 1MB.
+    pub channel_max_buffer_size: usize,
+    /// The maximum size of data packets announced to peer.
+    ///
+    /// Defaults to 32kB.
+    pub channel_max_packet_size: usize,
 }
 
 impl Default for ClientConfig {
@@ -68,6 +76,8 @@ impl Default for ClientConfig {
             compression_algorithms: COMPRESSION_ALGORITHMS.to_vec(),
             mac_algorithms: MAC_ALGORITHMS.to_vec(),
             channel_max_count: 256,
+            channel_max_buffer_size: 1024 * 1024,
+            channel_max_packet_size: 32768,
         }
     }
 }
@@ -106,8 +116,14 @@ impl TransportConfig for ClientConfig {
 }
 
 impl ConnectionConfig for ClientConfig {
-    fn channel_max_count(&self) -> u32 {
+    fn channel_max_count(&self) -> usize {
         self.channel_max_count
+    }
+    fn channel_max_buffer_size(&self) -> usize {
+        self.channel_max_buffer_size
+    }
+    fn channel_max_packet_size(&self) -> usize {
+        self.channel_max_packet_size
     }
 }
 
@@ -129,5 +145,7 @@ mod tests {
         assert_eq!(c.compression_algorithms(), &COMPRESSION_ALGORITHMS.to_vec());
         assert_eq!(c.mac_algorithms(), &MAC_ALGORITHMS.to_vec());
         assert_eq!(c.channel_max_count(), 256);
+        assert_eq!(c.channel_max_buffer_size(), 1024 * 1024);
+        assert_eq!(c.channel_max_packet_size(), 32768);
     }
 }

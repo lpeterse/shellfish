@@ -31,28 +31,28 @@ impl UserAuth {
     pub const NAME: &'static str = "ssh-userauth";
 
     /// Request another service with user authentication.
-    pub async fn request<S: Socket, T: Service<Client>>(
-        transport: Transport<Client, S>,
+    pub async fn request<T: TransportLayer, S: Service<Client>>(
+        transport: T,
         config: &<Client as Role>::Config,
         user: &str,
         agent: &Arc<Box<dyn AuthAgent>>,
-    ) -> Result<T, UserAuthError> {
-        let mut t = transport.request_service(Self::NAME).await?;
-        let service = <T as Service<Client>>::NAME;
+    ) -> Result<S, UserAuthError> {
+        let mut t = TransportLayerExt::request_service(transport, Self::NAME).await?;
+        let service = <S as Service<Client>>::NAME;
         let identities = agent.identities().await?;
 
         for (id, comment) in identities {
             log::debug!("Trying identity: {} ({})", comment, id.algorithm());
-            if Self::try_pubkey::<S>(&mut t, &agent, service, user, id).await? {
-                return Ok(<T as Service<Client>>::new(config, t));
+            if Self::try_pubkey::<T>(&mut t, &agent, service, user, id).await? {
+                return Ok(<S as Service<Client>>::new(config, t));
             }
         }
 
         Err(UserAuthError::NoMoreAuthMethods)
     }
 
-    async fn try_pubkey<S: Socket>(
-        transport: &mut Transport<Client, S>,
+    async fn try_pubkey<T: TransportLayer>(
+        transport: &mut T,
         agent: &Arc<Box<dyn AuthAgent>>,
         service: &str,
         user: &str,
@@ -77,9 +77,9 @@ impl UserAuth {
                 signature,
             },
         };
-        transport.send(&msg).await?;
-        transport.flush().await?;
-        transport.receive().await?;
+        TransportLayerExt::send(transport, &msg).await?;
+        TransportLayerExt::flush(transport).await?;
+        TransportLayerExt::receive(transport).await?;
         if let Some(x) = transport.decode() {
             let _: MsgSuccess = x;
             transport.consume();

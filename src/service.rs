@@ -2,10 +2,10 @@ pub mod connection;
 pub mod user_auth;
 
 use crate::role::Role;
-use crate::transport::{Socket, Transport};
+use crate::transport::TransportLayer;
 
 pub trait Service<R: Role> {
     const NAME: &'static str;
 
-    fn new<S: Socket>(config: &R::Config, transport: Transport<R, S>) -> Self;
+    fn new<T: TransportLayer>(config: &R::Config, transport: T) -> Self;
 }

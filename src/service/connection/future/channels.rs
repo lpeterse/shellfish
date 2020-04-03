@@ -5,45 +5,12 @@ use crate::transport::*;
 
 use async_std::task::Context;
 
-pub (crate) fn poll<R: Role, T: Socket>(
-    x: &mut ConnectionFuture<R,T>,
+pub(crate) fn poll<T: TransportLayer>(
+    x: &mut ConnectionFuture<T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     for channel in x.channels.iter() {
-        /*
-        // Nothing to do if channel is closing.
-        // We're expecting the peer's close message any moment..
-        // The channel remove logic is located in the disconnect
-        // message handler.
-        if channel.is_closing() {
-            continue;
-        }
-        match channel.shared() {
-            // stdout
-            // stderr
-            // requests
-            // env
-            // signals
-            SharedState::Session(ref st) => {
-                let mut state = st.lock().unwrap();
-                state.inner_register(cx);
-                match state.request {
-                    RequestState::Open(ref r) => {
-                        let msg = MsgChannelRequest {
-                            recipient_channel: channel.remote_channel(),
-                            request: r.name(),
-                            want_reply: true,
-                            specific: r,
-                        };
-                        ready!(x.transport.poll_send(cx, &msg))?;
-                        state.request = RequestState::Progress;
-                    }
-                    _ => (),
-                }
-            }
-        }
-        */
+        ready!(channel.poll(cx, &mut x.transport))?
     }
-
     Poll::Pending
 }

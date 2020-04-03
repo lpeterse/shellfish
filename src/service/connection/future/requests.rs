@@ -1,8 +1,5 @@
 use super::*;
 
-use crate::role::*;
-use crate::transport::Socket;
-
 use async_std::task::{ready, Context, Poll};
 
 macro_rules! poll_open {
@@ -10,29 +7,29 @@ macro_rules! poll_open {
         if let Some(id) = $x.channels.free_id() {
             let msg: MsgChannelOpen<$ty> = MsgChannelOpen {
                 sender_channel: id,
-                initial_window_size: $r.input.initial_window_size,
-                maximum_packet_size: $r.input.max_packet_size,
+                initial_window_size: $x.channel_max_buffer_size as u32,
+                maximum_packet_size: $x.channel_max_packet_size as u32,
                 channel_type: $r.input.specific.clone(),
             };
             ready!($x.transport.poll_send($cx, &msg))?;
             log::debug!("Sent MSG_CHANNEL_OPEN");
-            let channel = Box::new(<$ty as Channel>::new_state(id, &$r.input));
-            $x.channels.insert(id, channel)?;
-            $x.requests.accept();
+            let channel = <$ty as Channel>::new_state($x.channel_max_buffer_size);
+            $x.channels.insert(id, Box::new(channel.into()))?;
+            $x.request_rx.accept();
         } else {
-            $x.requests.accept();
-            $x.requests
+            $x.request_rx.accept();
+            $x.request_rx
                 .resolve::<OpenRequest<$ty>>(Err(ChannelOpenFailureReason::RESOURCE_SHORTAGE))?;
         }
     }};
 }
 
 /// Poll for user requests (like channel open etc).
-pub(crate) fn poll<R: Role, S: Socket>(
-    x: &mut ConnectionFuture<R, S>,
+pub(crate) fn poll<T: TransportLayer>(
+    x: &mut ConnectionFuture<T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
-    match ready!(x.requests.poll(cx))? {
+    match ready!(x.request_rx.poll(cx))? {
         Request::OpenSession(r) => poll_open!(x, cx, r, Session),
         Request::OpenDirectTcpIp(r) => poll_open!(x, cx, r, DirectTcpIp),
     }

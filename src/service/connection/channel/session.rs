@@ -88,7 +88,41 @@ impl Channel for Session {
 
     const NAME: &'static str = "session";
 
-    fn new_state(local_id: u32, req: &OpenRequest<Self>) -> Self::State {
+    fn new_state(max_buffer_size: usize) -> Self::State {
         todo!()
     }
 }
+
+
+        /*
+        match channel.shared() {
+            SharedState::Session(ref st) => {
+                let mut state = st.lock().unwrap();
+                match msg.request {
+                    "env" => {
+                        let env = BDecoder::decode(msg.specific)
+                            .ok_or(TransportError::DecoderError)?;
+                        //state.add_env(env); FIXME
+                    }
+                    "exit-status" => {
+                        let status = BDecoder::decode(msg.specific)
+                            .ok_or(TransportError::DecoderError)?;
+                        state.set_exit_status(status);
+                    }
+                    "exit-signal" => {
+                        let signal = BDecoder::decode(msg.specific)
+                            .ok_or(TransportError::DecoderError)?;
+                        state.set_exit_signal(signal);
+                    }
+                    _ => {
+                        if msg.want_reply {
+                            let msg = MsgChannelFailure {
+                                recipient_channel: channel.remote_channel(),
+                            };
+                            ready!(x.transport.poll_send(cx, &msg))?;
+                            log::debug!("Sent MSG_CHANNEL_FAILURE");
+                        }
+                    }
+                }
+            }
+        }*/

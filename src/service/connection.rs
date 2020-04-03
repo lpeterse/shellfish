@@ -19,7 +19,7 @@ use super::*;
 use crate::client::*;
 use crate::codec::*;
 use crate::role::*;
-use crate::transport::DisconnectReason;
+use crate::transport::{DisconnectReason, Socket, Transport, TransportLayer, TransportLayerExt};
 use crate::util::oneshot;
 
 use async_std::future::Future;
@@ -50,11 +50,12 @@ where
     ///
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
-    fn new<S: Socket>(config: &R::Config, transport: Transport<R, S>) -> Connection<R> {
+    fn new<T: TransportLayer>(config: &R::Config, transport: T) -> Connection<R> {
         let (s1, r1) = oneshot::channel();
         let (s2, r2) = oneshot::channel();
         let (s3, r3) = channel();
-        let future = ConnectionFuture::new(config, r1, r3, transport);
+        let (s4, r4) = channel();
+        let future = ConnectionFuture::new(config, transport, r1, r3, s4);
         async_std::task::spawn(async { s2.send(future.await) });
         Connection {
             phantom: std::marker::PhantomData,
@@ -75,7 +76,7 @@ impl Connection<Client> {
         transport: Transport<Client, S>,
         config: &ClientConfig,
     ) -> Result<Self, ConnectionError> {
-        let transport = transport.request_service(Self::NAME).await?;
+        let transport = TransportLayerExt::request_service(transport, Self::NAME).await?;
         Ok(<Self as Service<Client>>::new(config, transport))
     }
 
@@ -88,11 +89,7 @@ impl Connection<Client> {
     pub async fn session(
         &mut self,
     ) -> Result<Result<Session, ChannelOpenFailureReason>, ConnectionError> {
-        let req: OpenRequest<Session> = OpenRequest {
-            initial_window_size: 8192,
-            max_packet_size: 1024,
-            specific: (),
-        };
+        let req: OpenRequest<Session> = OpenRequest { specific: () };
         self.requests.request(req).await
     }
 
@@ -104,8 +101,6 @@ impl Connection<Client> {
         src_port: u32,
     ) -> Result<Result<DirectTcpIp, ChannelOpenFailureReason>, ConnectionError> {
         let req: OpenRequest<DirectTcpIp> = OpenRequest {
-            initial_window_size: 8192,
-            max_packet_size: 1024,
             specific: DirectTcpIpOpen {
                 dst_host,
                 dst_port,

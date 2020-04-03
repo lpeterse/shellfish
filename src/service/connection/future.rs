@@ -16,25 +16,34 @@ use std::pin::*;
 /// The future needs to be constantly polled in order to drive the connection handling. It is
 /// supposed to be run as isolated task. The future only resolves on error which also designates
 /// the end of the connection's lifetime.
-pub(crate) struct ConnectionFuture<R: Role, S: Socket> {
+pub(crate) struct ConnectionFuture<T: TransportLayer> {
     close: oneshot::Receiver<DisconnectReason>,
+    channel_max_buffer_size: usize,
+    channel_max_packet_size: usize,
     channels: Channels,
-    requests: RequestReceiver,
-    transport: Transport<R, S>,
+    transport: T,
+    request_rx: RequestReceiver,
+    global_request_source: GlobalRequestSource,
+    global_request_sink: GlobalRequestSink,
 }
 
-impl<R: Role, T: Socket> ConnectionFuture<R, T> {
+impl<T: TransportLayer> ConnectionFuture<T> {
     pub fn new<C: ConnectionConfig>(
         config: &C,
+        transport: T,
         close: oneshot::Receiver<DisconnectReason>,
-        requests: RequestReceiver,
-        transport: Transport<R, T>,
+        request_rx: RequestReceiver,
+        request_tx: RequestSender,
     ) -> Self {
         Self {
             close,
+            channel_max_buffer_size: config.channel_max_buffer_size(),
+            channel_max_packet_size: config.channel_max_packet_size(),
             channels: Channels::new(config.channel_max_count()),
-            requests,
             transport,
+            request_rx,
+            global_request_source: GlobalRequestSource {},
+            global_request_sink: GlobalRequestSink {},
         }
     }
 
@@ -53,7 +62,7 @@ impl<R: Role, T: Socket> ConnectionFuture<R, T> {
                     Poll::Pending => (),
                     Poll::Ready(reason) => {
                         let reason = reason.unwrap_or_default();
-                        self.transport.poll_send_disconnect(cx, reason);
+                        self.transport.send_disconnect(cx, reason);
                         return Poll::Ready(TransportError::DisconnectByUs(reason).into());
                     }
                 }
@@ -97,19 +106,17 @@ impl<R: Role, T: Socket> ConnectionFuture<R, T> {
 
     /// Deliver a `ConnectionError` to all dependant users of this this connections (tasks waiting
     /// on connection requests or channel I/O).
-    /// 
+    ///
     /// This shall be the last thing to happen and has great similarity with `Drop` except that
     /// it distributes an error.
     fn terminate(&mut self, e: ConnectionError) {
-        self.requests.terminate(e);
+        self.request_rx.terminate(e);
+        // FIXME tx
         self.channels.terminate(e);
     }
 }
 
-impl<R: Role, T> Future for ConnectionFuture<R, T>
-where
-    T: Unpin + Socket,
-{
+impl<T: TransportLayer> Future for ConnectionFuture<T> {
     type Output = ConnectionError;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
@@ -117,5 +124,24 @@ where
         let e = ready!(self_.poll_events(cx));
         self_.terminate(e);
         Poll::Ready(e)
+    }
+}
+
+pub(crate) struct GlobalRequestSource {}
+
+impl GlobalRequestSource {
+    fn push_success(&mut self, data: &[u8]) -> Result<(), ConnectionError> {
+        todo!()
+    }
+    fn push_failure(&mut self) -> Result<(), ConnectionError> {
+        todo!()
+    }
+}
+
+pub(crate) struct GlobalRequestSink {}
+
+impl GlobalRequestSink {
+    fn push_request(&mut self, want_reply: bool, data: &[u8]) -> Result<(), ConnectionError> {
+        todo!()
     }
 }

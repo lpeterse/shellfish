@@ -34,7 +34,7 @@ impl Client {
         socket: S,
     ) -> Result<Connection<Self>, ClientError> {
         let verifier = self.hostkey_verifier.clone();
-        let t = Transport::<Client, S>::new(&self.config, verifier, hostname, socket).await?;
+        let t = Transport::<Client, S>::connect(&self.config, verifier, hostname, socket).await?;
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, &self.config, user, &self.auth_agent).await?,
             None => Connection::request(t, &self.config).await?,

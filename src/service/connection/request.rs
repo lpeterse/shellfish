@@ -16,8 +16,6 @@ pub(crate) struct Transaction<R: IsRequest> {
 }
 
 pub(crate) struct OpenRequest<T: Channel> {
-    pub initial_window_size: u32,
-    pub max_packet_size: u32,
     pub specific: <T as Channel>::Open,
 }
 
@@ -54,7 +52,7 @@ impl IsRequest for OpenRequest<DirectTcpIp> {
     fn try_from(r: Request) -> Option<Transaction<Self>> {
         match r {
             Request::OpenDirectTcpIp(x) => Some(x),
-            _ => None
+            _ => None,
         }
     }
     fn into_request(

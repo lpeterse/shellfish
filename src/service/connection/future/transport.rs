@@ -1,12 +1,9 @@
 use super::*;
 
-use crate::transport::TransportError;
-
 use async_std::task::{Context, Poll};
-use std::sync::{Arc, Mutex};
 
-pub(crate) fn poll<R: Role, T: Socket>(
-    x: &mut ConnectionFuture<R, T>,
+pub(crate) fn poll<T: TransportLayer>(
+    x: &mut ConnectionFuture<T>,
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     ready!(x.transport.poll_receive(cx))?;
@@ -55,8 +52,6 @@ pub(crate) fn poll<R: Role, T: Socket>(
         log::debug!("Received MSG_CHANNEL_CLOSE");
         let channel = x.channels.get(msg.recipient_channel)?;
         channel.push_close()?;
-        ready!(x.transport.poll_send(cx, &msg))?; // FIXME
-        x.channels.remove(msg.recipient_channel)?; // FIXME
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -64,7 +59,7 @@ pub(crate) fn poll<R: Role, T: Socket>(
     if let Some(msg) = x.transport.decode() {
         let _: MsgChannelOpen<Session> = msg;
         log::debug!("Received MSG_CHANNEL_OPEN");
-        todo!();
+        // todo!()
     }
     // MSG_CHANNEL_OPEN_CONFIRMATION
     if let Some(msg) = x.transport.decode_ref() {
@@ -85,7 +80,7 @@ pub(crate) fn poll<R: Role, T: Socket>(
         log::debug!("Received MSG_CHANNEL_OPEN_FAILURE");
         let channel = x.channels.get(msg.recipient_channel)?;
         channel.push_open_failure(msg.reason)?;
-        x.channels.remove(msg.recipient_channel);
+        x.channels.remove(msg.recipient_channel)?;
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -94,39 +89,7 @@ pub(crate) fn poll<R: Role, T: Socket>(
         let _: MsgChannelRequest<&[u8]> = msg;
         log::debug!("Received MSG_CHANNEL_REQUEST: {}", msg.request);
         let channel = x.channels.get(msg.recipient_channel)?;
-        channel.request(msg.specific)?;
-        /*
-        match channel.shared() {
-            SharedState::Session(ref st) => {
-                let mut state = st.lock().unwrap();
-                match msg.request {
-                    "env" => {
-                        let env = BDecoder::decode(msg.specific)
-                            .ok_or(TransportError::DecoderError)?;
-                        //state.add_env(env); FIXME
-                    }
-                    "exit-status" => {
-                        let status = BDecoder::decode(msg.specific)
-                            .ok_or(TransportError::DecoderError)?;
-                        state.set_exit_status(status);
-                    }
-                    "exit-signal" => {
-                        let signal = BDecoder::decode(msg.specific)
-                            .ok_or(TransportError::DecoderError)?;
-                        state.set_exit_signal(signal);
-                    }
-                    _ => {
-                        if msg.want_reply {
-                            let msg = MsgChannelFailure {
-                                recipient_channel: channel.remote_channel(),
-                            };
-                            ready!(x.transport.poll_send(cx, &msg))?;
-                            log::debug!("Sent MSG_CHANNEL_FAILURE");
-                        }
-                    }
-                }
-            }
-        }*/
+        channel.push_request(msg.specific)?;
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -135,7 +98,7 @@ pub(crate) fn poll<R: Role, T: Socket>(
         log::debug!("Received MSG_CHANNEL_SUCCESS");
         let _: MsgChannelSuccess = msg;
         let channel = x.channels.get(msg.recipient_channel)?;
-        channel.success()?;
+        channel.push_success()?;
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -144,7 +107,7 @@ pub(crate) fn poll<R: Role, T: Socket>(
         let _: MsgChannelFailure = msg;
         log::debug!("Received MSG_CHANNEL_FAILURE");
         let channel = x.channels.get(msg.recipient_channel)?;
-        channel.fail()?;
+        channel.push_failure()?;
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -152,11 +115,8 @@ pub(crate) fn poll<R: Role, T: Socket>(
     if let Some(msg) = x.transport.decode_ref() {
         let _: MsgGlobalRequest = msg;
         log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
-        if msg.want_reply {
-            let msg = MsgRequestFailure;
-            ready!(x.transport.poll_send(cx, &msg))?;
-            log::debug!("Sent MSG_REQUEST_FAILURE");
-        }
+        x.global_request_sink
+            .push_request(msg.want_reply, msg.data)?;
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -164,16 +124,19 @@ pub(crate) fn poll<R: Role, T: Socket>(
     if let Some(msg) = x.transport.decode_ref() {
         let _: MsgRequestSuccess = msg;
         log::debug!("Received MSG_REQUEST_SUCCESS");
-        todo!(); // FIXME
+        x.global_request_source.push_success(msg.data)?;
+        x.transport.consume();
+        return Poll::Ready(Ok(()));
     }
     // MSG_REQUEST_FAILURE
     if let Some(msg) = x.transport.decode_ref() {
         let _: MsgRequestFailure = msg;
         log::debug!("Received MSG_REQUEST_FAILURE");
-        todo!(); // FIXME
+        x.global_request_source.push_failure()?;
+        x.transport.consume();
+        return Poll::Ready(Ok(()));
     }
-    // In case the message cannot be decoded, don't consume the message before the transport has
-    // sent a MSG_UNIMPLEMENTED for the corresponding packet number.
+    // Otherwise try to send MSG_UNIMPLEMENTED and return error.
     x.transport.send_unimplemented(cx);
     Poll::Ready(Err(TransportError::MessageUnexpected.into()))
 }

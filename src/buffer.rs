@@ -8,6 +8,7 @@
 /// chunk of memory. In case the buffer is empty after a previous read (the most likely case),
 /// the next write will start at buffer start position and not cause data to be moved.
 /// The buffer never shrinks (yet).
+#[derive(Debug)]
 pub struct Buffer {
     max_capacity: usize,
     off: usize,

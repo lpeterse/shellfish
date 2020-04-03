@@ -3,15 +3,15 @@ use super::*;
 use std::slice::IterMut;
 
 #[derive(Debug)]
-pub(crate) struct Channels<T = Box<dyn ChannelState>> {
+pub(crate) struct Channels<T = Box<ChannelState2>> {
     capacity: usize,
     elements: Vec<Option<T>>,
 }
 
 impl<T> Channels<T> {
-    pub fn new(capacity: u32) -> Self {
+    pub fn new(capacity: usize) -> Self {
         Channels {
-            capacity: capacity as usize,
+            capacity,
             elements: Vec::with_capacity(1),
         }
     }
