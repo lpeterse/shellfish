@@ -14,7 +14,6 @@ use crate::agent::*;
 use crate::algorithm::auth::*;
 use crate::client::*;
 use crate::codec::*;
-use crate::role::*;
 use crate::service::Service;
 use crate::transport::*;
 
@@ -33,7 +32,7 @@ impl UserAuth {
     /// Request another service with user authentication.
     pub async fn request<T: TransportLayer, S: Service<Client>>(
         transport: T,
-        config: &<Client as Role>::Config,
+        config: &ClientConfig,
         user: &str,
         agent: &Arc<Box<dyn AuthAgent>>,
     ) -> Result<S, UserAuthError> {
@@ -93,9 +92,9 @@ impl UserAuth {
 
 #[derive(Debug)]
 pub enum UserAuthError {
-    NoMoreAuthMethods,
-    AuthAgentError(AuthAgentError),
     TransportError(TransportError),
+    AuthAgentError(AuthAgentError),
+    NoMoreAuthMethods,
 }
 
 impl From<AuthAgentError> for UserAuthError {

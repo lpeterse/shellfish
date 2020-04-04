@@ -1,10 +1,12 @@
 use super::*;
+use crate::role::Role;
+
 use async_std::io::Read;
 use async_std::stream::Stream;
 use async_std::task::{Context, Poll};
 use std::pin::Pin;
 
-pub struct Process(Session);
+pub struct Process<R: Role>(pub (crate) Session<R>);
 
 #[derive(Debug, Clone)]
 pub enum ProcessEvent {
@@ -12,20 +14,20 @@ pub enum ProcessEvent {
     Exit(Exit),
 }
 
-impl Process {
-    pub(super) fn new(x: Session) -> Self {
+impl<R: Role> Process<R> {
+    pub(super) fn new(x: Session<R>) -> Self {
         Self(x)
     }
 
-    pub fn stdin<'a>(&'a mut self) -> Stdin<'a> {
+    pub fn stdin<'a>(&'a mut self) -> Stdin<'a, R> {
         Stdin(self)
     }
 
-    pub fn stdout<'a>(&'a mut self) -> Stdout<'a> {
+    pub fn stdout<'a>(&'a mut self) -> Stdout<'a, R> {
         Stdout(self)
     }
 
-    pub fn stderr<'a>(&'a mut self) -> Stderr<'a> {
+    pub fn stderr<'a>(&'a mut self) -> Stderr<'a, R> {
         Stderr(self)
     }
 
@@ -34,15 +36,18 @@ impl Process {
     pub fn kill(&mut self, signal: Signal) {}
 }
 
-impl Stream for Process {
+impl<R: Role> Stream for Process<R> {
     type Item = Result<ProcessEvent, ConnectionError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut state = ((self.0).0).0.lock().map_err(|_| ConnectionError::Terminated)?;
+        let mut state = ((self.0).state)
+            .0
+            .lock()
+            .map_err(|_| ConnectionError::Terminated)?;
         state.outer_task = None;
 
         if let Some(exit) = state.exit.take() {
-            return Poll::Ready(Some(Ok(ProcessEvent::Exit(exit))))
+            return Poll::Ready(Some(Ok(ProcessEvent::Exit(exit))));
         }
         if let Some(done) = state.inner_done.take() {
             Err(done)?
@@ -52,11 +57,11 @@ impl Stream for Process {
     }
 }
 
-pub struct Stdin<'a>(&'a mut Process);
+pub struct Stdin<'a, R: Role>(&'a mut Process<R>);
 
-pub struct Stdout<'a>(&'a mut Process);
+pub struct Stdout<'a, R: Role>(&'a mut Process<R>);
 
-impl<'a> Read for Stdout<'a> {
+impl<'a, R: Role> Read for Stdout<'a, R> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -84,9 +89,9 @@ impl<'a> Read for Stdout<'a> {
     }
 }
 
-pub struct Stderr<'a>(&'a mut Process);
+pub struct Stderr<'a, R: Role>(&'a mut Process<R>);
 
-impl<'a> Read for Stderr<'a> {
+impl<'a, R: Role> Read for Stderr<'a, R> {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,

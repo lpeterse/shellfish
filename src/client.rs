@@ -21,7 +21,7 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn connect<H: HostName>(&self, host: H) -> Result<Connection<Self>, ClientError> {
+    pub async fn connect<H: HostName>(&self, host: H) -> Result<Connection, ClientError> {
         let e = ClientError::ConnectError;
         let hostname = host.name();
         let socket = TcpStream::connect(host).await.map_err(e)?;
@@ -32,7 +32,7 @@ impl Client {
         &self,
         hostname: String,
         socket: S,
-    ) -> Result<Connection<Self>, ClientError> {
+    ) -> Result<Connection, ClientError> {
         let verifier = self.hostkey_verifier.clone();
         let t = Transport::<Client, S>::connect(&self.config, verifier, hostname, socket).await?;
         Ok(match self.username {

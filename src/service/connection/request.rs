@@ -6,7 +6,7 @@ use async_std::task::{ready, Context, Poll};
 use std::pin::Pin;
 
 pub(crate) enum Request {
-    OpenSession(Transaction<OpenRequest<Session>>),
+    OpenSession(Transaction<OpenRequest<Session<Client>>>),
     OpenDirectTcpIp(Transaction<OpenRequest<DirectTcpIp>>),
 }
 
@@ -28,8 +28,8 @@ pub(crate) trait IsRequest: Sized {
     ) -> Request;
 }
 
-impl IsRequest for OpenRequest<Session> {
-    type Result = Result<Session, ChannelOpenFailureReason>;
+impl IsRequest for OpenRequest<Session<Client>> {
+    type Result = Result<Session<Client>, ChannelOpenFailureReason>;
     fn try_from(r: Request) -> Option<Transaction<Self>> {
         match r {
             Request::OpenSession(x) => Some(x),

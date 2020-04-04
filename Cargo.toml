@@ -5,7 +5,7 @@ authors = ["Lars Petersen <info@lars-petersen.net>"]
 edition = "2018"
 
 [dependencies]
-async-std = "1.5.0"
+async-std = { version = "1.5.0", features = ["unstable"] }
 base64 = "0.12.0"
 chacha20 = { version = "0.3.4", features = ["legacy"] }
 ed25519-dalek = "1.0.0-pre.3"

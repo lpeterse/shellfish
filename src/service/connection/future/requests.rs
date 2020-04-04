@@ -30,7 +30,7 @@ pub(crate) fn poll<T: TransportLayer>(
     cx: &mut Context,
 ) -> Poll<Result<(), ConnectionError>> {
     match ready!(x.request_rx.poll(cx))? {
-        Request::OpenSession(r) => poll_open!(x, cx, r, Session),
+        Request::OpenSession(r) => poll_open!(x, cx, r, Session<Client>),
         Request::OpenDirectTcpIp(r) => poll_open!(x, cx, r, DirectTcpIp),
     }
     Poll::Ready(Ok(()))

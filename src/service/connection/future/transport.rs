@@ -57,7 +57,7 @@ pub(crate) fn poll<T: TransportLayer>(
     }
     // MSG_CHANNEL_OPEN
     if let Some(msg) = x.transport.decode() {
-        let _: MsgChannelOpen<Session> = msg;
+        let _: MsgChannelOpen<Session<Client>> = msg;
         log::debug!("Received MSG_CHANNEL_OPEN");
         // todo!()
     }
