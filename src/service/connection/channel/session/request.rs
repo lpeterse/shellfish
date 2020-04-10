@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug)]
 pub(crate) enum RequestState<T> {
     None,
     Open(T),

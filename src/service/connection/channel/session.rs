@@ -21,9 +21,10 @@ use crate::codec::*;
 /// shell, an application, a system command, or some built-in subsystem.
 /// It may or may not have a tty, and may or may not involve X11
 /// forwarding.  Multiple sessions can be active simultaneously.
+#[derive(Debug)]
 pub struct Session<R: Role> {
     role: std::marker::PhantomData<R>,
-    pub (crate) state: SessionState,
+    pub(crate) state: SessionState,
 }
 
 impl Session<Client> {
@@ -46,12 +47,18 @@ impl Session<Client> {
     }
 
     async fn request(self, request: SessionRequest) -> Result<Self, ConnectionError> {
-        let mut state = (self.state).0.lock().map_err(|_| ConnectionError::Terminated)?;
+        let mut state = (self.state)
+            .0
+            .lock()
+            .map_err(|_| ConnectionError::Terminated)?;
         state.request = RequestState::Open(request);
         //state.inner_wake(); // FIXME
         drop(state);
         async_std::future::poll_fn(|cx| {
-            let mut state = (self.state).0.lock().map_err(|_| ConnectionError::Terminated)?;
+            let mut state = (self.state)
+                .0
+                .lock()
+                .map_err(|_| ConnectionError::Terminated)?;
             match state.request {
                 RequestState::Success => {
                     state.request = RequestState::None;
@@ -84,15 +91,21 @@ impl<R: Role> Drop for Session<R> {
     }
 }
 
-impl<R: Role> Channel for Session<R> {
+impl<R: Role> ChannelOpen for Session<R> {
     type Open = ();
     type Confirmation = ();
+}
+
+impl<R: Role> Channel for Session<R> {
     type Request = SessionRequest;
     type State = SessionState;
 
     const NAME: &'static str = "session";
 
-    fn new_state(max_buffer_size: usize) -> Self::State {
+    fn new_state(
+        max_buffer_size: usize,
+        reply: oneshot::Sender<Result<Self, ChannelOpenFailureReason>>,
+    ) -> Self::State {
         todo!()
     }
 }

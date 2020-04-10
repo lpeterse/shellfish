@@ -33,7 +33,7 @@ pub use self::session_id::*;
 pub use self::socket::*;
 
 use self::cipher::*;
-use self::kex::*;
+pub use self::kex::*;
 use self::key_streams::*;
 use self::msg_debug::*;
 pub use self::msg_disconnect::*;

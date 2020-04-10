@@ -11,4 +11,4 @@ pub(crate) mod buffer;
 pub(crate) mod codec;
 pub(crate) mod message;
 pub(crate) mod role;
-pub(crate) mod util;
+pub mod util; // FIXME

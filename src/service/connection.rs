@@ -2,20 +2,19 @@ mod channel;
 mod channels;
 mod config;
 mod error;
-mod future;
+pub mod future;
 mod global;
 mod msg;
-mod request;
 
 pub use self::config::*;
 pub use self::error::*;
+pub use self::future::*;
 pub use self::global::*;
 
 use self::channel::*;
 use self::channels::*;
 use self::future::ConnectionFuture;
 use self::msg::*;
-use self::request::*;
 use super::*;
 
 use crate::client::Client;
@@ -23,11 +22,11 @@ use crate::codec::*;
 use crate::role::*;
 use crate::server::Server;
 use crate::transport::{DisconnectReason, TransportLayer, TransportLayerExt};
+use crate::util::manyshot;
 use crate::util::oneshot;
 
 use async_std::future::Future;
 use async_std::stream::Stream;
-use async_std::sync;
 use async_std::task::ready;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -39,21 +38,10 @@ use std::task::{Context, Poll};
 /// itself alive and does nothing. Dropping the connection object will close the connection and
 /// free all resources. It will also terminate all dependant channels (shells and forwardings etc).
 pub struct Connection {
-    close: oneshot::Sender<DisconnectReason>,
-    error: oneshot::Receiver<ConnectionError>,
-    requests: RequestSender,
-    requests_rx: sync::Receiver<ConnectionRequest>,
-}
-
-impl<R: Role> Service<R> for Connection
-where
-    R::Config: ConnectionConfig,
-{
-    const NAME: &'static str = "ssh-connection";
-
-    fn new<T: TransportLayer>(config: &R::Config, transport: T) -> Self {
-        Self::new(config, transport)
-    }
+    close_tx: oneshot::Sender<DisconnectReason>,
+    error_rx: oneshot::Receiver<ConnectionError>,
+    request_tx: manyshot::Sender<OutboundRequest>,
+    request_rx: manyshot::Receiver<InboundRequest>,
 }
 
 impl Connection {
@@ -62,18 +50,23 @@ impl Connection {
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
     fn new<C: ConnectionConfig, T: TransportLayer>(config: &C, transport: T) -> Connection {
-        let (s1, r1) = oneshot::channel();
-        let (s2, r2) = oneshot::channel();
-        let (s3, r3) = channel();
-        let (s4, r4) = channel();
-        let (_, requests_rx) = sync::channel(2);
-        let future = ConnectionFuture::new(config, transport, r1, r3, s4);
-        async_std::task::spawn(async { s2.send(future.await) });
+        let (close_tx, close_rx) = oneshot::channel();
+        let (error_tx, error_rx) = oneshot::channel();
+        let (request_in_tx, request_in_rx) = manyshot::new();
+        let (request_out_tx, request_out_rx) = manyshot::new();
+        let future = ConnectionFuture::new(
+            config,
+            transport,
+            close_rx,
+            request_out_tx,
+            request_in_rx,
+        );
+        async_std::task::spawn(async { error_tx.send(future.await) });
         Connection {
-            close: s1,
-            error: r2,
-            requests: s3,
-            requests_rx,
+            close_tx,
+            error_rx,
+            request_tx: request_in_tx,
+            request_rx: request_out_rx,
         }
     }
 
@@ -97,35 +90,36 @@ impl Connection {
     /// called more than once on a given connection. This method may fail if either the client
     /// (due to config limitiation) or the server hits a limit on the number of concurrent
     /// channels per connection.
-    pub async fn session(
+    pub async fn open_session(
         &mut self,
     ) -> Result<Result<Session<Client>, ChannelOpenFailureReason>, ConnectionError> {
+        /*
         let req: OpenRequest<Session<Client>> = OpenRequest { specific: () };
         self.requests.request(req).await
+        */
+        todo!()
     }
 
-    pub async fn direct_tcpip(
+    pub async fn open_direct_tcpip(
         &mut self,
-        dst_host: String,
-        dst_port: u32,
-        src_addr: String,
-        src_port: u32,
+        params: DirectTcpIpOpen,
     ) -> Result<Result<DirectTcpIp, ChannelOpenFailureReason>, ConnectionError> {
+        let (tx, rx) = oneshot::channel();
         let req: OpenRequest<DirectTcpIp> = OpenRequest {
-            specific: DirectTcpIpOpen {
-                dst_host,
-                dst_port,
-                src_addr,
-                src_port,
-            },
+            open: params,
+            reply: tx,
         };
-        self.requests.request(req).await
+        self.request_tx
+            .send(OutboundRequest::OpenDirectTcpIp(req))
+            .await
+            .ok_or(ConnectionError::Terminated)?;
+        rx.await.ok_or(ConnectionError::Terminated)
     }
 }
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        let x = std::mem::replace(&mut self.close, oneshot::channel().0);
+        let x = std::mem::replace(&mut self.close_tx, oneshot::channel().0);
         x.send(DisconnectReason::BY_APPLICATION);
     }
 }
@@ -135,29 +129,50 @@ impl Future for Connection {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let s = Pin::into_inner(self);
-        let r = ready!(Pin::new(&mut s.error).poll(cx));
+        let r = ready!(Pin::new(&mut s.error_rx).poll(cx));
         Poll::Ready(r.unwrap_or(ConnectionError::Terminated))
     }
 }
 
-pub enum ConnectionRequest {
-    Global(GlobalRequest),
-    OpenSession(OpenSessionRequest),
+impl<R: Role> Service<R> for Connection
+where
+    R::Config: ConnectionConfig,
+{
+    const NAME: &'static str = "ssh-connection";
+
+    fn new<T: TransportLayer>(config: &R::Config, transport: T) -> Self {
+        Self::new(config, transport)
+    }
 }
 
-pub struct OpenSessionRequest {}
+#[derive(Debug)]
+pub enum InboundRequest {
+    Global(GlobalRequest)
+}
 
-impl OpenSessionRequest {
-    fn accept(self) -> Session<Server> {
+#[derive(Debug)]
+pub enum OutboundRequest {
+    Global(GlobalRequest),
+    OpenSession(OpenRequest<Session<Client>>),
+    OpenDirectTcpIp(OpenRequest<DirectTcpIp>),
+}
+
+#[derive(Debug)]
+pub struct OpenRequest<T: ChannelOpen> {
+    open: <T as ChannelOpen>::Open,
+    reply: oneshot::Sender<Result<T, ChannelOpenFailureReason>>,
+}
+
+impl OpenRequest<Session<Server>> {
+    pub fn accept(self) -> Session<Server> {
         todo!()
     }
 }
 
 impl Stream for Connection {
-    type Item = ConnectionRequest;
+    type Item = InboundRequest;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut self_ = self;
-        Stream::poll_next(Pin::new(&mut self_.as_mut().requests_rx), cx)
+        self.request_rx.poll_receive(cx)
     }
 }

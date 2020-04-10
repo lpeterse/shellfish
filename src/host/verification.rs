@@ -1,10 +1,10 @@
 use crate::algorithm::auth::*;
 
+use async_std::future::ready;
 use std::future::Future;
 use std::ops::Deref;
-use async_std::future::ready;
 
-pub trait HostKeyVerifier: Send + Sync + 'static {
+pub trait HostKeyVerifier: std::fmt::Debug + Send + Sync + 'static {
     fn verify(&self, name: &str, identity: &Identity) -> VerificationFuture;
 }
 
@@ -24,6 +24,7 @@ pub enum VerificationError {
     KeyNotFound,
 }
 
+#[derive(Debug)]
 pub struct AcceptingVerifier {}
 
 impl HostKeyVerifier for AcceptingVerifier {

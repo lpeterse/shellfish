@@ -24,7 +24,7 @@ use crate::algorithm::auth::*;
 use crate::codec::*;
 use crate::util::*;
 
-pub trait AuthAgent: Send + Sync + 'static {
+pub trait AuthAgent: std::fmt::Debug + Send + Sync + 'static {
     fn identities(&self) -> BoxFuture<Result<Vec<(Identity, String)>, AuthAgentError>>;
     fn signature(
         &self,

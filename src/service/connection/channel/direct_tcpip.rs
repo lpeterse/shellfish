@@ -10,17 +10,21 @@ use async_std::task::Poll;
 use async_std::task::Waker;
 use std::sync::{Arc, Mutex};
 
+#[derive(Debug)]
 pub struct DirectTcpIp(Arc<Mutex<DirectTcpIpState>>);
 
-impl Channel for DirectTcpIp {
+impl ChannelOpen for DirectTcpIp {
     type Open = DirectTcpIpOpen;
     type Confirmation = ();
+}
+
+impl Channel for DirectTcpIp {
     type Request = ();
     type State = DirectTcpIpState;
 
     const NAME: &'static str = "direct-tcpip";
 
-    fn new_state(max_buffer_size: usize) -> Self::State {
+    fn new_state(max_buffer_size: usize, reply: oneshot::Sender<Result<Self, ChannelOpenFailureReason>>) -> Self::State {
         Self::State {
             local_window_size: max_buffer_size as u32,
             remote_channel: 0,

@@ -5,7 +5,7 @@ use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
 /// An interface to the local `ssh-agent`.
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct LocalAgent {
     path: PathBuf,
 }

@@ -4,9 +4,10 @@ use async_std::task::Poll;
 use async_std::task::{Context, Waker};
 use std::sync::{Arc, Mutex};
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub(crate) struct SessionState(pub(crate) Arc<Mutex<SessionInner>>);
 
+#[derive(Debug)]
 pub(crate) struct SessionInner {
     pub remote_channel: u32,
     pub remote_window_size: u32,

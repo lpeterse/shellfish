@@ -13,6 +13,7 @@ use crate::transport::*;
 use async_std::net::TcpStream;
 use std::sync::Arc;
 
+#[derive(Debug)]
 pub struct Client {
     config: ClientConfig,
     username: Option<String>,

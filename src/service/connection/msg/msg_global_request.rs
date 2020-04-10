@@ -2,17 +2,17 @@ use crate::codec::*;
 use crate::message::*;
 
 #[derive(Debug)]
-pub(crate) struct MsgGlobalRequest<'a> {
-    pub name: &'a str,
+pub(crate) struct MsgGlobalRequest {
+    pub name: String,
     pub want_reply: bool,
-    pub data: &'a [u8],
+    pub data: Vec<u8>,
 }
 
-impl<'a> Message for MsgGlobalRequest<'a> {
+impl Message for MsgGlobalRequest {
     const NUMBER: u8 = 80;
 }
 
-impl<'a> Encode for MsgGlobalRequest<'a> {
+impl Encode for MsgGlobalRequest {
     fn size(&self) -> usize {
         1 + Encode::size(&self.name) + 1 + self.data.len()
     }
@@ -24,13 +24,13 @@ impl<'a> Encode for MsgGlobalRequest<'a> {
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgGlobalRequest<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgGlobalRequest {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             name: DecodeRef::decode(d)?,
             want_reply: d.take_u8()? != 0,
-            data: d.take_all()?,
+            data: d.take_all()?.into(),
         }
         .into()
     }
@@ -43,9 +43,9 @@ mod tests {
     #[test]
     fn test_debug_01() {
         let msg = MsgGlobalRequest {
-            name: "name",
+            name: "name".into(),
             want_reply: true,
-            data: &b"data"[..],
+            data: b"data"[..].into(),
         };
         assert_eq!(
             "MsgGlobalRequest { name: \"name\", want_reply: true, data: [100, 97, 116, 97] }",
@@ -56,9 +56,9 @@ mod tests {
     #[test]
     fn test_encode_02() {
         let msg = MsgGlobalRequest {
-            name: "name",
+            name: "name".into(),
             want_reply: true,
-            data: &b"data"[..],
+            data: b"data"[..].into(),
         };
         assert_eq!(
             &[80, 0, 0, 0, 4, 110, 97, 109, 101, 1, 100, 97, 116, 97][..],

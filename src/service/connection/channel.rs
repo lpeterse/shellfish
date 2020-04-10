@@ -6,15 +6,18 @@ use super::*;
 pub use self::direct_tcpip::*;
 pub use self::session::*;
 
-pub(crate) trait Channel: Sized {
-    type Open: Clone + Encode + Decode;
+pub trait ChannelOpen: Sized {
+    type Open: std::fmt::Debug + Clone + Encode + Decode;
     type Confirmation: Encode + Decode;
+}
+
+pub (crate) trait Channel: ChannelOpen {
     type Request: ChannelRequest + Encode;
     type State: ChannelState;
 
     const NAME: &'static str;
 
-    fn new_state(max_buffer_size: usize) -> Self::State;
+    fn new_state(max_buffer_size: usize, reply: oneshot::Sender<Result<Self, ChannelOpenFailureReason>>) -> Self::State;
 }
 
 pub trait ChannelRequest {
@@ -27,7 +30,7 @@ impl ChannelRequest for () {
     }
 }
 
-pub(crate) trait ChannelState: Send {
+pub (crate) trait ChannelState: Send {
     fn terminate(&mut self, e: ConnectionError);
 
     fn push_open_confirmation(&mut self, id: u32, ws: u32, ps: u32) -> Result<(), ConnectionError>;

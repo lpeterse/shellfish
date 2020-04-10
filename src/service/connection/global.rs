@@ -1,13 +1,15 @@
-use super::*;
+use crate::util::oneshot;
 
+#[derive(Debug)]
 pub struct GlobalRequest {
-    name: String,
-    data: Vec<u8>,
-    reply: Option<oneshot::Sender<GlobalRequestReply>>,
+    pub(crate) name: String,
+    pub(crate) data: Vec<u8>,
+    pub(crate) reply: Option<oneshot::Sender<GlobalReply>>,
 }
 
-pub enum GlobalRequestReply {
-    Success,
+#[derive(Debug)]
+pub enum GlobalReply {
+    Success(Vec<u8>),
     Failure,
 }
 
@@ -18,18 +20,11 @@ impl GlobalRequest {
     pub fn data(&self) -> &[u8] {
         self.data.as_ref()
     }
-    pub fn accept(self) {
-        let mut self_ = self;
-        if let Some(x) = self_.reply.take() {
-            x.send(GlobalRequestReply::Success)
-        }
-    }
-}
 
-impl Drop for GlobalRequest {
-    fn drop(&mut self) {
-        if let Some(x) = self.reply.take() {
-            x.send(GlobalRequestReply::Failure)
+    pub fn accept(self, data: Vec<u8>) {
+        let mut self_ = self;
+        if let Some(reply) = self_.reply.take() {
+            reply.send(GlobalReply::Success(data))
         }
     }
 }

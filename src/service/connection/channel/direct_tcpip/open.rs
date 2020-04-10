@@ -1,7 +1,7 @@
 use crate::codec::*;
 
-#[derive(Clone)]
-pub(crate) struct DirectTcpIpOpen {
+#[derive(Debug, Clone)]
+pub struct DirectTcpIpOpen {
     pub(crate) dst_host: String,
     pub(crate) dst_port: u32,
     pub(crate) src_addr: String,

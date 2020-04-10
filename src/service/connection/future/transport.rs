@@ -55,11 +55,63 @@ pub(crate) fn poll<T: TransportLayer>(
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
-    // MSG_CHANNEL_OPEN
+    // MSG_CHANNEL_OPEN (session)
     if let Some(msg) = x.transport.decode() {
         let _: MsgChannelOpen<Session<Client>> = msg;
-        log::debug!("Received MSG_CHANNEL_OPEN");
-        // todo!()
+        log::debug!("Received MSG_CHANNEL_OPEN (session)");
+        /*
+        if x.channel_open.is_none() {
+            let (s, r) = oneshot::channel();
+            let o = CO {
+                sender_channel: msg.sender_channel,
+                initial_window_size: msg.initial_window_size,
+                maximum_packet_size: msg.maximum_packet_size,
+                reply: XY::Session(r),
+            };
+            let req = OpenRequest {
+                open: msg.channel_type,
+                reply: s,
+            };
+            let tx = x.request_tx.clone();
+            let mut future: BoxFuture<()> =
+                Box::pin(async move { tx.send(InboundRequest::OpenSession(req)).await });
+            ready!(Pin::new(&mut future).poll(cx));
+            x.channel_open = Some(o);
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        } else {
+            return Poll::Ready(Err(ConnectionError::ChannelOpenUnexpected));
+        }*/
+        todo!()
+    }
+    // MSG_CHANNEL_OPEN (direct-tcpip)
+    if let Some(msg) = x.transport.decode() {
+        let _: MsgChannelOpen<DirectTcpIp> = msg;
+        log::debug!("Received MSG_CHANNEL_OPEN (direct-tcpip)");
+        /*
+        if x.channel_open.is_none() {
+            let (s, r) = oneshot::channel();
+            let o = CO {
+                sender_channel: msg.sender_channel,
+                initial_window_size: msg.initial_window_size,
+                maximum_packet_size: msg.maximum_packet_size,
+                reply: XY::DirectTcpIp(r),
+            };
+            let req = OpenRequest {
+                open: msg.channel_type,
+                reply: s,
+            };
+            let tx = x.request_tx.clone();
+            let mut future: BoxFuture<()> =
+                Box::pin(async move { tx.send(InboundRequest::OpenDirectTcpIp(req)).await });
+            ready!(Pin::new(&mut future).poll(cx));
+            x.channel_open = Some(o);
+            x.transport.consume();
+            return Poll::Ready(Ok(()));
+        } else {
+            return Poll::Ready(Err(ConnectionError::ChannelOpenUnexpected));
+        }*/
+        todo!()
     }
     // MSG_CHANNEL_OPEN_CONFIRMATION
     if let Some(msg) = x.transport.decode_ref() {
@@ -112,11 +164,10 @@ pub(crate) fn poll<T: TransportLayer>(
         return Poll::Ready(Ok(()));
     }
     // MSG_GLOBAL_REQUEST
-    if let Some(msg) = x.transport.decode_ref() {
+    if let Some(msg) = x.transport.decode() {
         let _: MsgGlobalRequest = msg;
         log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
-        x.global_request_sink
-            .push_request(msg.want_reply, msg.data)?;
+        ready!(x.push_global_request(cx, msg.name, msg.data, msg.want_reply));
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -124,7 +175,11 @@ pub(crate) fn poll<T: TransportLayer>(
     if let Some(msg) = x.transport.decode_ref() {
         let _: MsgRequestSuccess = msg;
         log::debug!("Received MSG_REQUEST_SUCCESS");
-        x.global_request_source.push_success(msg.data)?;
+        if let Some(tx) = x.pending_global.pop_front() {
+            tx.send(GlobalReply::Success(msg.data.into()));
+        } else {
+            return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
+        }
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -132,7 +187,11 @@ pub(crate) fn poll<T: TransportLayer>(
     if let Some(msg) = x.transport.decode_ref() {
         let _: MsgRequestFailure = msg;
         log::debug!("Received MSG_REQUEST_FAILURE");
-        x.global_request_source.push_failure()?;
+        if let Some(tx) = x.pending_global.pop_front() {
+            tx.send(GlobalReply::Failure);
+        } else {
+            return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
+        }
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }

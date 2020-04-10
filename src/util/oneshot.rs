@@ -4,7 +4,10 @@ use std::sync::{Arc, Mutex};
 use std::task::Waker;
 use std::task::{Context, Poll};
 
+#[derive(Debug)]
 pub struct Sender<T>(Arc<Mutex<Inner<T>>>);
+
+#[derive(Debug)]
 pub struct Receiver<T>(Arc<Mutex<Inner<T>>>);
 
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
@@ -15,6 +18,7 @@ pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
     (Sender(x.clone()), Receiver(x))
 }
 
+#[derive(Debug)]
 struct Inner<T> {
     waker: Option<Waker>,
     token: Option<Option<T>>,

@@ -7,6 +7,7 @@ pub enum ConnectionError {
     IoError(std::io::ErrorKind),
     TransportError(TransportError),
     ChannelOpenFailure(ChannelOpenFailureReason),
+    ChannelOpenUnexpected,
     ChannelIdInvalid,
     ChannelRequestFailure,
     ChannelFailureUnexpected,
@@ -16,6 +17,9 @@ pub enum ConnectionError {
     RequestSenderDropped,
     RequestReceiverDropped,
     RequestUnexpectedResponse,
+    GlobalRequestChannelExhausted,
+    GlobalRequestReplyUnexpected,
+    GlobalRequestReplyChannelExhausted,
 }
 
 impl From<std::io::Error> for ConnectionError {

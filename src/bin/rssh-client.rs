@@ -1,11 +1,32 @@
 use rssh::client::*;
+use rssh::service::connection::future::*;
 use rssh::service::connection::*;
+use rssh::transport::*;
 
+use async_std::net::TcpStream;
 use async_std::stream::StreamExt;
 
+use rssh::util::oneshot;
+use std::collections::VecDeque;
+use futures_timer::Delay;
+
 async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
-    let session = conn.session().await??;
-    let mut process = session.exec("for i in 1 2 3 4 5 6 7 8 9; do echo $i && sleep 1; done".into()).await?;
+    /*while let Some(request) = conn.next().await {
+        log::warn!("Incoming request: {:?}", request);
+        match request {
+            IncomingRequest::Global(r) => r.accept(vec![]),
+            IncomingRequest::OpenSession(r) => {
+                let session = r.accept();
+                //log::warn!("New session: {:?}", session);
+            }
+            _ => (),
+        }
+    }*/
+
+    let session = conn.open_session().await??;
+    let mut process = session
+        .exec("for i in 1 2 3 4 5 6 7 8 9; do echo $i && sleep 1; done".into())
+        .await?;
     while let Some(i) = process.next().await {
         log::error!("EVENT {:?}", i);
     }
@@ -21,6 +42,27 @@ async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
 
 fn main() {
     env_logger::init();
+
+    log::error!(
+        "Transport: {}",
+        std::mem::size_of::<Transport<Client, TcpStream>>(),
+    );
+    log::error!(
+        "ClientKex: {}",
+        std::mem::size_of::<ClientKex>(),
+    );
+    log::error!(
+        "Delay: {}",
+        std::mem::size_of::<Delay>(),
+    );
+    log::error!(
+        "ConnectionFuture: {}",
+        std::mem::size_of::<ConnectionFuture<Transport<Client, TcpStream>>>()
+    );
+    log::error!(
+        "VecDequeue: {}",
+        std::mem::size_of::<VecDeque<oneshot::Receiver<GlobalReply>>>()
+    );
 
     async_std::task::block_on(async move {
         let client = Client::default();

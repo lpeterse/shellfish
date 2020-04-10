@@ -4,6 +4,7 @@ use crate::transport::*;
 
 use std::time::Duration;
 
+#[derive(Debug)]
 pub struct ClientConfig {
     /// The local identification string.
     ///
