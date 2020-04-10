@@ -20,7 +20,6 @@ use super::*;
 use crate::client::Client;
 use crate::codec::*;
 use crate::role::*;
-use crate::server::Server;
 use crate::transport::{DisconnectReason, TransportLayer, TransportLayerExt};
 use crate::util::manyshot;
 use crate::util::oneshot;
@@ -54,13 +53,8 @@ impl Connection {
         let (error_tx, error_rx) = oneshot::channel();
         let (request_in_tx, request_in_rx) = manyshot::new();
         let (request_out_tx, request_out_rx) = manyshot::new();
-        let future = ConnectionFuture::new(
-            config,
-            transport,
-            close_rx,
-            request_out_tx,
-            request_in_rx,
-        );
+        let future =
+            ConnectionFuture::new(config, transport, close_rx, request_out_tx, request_in_rx);
         async_std::task::spawn(async { error_tx.send(future.await) });
         Connection {
             close_tx,
@@ -84,6 +78,27 @@ impl Connection {
         Ok(Self::new(config, transport))
     }
 
+    pub async fn request2(&mut self, name: String, data: Vec<u8>) -> Result<(), ConnectionError> {
+        let request = GlobalRequest::new(name, data);
+        self.request_tx
+            .send(OutboundRequest::Global(request))
+            .await
+            .ok_or(ConnectionError::Terminated)
+    }
+
+    pub async fn request_want_reply(
+        &self,
+        name: String,
+        data: Vec<u8>,
+    ) -> Result<GlobalReply, ConnectionError> {
+        let (request, reply) = GlobalRequest::new_want_reply(name, data);
+        self.request_tx
+            .send(OutboundRequest::Global(request))
+            .await
+            .ok_or(ConnectionError::Terminated)?;
+        Ok(reply)
+    }
+
     /// Request a new session on top of an established connection.
     ///
     /// A connection is able to multiplex several sessions simultaneously so this method may be
@@ -100,6 +115,7 @@ impl Connection {
         todo!()
     }
 
+    /// Request a direct-tcpip forwarding on top of an establied connection.
     pub async fn open_direct_tcpip(
         &mut self,
         params: DirectTcpIpOpen,
@@ -147,26 +163,20 @@ where
 
 #[derive(Debug)]
 pub enum InboundRequest {
-    Global(GlobalRequest)
+    Global(GlobalRequest),
 }
 
 #[derive(Debug)]
-pub enum OutboundRequest {
+pub(crate) enum OutboundRequest {
     Global(GlobalRequest),
     OpenSession(OpenRequest<Session<Client>>),
     OpenDirectTcpIp(OpenRequest<DirectTcpIp>),
 }
 
 #[derive(Debug)]
-pub struct OpenRequest<T: ChannelOpen> {
+pub(crate) struct OpenRequest<T: ChannelOpen> {
     open: <T as ChannelOpen>::Open,
     reply: oneshot::Sender<Result<T, ChannelOpenFailureReason>>,
-}
-
-impl OpenRequest<Session<Server>> {
-    pub fn accept(self) -> Session<Server> {
-        todo!()
-    }
 }
 
 impl Stream for Connection {

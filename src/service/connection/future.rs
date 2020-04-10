@@ -13,18 +13,6 @@ use async_std::task::{ready, Context, Poll};
 use std::collections::VecDeque;
 use std::pin::*;
 
-pub struct CO {
-    pub sender_channel: u32,
-    pub initial_window_size: u32,
-    pub maximum_packet_size: u32,
-    pub reply: XY,
-}
-
-pub enum XY {
-    Session(oneshot::Receiver<Result<oneshot::Sender<Session<Server>>, ChannelOpenFailureReason>>),
-    DirectTcpIp(oneshot::Receiver<Result<oneshot::Sender<DirectTcpIp>, ChannelOpenFailureReason>>),
-}
-
 /// The `ConnectionFuture` handles all events related with a single connection.
 ///
 /// The future needs to be constantly polled in order to drive the connection handling. It is
@@ -39,10 +27,10 @@ pub struct ConnectionFuture<T: TransportLayer> {
     request_tx: manyshot::Sender<InboundRequest>,
     request_rx: (Option<OutboundRequest>, manyshot::Receiver<OutboundRequest>),
     global_in_rx: (
-        Option<GlobalReply>,
-        VecDeque<oneshot::Receiver<GlobalReply>>,
+        Option<Option<Vec<u8>>>,
+        VecDeque<oneshot::Receiver<Option<Vec<u8>>>>,
     ),
-    pending_global: VecDeque<oneshot::Sender<GlobalReply>>,
+    pending_global: VecDeque<oneshot::Sender<Option<Vec<u8>>>>,
 }
 
 impl<T: TransportLayer> ConnectionFuture<T> {
@@ -239,7 +227,7 @@ impl<T: TransportLayer> ConnectionFuture<T> {
         // Try all other replies in the correct order (sic!).
         // Stop on the first that is not ready or store when it got ready, but couldn't be sent.
         while let Some(future) = self.global_in_rx.1.front_mut() {
-            let reply = ready!(Pin::new(future).poll(cx)).unwrap_or(GlobalReply::Failure);
+            let reply = ready!(Pin::new(future).poll(cx)).unwrap_or(None);
             let _ = self.global_in_rx.1.pop_front();
             match Self::poll_send_global_reply(&mut self.transport, cx, &reply) {
                 Poll::Ready(r) => r?,
@@ -255,18 +243,15 @@ impl<T: TransportLayer> ConnectionFuture<T> {
     fn poll_send_global_reply(
         transport: &mut T,
         cx: &mut Context,
-        reply: &GlobalReply,
+        reply: &Option<Vec<u8>>,
     ) -> Poll<Result<(), ConnectionError>> {
-        match reply {
-            GlobalReply::Success(data) => {
-                let msg = MsgRequestSuccess {
-                    data: data.as_ref(),
-                };
-                ready!(transport.poll_send(cx, &msg))?;
-            }
-            GlobalReply::Failure => {
-                ready!(transport.poll_send(cx, &MsgRequestFailure))?;
-            }
+        if let Some(data) = reply {
+            let msg = MsgRequestSuccess {
+                data: data.as_ref(),
+            };
+            ready!(transport.poll_send(cx, &msg))?;
+        } else {
+            ready!(transport.poll_send(cx, &MsgRequestFailure))?;
         }
 
         Poll::Ready(Ok(()))

@@ -1,16 +1,31 @@
-use crate::util::oneshot;
+use super::*;
+
+use async_std::future::Future;
+use async_std::task::*;
+use core::pin::*;
 
 #[derive(Debug)]
 pub struct GlobalRequest {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
-    pub(crate) reply: Option<oneshot::Sender<GlobalReply>>,
+    pub(crate) reply: Option<oneshot::Sender<Option<Vec<u8>>>>,
 }
 
-#[derive(Debug)]
-pub enum GlobalReply {
-    Success(Vec<u8>),
-    Failure,
+impl GlobalRequest {
+    pub fn new(name: String, data: Vec<u8>) -> Self {
+        Self {
+            name,
+            data,
+            reply: None,
+        }
+    }
+
+    pub fn new_want_reply(name: String, data: Vec<u8>) -> (Self, GlobalReply) {
+        let (tx, rx) = oneshot::channel();
+        let mut self_ = Self::new(name, data);
+        self_.reply = Some(tx);
+        (self_, GlobalReply(rx))
+    }
 }
 
 impl GlobalRequest {
@@ -20,11 +35,17 @@ impl GlobalRequest {
     pub fn data(&self) -> &[u8] {
         self.data.as_ref()
     }
+}
 
-    pub fn accept(self, data: Vec<u8>) {
-        let mut self_ = self;
-        if let Some(reply) = self_.reply.take() {
-            reply.send(GlobalReply::Success(data))
-        }
+#[derive(Debug)]
+pub struct GlobalReply(oneshot::Receiver<Option<Vec<u8>>>);
+
+impl Future for GlobalReply {
+    type Output = Result<Option<Vec<u8>>, ConnectionError>;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        Pin::new(&mut self.as_mut().0)
+            .poll(cx)
+            .map(|x| x.ok_or(ConnectionError::Terminated))
     }
 }

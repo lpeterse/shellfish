@@ -176,7 +176,7 @@ pub(crate) fn poll<T: TransportLayer>(
         let _: MsgRequestSuccess = msg;
         log::debug!("Received MSG_REQUEST_SUCCESS");
         if let Some(tx) = x.pending_global.pop_front() {
-            tx.send(GlobalReply::Success(msg.data.into()));
+            tx.send(Some(msg.data.into()));
         } else {
             return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
         }
@@ -188,7 +188,7 @@ pub(crate) fn poll<T: TransportLayer>(
         let _: MsgRequestFailure = msg;
         log::debug!("Received MSG_REQUEST_FAILURE");
         if let Some(tx) = x.pending_global.pop_front() {
-            tx.send(GlobalReply::Failure);
+            tx.send(None);
         } else {
             return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
         }
