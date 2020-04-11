@@ -3,7 +3,7 @@ use super::*;
 use std::slice::IterMut;
 
 #[derive(Debug)]
-pub(crate) struct Channels<T = Box<ChannelState2>> {
+pub(crate) struct Channels<T = ChannelState42> {
     capacity: usize,
     elements: Vec<Option<T>>,
 }
@@ -23,8 +23,19 @@ impl<T> Channels<T> {
         }
     }
 
-    pub fn free_id(&mut self) -> Option<u32> {
-        Some(0) // FIXME
+    pub fn get_free_id(&mut self) -> Option<u32> {
+        for (i, c) in self.elements.iter().enumerate() {
+            log::debug!("ENUM {}", i);
+            if c.is_none() {
+                return Some(i as u32);
+            }
+        }
+        if self.elements.len() < self.capacity {
+            self.elements.push(None);
+            Some(self.elements.len() as u32 - 1)
+        } else {
+            None
+        }
     }
 
     pub fn insert(&mut self, id: u32, channel: T) -> Result<(), ConnectionError> {
@@ -35,30 +46,12 @@ impl<T> Channels<T> {
             }
         }
         Err(ConnectionError::ChannelIdInvalid)
-        /*
-        for id in 0..self.elements.len() {
-            match self.elements[id] {
-                None => {
-                    self.elements[id] = Some(f(id as u32));
-                    return Some(id as u32);
-                }
-                _ => (),
-            }
-        }
-        if self.elements.len() < self.capacity {
-            let id = self.elements.len() as u32;
-            self.elements.push(Some(f(id)));
-            return Some(id);
-        }
-        None
-        */
     }
 
-    pub fn remove(&mut self, id: u32) -> Result<(), ConnectionError> {
+    pub fn remove(&mut self, id: u32) -> Result<T, ConnectionError> {
         if let Some(x) = self.elements.get_mut(id as usize) {
-            if x.is_some() {
-                *x = None;
-                return Ok(());
+            if let Some(ch) = x.take() {
+                return Ok(ch)
             }
         }
         Err(ConnectionError::ChannelIdInvalid)
@@ -70,7 +63,7 @@ impl<T> Channels<T> {
 
     pub fn terminate(&mut self, _e: ConnectionError) {
         // FIXME
-        todo!()
+        //todo!("TERMINATE")
     }
 }
 

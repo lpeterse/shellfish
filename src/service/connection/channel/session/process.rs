@@ -43,7 +43,7 @@ impl<R: Role> Stream for Process<R> {
         let mut state = ((self.0).state)
             .0
             .lock()
-            .map_err(|_| ConnectionError::Terminated)?;
+            .map_err(|_| ConnectionError::Unknown)?;
         state.outer_task = None;
 
         if let Some(exit) = state.exit.take() {

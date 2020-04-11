@@ -28,9 +28,9 @@ pub struct ConnectionFuture<T: TransportLayer> {
     request_rx: (Option<OutboundRequest>, manyshot::Receiver<OutboundRequest>),
     global_in_rx: (
         Option<Option<Vec<u8>>>,
-        VecDeque<oneshot::Receiver<Option<Vec<u8>>>>,
+        VecDeque<oneshot::Receiver<Result<Option<Vec<u8>>, ConnectionError>>>,
     ),
-    pending_global: VecDeque<oneshot::Sender<Option<Vec<u8>>>>,
+    pending_global: VecDeque<oneshot::Sender<Result<Option<Vec<u8>>, ConnectionError>>>,
 }
 
 impl<T: TransportLayer> ConnectionFuture<T> {
@@ -56,6 +56,7 @@ impl<T: TransportLayer> ConnectionFuture<T> {
 
     fn poll_events(&mut self, cx: &mut Context) -> Poll<ConnectionError> {
         loop {
+            log::debug!("FOOO");
             // Loop over all event sources until none of it makes progress anymore.
             // The transport shall not be flushed, but might be written to. A consolidated flush
             // will be performed afterwards. This is benefecial for networking performance as it
@@ -63,6 +64,7 @@ impl<T: TransportLayer> ConnectionFuture<T> {
             // and impedes traffic analysis.
             let mut made_progress = true;
             while made_progress {
+                log::debug!("ASHDAJH");
                 made_progress = false;
                 // Poll for local connection close
                 match Pin::new(&mut self.close).poll(cx) {
@@ -83,14 +85,9 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                     Poll::Ready(Err(e)) => return Poll::Ready(e),
                     _ => (),
                 }
+                log::debug!("2738947");
                 // Poll for incoming messages
                 match transport::poll(self, cx) {
-                    Poll::Pending => (),
-                    Poll::Ready(Ok(())) => made_progress = true,
-                    Poll::Ready(Err(e)) => return Poll::Ready(e),
-                }
-                // Poll for requests issued on the local connection handle
-                match requests::poll(self, cx) {
                     Poll::Pending => (),
                     Poll::Ready(Ok(())) => made_progress = true,
                     Poll::Ready(Err(e)) => return Poll::Ready(e),
@@ -121,28 +118,40 @@ impl<T: TransportLayer> ConnectionFuture<T> {
         }
     }
 
-    /// Deliver a `ConnectionError` to all dependant users of this this connections (tasks waiting
+    /// Deliver a `ConnectionError` to all dependant users of this this connection (tasks waiting
     /// on connection requests or channel I/O).
     ///
     /// This shall be the last thing to happen and has great similarity with `Drop` except that
     /// it distributes an error.
     fn terminate(&mut self, e: ConnectionError) {
-        //self.request_rx.terminate(e);
+        if let Some(x) = self.request_rx.0.take() {
+            match x {
+                OutboundRequest::Global(mut x) => {
+                    x.reply.take().map(|x| x.send(Err(e))).unwrap_or(())
+                }
+                OutboundRequest::OpenSession(_) => todo!(),
+                OutboundRequest::OpenDirectTcpIp(_) => todo!(),
+            }
+        }
+        while let Some(x) = self.pending_global.pop_front() {
+            x.send(Err(e))
+        }
         // FIXME tx
         self.channels.terminate(e);
     }
 
     fn poll_outbound_requests(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
         loop {
+            log::debug!("ASHD");
             let request = if let Some(request) = self.request_rx.0.take() {
                 request
             } else {
                 ready!(Pin::new(&mut self.request_rx.1).poll_receive(cx))
-                    .ok_or(ConnectionError::Terminated)?
+                    .ok_or(ConnectionError::Unknown)?
             };
 
             match request {
-                OutboundRequest::Global(x) => {
+                OutboundRequest::Global(mut x) => {
                     let msg = MsgGlobalRequest {
                         name: x.name.clone(),
                         data: x.data.clone(), // FIXME
@@ -150,7 +159,7 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                     };
                     match self.transport.poll_send(cx, &msg) {
                         Poll::Ready(Ok(())) => {
-                            if let Some(reply) = x.reply {
+                            if let Some(reply) = x.reply.take() {
                                 self.pending_global.push_back(reply);
                             }
                         }
@@ -163,18 +172,22 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                 }
                 OutboundRequest::OpenSession(_) => todo!(),
                 OutboundRequest::OpenDirectTcpIp(x) => {
-                    if let Some(id) = self.channels.free_id() {
+                    log::debug!("OPEN {:?}", x);
+                    if let Some(id) = self.channels.get_free_id() {
+                        let local_ws = self.channel_max_buffer_size as u32;
+                        let local_ps = self.channel_max_packet_size as u32;
                         let msg = MsgChannelOpen::<DirectTcpIp> {
                             sender_channel: id,
-                            initial_window_size: 123,
-                            maximum_packet_size: 123,
+                            initial_window_size: local_ws,
+                            maximum_packet_size: local_ps,
                             channel_type: x.open.clone(),
                         };
                         match self.transport.poll_send(cx, &msg) {
                             Poll::Ready(Ok(())) => {
-                                let st = DirectTcpIp::new_state(1234, x.reply);
-                                let st = ChannelState2::DirectTcpIp(st);
-                                self.channels.insert(id, Box::new(st))?;
+                                log::debug!("SENT {}", id);
+                                let st = ChannelState42::new_state(local_ws, local_ps, x.reply);
+                                self.channels.insert(id, st)?;
+                                log::debug!("INSERTED {}", id);
                             }
                             Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
                             Poll::Pending => {
@@ -208,12 +221,12 @@ impl<T: TransportLayer> ConnectionFuture<T> {
             let (tx, rx) = oneshot::channel();
             req.reply = Some(tx);
             let req = InboundRequest::Global(req);
-            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Terminated)?;
+            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Unknown)?;
             self.global_in_rx.1.push_back(rx);
             Poll::Ready(Ok(()))
         } else {
             let req = InboundRequest::Global(req);
-            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Terminated)?;
+            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Unknown)?;
             Poll::Ready(Ok(()))
         }
     }
@@ -227,7 +240,7 @@ impl<T: TransportLayer> ConnectionFuture<T> {
         // Try all other replies in the correct order (sic!).
         // Stop on the first that is not ready or store when it got ready, but couldn't be sent.
         while let Some(future) = self.global_in_rx.1.front_mut() {
-            let reply = ready!(Pin::new(future).poll(cx)).unwrap_or(None);
+            let reply = ready!(Pin::new(future).poll(cx)).unwrap_or(Ok(None))?;
             let _ = self.global_in_rx.1.pop_front();
             match Self::poll_send_global_reply(&mut self.transport, cx, &reply) {
                 Poll::Ready(r) => r?,
@@ -264,6 +277,7 @@ impl<T: TransportLayer> Future for ConnectionFuture<T> {
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let self_ = Pin::into_inner(self);
         let e = ready!(self_.poll_events(cx));
+        log::debug!("Connection terminated due to {:?}", e);
         self_.terminate(e);
         Poll::Ready(e)
     }

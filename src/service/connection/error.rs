@@ -3,23 +3,23 @@ use crate::transport::TransportError;
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub enum ConnectionError {
-    Terminated,
     IoError(std::io::ErrorKind),
     TransportError(TransportError),
+    GlobalRequestReplyUnexpected,
     ChannelOpenFailure(ChannelOpenFailureReason),
     ChannelOpenUnexpected,
     ChannelIdInvalid,
     ChannelRequestFailure,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
-    ChannelWindowSizeUnderflow,
+    ChannelWindowSizeExceeded,
     ChannelWindowSizeOverflow,
+    ChannelMaxPacketSizeExceeded,
+    ChannelBufferSizeExceeded,
     RequestSenderDropped,
     RequestReceiverDropped,
     RequestUnexpectedResponse,
-    GlobalRequestChannelExhausted,
-    GlobalRequestReplyUnexpected,
-    GlobalRequestReplyChannelExhausted,
+    Unknown
 }
 
 impl From<std::io::Error> for ConnectionError {
@@ -46,7 +46,7 @@ mod tests {
 
     #[test]
     fn test_debug_01() {
-        assert_eq!("Terminated", format!("{:?}", ConnectionError::Terminated));
+        assert_eq!("Terminated", format!("{:?}", ConnectionError::Unknown));
         assert_eq!(
             "IoError(Other)",
             format!("{:?}", ConnectionError::IoError(std::io::ErrorKind::Other))
@@ -75,8 +75,8 @@ mod tests {
             format!("{:?}", ConnectionError::ChannelSuccessUnexpected)
         );
         assert_eq!(
-            "ChannelWindowSizeUnderflow",
-            format!("{:?}", ConnectionError::ChannelWindowSizeUnderflow)
+            "ChannelWindowSizeExceeded",
+            format!("{:?}", ConnectionError::ChannelWindowSizeExceeded)
         );
         assert_eq!(
             "ChannelWindowSizeOverflow",

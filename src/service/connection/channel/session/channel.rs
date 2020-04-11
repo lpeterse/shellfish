@@ -81,6 +81,7 @@ impl SessionState {
     }
 }
 
+/*
 impl ChannelState for SessionState {
     fn terminate(&mut self, e: ConnectionError) {}
 
@@ -127,3 +128,4 @@ impl ChannelState for SessionState {
         Poll::Pending
     }
 }
+*/

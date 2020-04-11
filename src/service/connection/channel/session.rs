@@ -50,7 +50,7 @@ impl Session<Client> {
         let mut state = (self.state)
             .0
             .lock()
-            .map_err(|_| ConnectionError::Terminated)?;
+            .map_err(|_| ConnectionError::Unknown)?;
         state.request = RequestState::Open(request);
         //state.inner_wake(); // FIXME
         drop(state);
@@ -58,7 +58,7 @@ impl Session<Client> {
             let mut state = (self.state)
                 .0
                 .lock()
-                .map_err(|_| ConnectionError::Terminated)?;
+                .map_err(|_| ConnectionError::Unknown)?;
             match state.request {
                 RequestState::Success => {
                     state.request = RequestState::None;
@@ -98,16 +98,16 @@ impl<R: Role> ChannelOpen for Session<R> {
 
 impl<R: Role> Channel for Session<R> {
     type Request = SessionRequest;
-    type State = SessionState;
+    //type State = SessionState;
 
     const NAME: &'static str = "session";
 
-    fn new_state(
+    /*fn new_state(
         max_buffer_size: usize,
         reply: oneshot::Sender<Result<Self, ChannelOpenFailureReason>>,
     ) -> Self::State {
         todo!()
-    }
+    }*/
 }
 
 /*

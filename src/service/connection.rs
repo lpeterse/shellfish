@@ -37,10 +37,10 @@ use std::task::{Context, Poll};
 /// itself alive and does nothing. Dropping the connection object will close the connection and
 /// free all resources. It will also terminate all dependant channels (shells and forwardings etc).
 pub struct Connection {
-    close_tx: oneshot::Sender<DisconnectReason>,
-    error_rx: oneshot::Receiver<ConnectionError>,
     request_tx: manyshot::Sender<OutboundRequest>,
     request_rx: manyshot::Receiver<InboundRequest>,
+    close_tx: Option<oneshot::Sender<DisconnectReason>>,
+    error_rx: Option<oneshot::Receiver<ConnectionError>>,
 }
 
 impl Connection {
@@ -51,16 +51,15 @@ impl Connection {
     fn new<C: ConnectionConfig, T: TransportLayer>(config: &C, transport: T) -> Connection {
         let (close_tx, close_rx) = oneshot::channel();
         let (error_tx, error_rx) = oneshot::channel();
-        let (request_in_tx, request_in_rx) = manyshot::new();
-        let (request_out_tx, request_out_rx) = manyshot::new();
-        let future =
-            ConnectionFuture::new(config, transport, close_rx, request_out_tx, request_in_rx);
+        let (request_tx, rx) = manyshot::new();
+        let (tx, request_rx) = manyshot::new();
+        let future = ConnectionFuture::new(config, transport, close_rx, tx, rx);
         async_std::task::spawn(async { error_tx.send(future.await) });
         Connection {
-            close_tx,
-            error_rx,
-            request_tx: request_in_tx,
-            request_rx: request_out_rx,
+            request_tx,
+            request_rx,
+            close_tx: Some(close_tx),
+            error_rx: Some(error_rx),
         }
     }
 
@@ -78,24 +77,28 @@ impl Connection {
         Ok(Self::new(config, transport))
     }
 
-    pub async fn request2(&mut self, name: String, data: Vec<u8>) -> Result<(), ConnectionError> {
+    pub async fn request_global(
+        &mut self,
+        name: String,
+        data: Vec<u8>,
+    ) -> Result<(), ConnectionError> {
         let request = GlobalRequest::new(name, data);
         self.request_tx
             .send(OutboundRequest::Global(request))
             .await
-            .ok_or(ConnectionError::Terminated)
+            .ok_or(ConnectionError::Unknown)
     }
 
-    pub async fn request_want_reply(
+    pub async fn request_global_want_reply(
         &self,
         name: String,
         data: Vec<u8>,
-    ) -> Result<GlobalReply, ConnectionError> {
+    ) -> Result<ReplyFuture, ConnectionError> {
         let (request, reply) = GlobalRequest::new_want_reply(name, data);
         self.request_tx
             .send(OutboundRequest::Global(request))
             .await
-            .ok_or(ConnectionError::Terminated)?;
+            .ok_or(ConnectionError::Unknown)?;
         Ok(reply)
     }
 
@@ -112,15 +115,22 @@ impl Connection {
         let req: OpenRequest<Session<Client>> = OpenRequest { specific: () };
         self.requests.request(req).await
         */
-        todo!()
+        todo!("SESSION 1234")
     }
 
     /// Request a direct-tcpip forwarding on top of an establied connection.
-    pub async fn open_direct_tcpip(
+    pub async fn open_direct_tcpip<S: Into<String>>(
         &mut self,
-        params: DirectTcpIpOpen,
+        dst_host: S, dst_port: u16, src: std::net::SocketAddr,
     ) -> Result<Result<DirectTcpIp, ChannelOpenFailureReason>, ConnectionError> {
         let (tx, rx) = oneshot::channel();
+        let params = DirectTcpIpOpen {
+            dst_host: dst_host.into(),
+            dst_port: dst_port as u32,
+            src_addr: src.ip().to_string(),
+            src_port: src.port() as u32
+        };
+        log::debug!("{:?}", params);
         let req: OpenRequest<DirectTcpIp> = OpenRequest {
             open: params,
             reply: tx,
@@ -128,25 +138,17 @@ impl Connection {
         self.request_tx
             .send(OutboundRequest::OpenDirectTcpIp(req))
             .await
-            .ok_or(ConnectionError::Terminated)?;
-        rx.await.ok_or(ConnectionError::Terminated)
+            .ok_or(ConnectionError::Unknown)?;
+        rx.await.ok_or(ConnectionError::Unknown).map(|x| x.map(DirectTcpIp))
     }
 }
 
 impl Drop for Connection {
     fn drop(&mut self) {
-        let x = std::mem::replace(&mut self.close_tx, oneshot::channel().0);
-        x.send(DisconnectReason::BY_APPLICATION);
-    }
-}
-
-impl Future for Connection {
-    type Output = ConnectionError;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let s = Pin::into_inner(self);
-        let r = ready!(Pin::new(&mut s.error_rx).poll(cx));
-        Poll::Ready(r.unwrap_or(ConnectionError::Terminated))
+        self.close_tx
+            .take()
+            .map(|tx| tx.send(DisconnectReason::BY_APPLICATION))
+            .unwrap_or(())
     }
 }
 
@@ -176,13 +178,24 @@ pub(crate) enum OutboundRequest {
 #[derive(Debug)]
 pub(crate) struct OpenRequest<T: ChannelOpen> {
     open: <T as ChannelOpen>::Open,
-    reply: oneshot::Sender<Result<T, ChannelOpenFailureReason>>,
+    reply: oneshot::Sender<Result<ChannelState42, ChannelOpenFailureReason>>,
 }
 
 impl Stream for Connection {
-    type Item = InboundRequest;
+    type Item = Result<InboundRequest, ConnectionError>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        self.request_rx.poll_receive(cx)
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        let self_: &mut Connection = &mut self.as_mut();
+        if let Some(ref mut error_rx) = self_.error_rx {
+            if let Poll::Ready(Some(x)) = self_.request_rx.poll_receive(cx) {
+                Poll::Ready(Some(Ok(x)))
+            } else {
+                let e = ready!(Pin::new(error_rx).poll(cx));
+                self.error_rx = None;
+                Poll::Ready(Some(Err(e.unwrap_or(ConnectionError::Unknown))))
+            }
+        } else {
+            Poll::Ready(None)
+        }
     }
 }

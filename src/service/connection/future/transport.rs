@@ -59,59 +59,13 @@ pub(crate) fn poll<T: TransportLayer>(
     if let Some(msg) = x.transport.decode() {
         let _: MsgChannelOpen<Session<Client>> = msg;
         log::debug!("Received MSG_CHANNEL_OPEN (session)");
-        /*
-        if x.channel_open.is_none() {
-            let (s, r) = oneshot::channel();
-            let o = CO {
-                sender_channel: msg.sender_channel,
-                initial_window_size: msg.initial_window_size,
-                maximum_packet_size: msg.maximum_packet_size,
-                reply: XY::Session(r),
-            };
-            let req = OpenRequest {
-                open: msg.channel_type,
-                reply: s,
-            };
-            let tx = x.request_tx.clone();
-            let mut future: BoxFuture<()> =
-                Box::pin(async move { tx.send(InboundRequest::OpenSession(req)).await });
-            ready!(Pin::new(&mut future).poll(cx));
-            x.channel_open = Some(o);
-            x.transport.consume();
-            return Poll::Ready(Ok(()));
-        } else {
-            return Poll::Ready(Err(ConnectionError::ChannelOpenUnexpected));
-        }*/
-        todo!()
+        todo!("MSG_CHANNEL_OPEN S")
     }
     // MSG_CHANNEL_OPEN (direct-tcpip)
     if let Some(msg) = x.transport.decode() {
         let _: MsgChannelOpen<DirectTcpIp> = msg;
         log::debug!("Received MSG_CHANNEL_OPEN (direct-tcpip)");
-        /*
-        if x.channel_open.is_none() {
-            let (s, r) = oneshot::channel();
-            let o = CO {
-                sender_channel: msg.sender_channel,
-                initial_window_size: msg.initial_window_size,
-                maximum_packet_size: msg.maximum_packet_size,
-                reply: XY::DirectTcpIp(r),
-            };
-            let req = OpenRequest {
-                open: msg.channel_type,
-                reply: s,
-            };
-            let tx = x.request_tx.clone();
-            let mut future: BoxFuture<()> =
-                Box::pin(async move { tx.send(InboundRequest::OpenDirectTcpIp(req)).await });
-            ready!(Pin::new(&mut future).poll(cx));
-            x.channel_open = Some(o);
-            x.transport.consume();
-            return Poll::Ready(Ok(()));
-        } else {
-            return Poll::Ready(Err(ConnectionError::ChannelOpenUnexpected));
-        }*/
-        todo!()
+        todo!("MSG_CHANNEL_OPEN")
     }
     // MSG_CHANNEL_OPEN_CONFIRMATION
     if let Some(msg) = x.transport.decode_ref() {
@@ -130,9 +84,8 @@ pub(crate) fn poll<T: TransportLayer>(
     if let Some(msg) = x.transport.decode_ref() {
         let _: MsgChannelOpenFailure = msg;
         log::debug!("Received MSG_CHANNEL_OPEN_FAILURE");
-        let channel = x.channels.get(msg.recipient_channel)?;
+        let mut channel = x.channels.remove(msg.recipient_channel)?;
         channel.push_open_failure(msg.reason)?;
-        x.channels.remove(msg.recipient_channel)?;
         x.transport.consume();
         return Poll::Ready(Ok(()));
     }
@@ -176,7 +129,7 @@ pub(crate) fn poll<T: TransportLayer>(
         let _: MsgRequestSuccess = msg;
         log::debug!("Received MSG_REQUEST_SUCCESS");
         if let Some(tx) = x.pending_global.pop_front() {
-            tx.send(Some(msg.data.into()));
+            tx.send(Ok(Some(msg.data.into())));
         } else {
             return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
         }
@@ -188,7 +141,7 @@ pub(crate) fn poll<T: TransportLayer>(
         let _: MsgRequestFailure = msg;
         log::debug!("Received MSG_REQUEST_FAILURE");
         if let Some(tx) = x.pending_global.pop_front() {
-            tx.send(None);
+            tx.send(Ok(None));
         } else {
             return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
         }

@@ -8,11 +8,11 @@ use core::pin::*;
 pub struct GlobalRequest {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
-    pub(crate) reply: Option<oneshot::Sender<Option<Vec<u8>>>>,
+    pub(crate) reply: Option<oneshot::Sender<Result<Option<Vec<u8>>, ConnectionError>>>,
 }
 
 impl GlobalRequest {
-    pub fn new(name: String, data: Vec<u8>) -> Self {
+    pub(crate) fn new(name: String, data: Vec<u8>) -> Self {
         Self {
             name,
             data,
@@ -20,11 +20,22 @@ impl GlobalRequest {
         }
     }
 
-    pub fn new_want_reply(name: String, data: Vec<u8>) -> (Self, GlobalReply) {
+    pub(crate) fn new_want_reply(name: String, data: Vec<u8>) -> (Self, ReplyFuture) {
         let (tx, rx) = oneshot::channel();
         let mut self_ = Self::new(name, data);
         self_.reply = Some(tx);
-        (self_, GlobalReply(rx))
+        (self_, ReplyFuture(rx))
+    }
+
+    pub fn accept(self, data: Vec<u8>) {
+        let mut self_ = self;
+        if let Some(reply) = self_.reply.take() {
+            reply.send(Ok(Some(data)))
+        }
+    }
+
+    pub fn reject(self) {
+        drop(self)
     }
 }
 
@@ -37,15 +48,23 @@ impl GlobalRequest {
     }
 }
 
-#[derive(Debug)]
-pub struct GlobalReply(oneshot::Receiver<Option<Vec<u8>>>);
+impl Drop for GlobalRequest {
+    fn drop(&mut self) {
+        if let Some(reply) = self.reply.take() {
+            reply.send(Ok(None))
+        }
+    }
+}
 
-impl Future for GlobalReply {
+#[derive(Debug)]
+pub struct ReplyFuture(oneshot::Receiver<Result<Option<Vec<u8>>, ConnectionError>>);
+
+impl Future for ReplyFuture {
     type Output = Result<Option<Vec<u8>>, ConnectionError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         Pin::new(&mut self.as_mut().0)
             .poll(cx)
-            .map(|x| x.ok_or(ConnectionError::Terminated))
+            .map(|x| x.unwrap_or(Err(ConnectionError::Unknown)))
     }
 }
