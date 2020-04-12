@@ -12,7 +12,6 @@ use super::super::*;
 use super::*;
 use crate::client::Client;
 
-use crate::buffer::*;
 use crate::codec::*;
 
 /// A session is a remote execution of a program.  The program may be a
@@ -22,6 +21,16 @@ use crate::codec::*;
 #[derive(Debug)]
 pub struct Session<R: Role> {
     role: std::marker::PhantomData<R>,
+    channel: ChannelState,
+}
+
+impl<R: Role> Session<R> {
+    pub(crate) fn new(channel: ChannelState) -> Self {
+        Self {
+            role: Default::default(),
+            channel,
+        }
+    }
 }
 
 impl Session<Client> {
@@ -42,6 +51,10 @@ impl Session<Client> {
         let req = SessionRequest::SubsystemRequest(SubsystemRequest { subsystem });
         Ok(Process::<Client>(self.request(req).await?))
     }
+
+    pub async fn request_env(&self) -> Result<(), ConnectionError> {
+        Ok(())
+    } 
 
     async fn request(self, request: SessionRequest) -> Result<Self, ConnectionError> {
         /*
@@ -86,47 +99,14 @@ impl<R: Role> ChannelOpen for Session<R> {
 
 impl<R: Role> Channel for Session<R> {
     type Request = SessionRequest;
-    //type State = SessionState;
 
     const NAME: &'static str = "session";
-
-    /*fn new_state(
-        max_buffer_size: usize,
-        reply: oneshot::Sender<Result<Self, ChannelOpenFailureReason>>,
-    ) -> Self::State {
-        todo!()
-    }*/
 }
 
-/*
-match channel.shared() {
-    SharedState::Session(ref st) => {
-        let mut state = st.lock().unwrap();
-        match msg.request {
-            "env" => {
-                let env = BDecoder::decode(msg.specific)
-                    .ok_or(TransportError::DecoderError)?;
-                //state.add_env(env); FIXME
-            }
-            "exit-status" => {
-                let status = BDecoder::decode(msg.specific)
-                    .ok_or(TransportError::DecoderError)?;
-                state.set_exit_status(status);
-            }
-            "exit-signal" => {
-                let signal = BDecoder::decode(msg.specific)
-                    .ok_or(TransportError::DecoderError)?;
-                state.set_exit_signal(signal);
-            }
-            _ => {
-                if msg.want_reply {
-                    let msg = MsgChannelFailure {
-                        recipient_channel: channel.remote_channel(),
-                    };
-                    ready!(x.transport.poll_send(cx, &msg))?;
-                    log::debug!("Sent MSG_CHANNEL_FAILURE");
-                }
-            }
-        }
+impl<R: Role> Drop for Session<R> {
+    fn drop(&mut self) {
+        let mut x = self.channel.0.lock().unwrap();
+        x.close_tx = Some(false);
+        x.wake_inner_task();
     }
-}*/
+}

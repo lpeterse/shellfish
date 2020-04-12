@@ -263,9 +263,6 @@ impl ChannelStateInner {
     }
 
     fn register_inner_task(&mut self, cx: &mut Context) {
-        log::debug!("WAKER {:?}", cx.waker());
-        log::debug!("WAKER {:?}", cx.waker());
-        log::debug!("WAKER {:?}", cx.waker().clone());
         if let Some(ref waker) = self.inner_task {
             if waker.will_wake(cx.waker()) {
                 return;

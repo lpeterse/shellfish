@@ -13,6 +13,16 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
     let src = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8080);
+
+    match conn.open_session().await? {
+        Ok(session) => {
+            log::debug!("SESSION CONFIRMED: {:?}", session);
+        }
+        Err(reason) => {
+            log::debug!("SESSION FAILURE: {:?}", reason);
+        }
+    }
+
     match conn.open_direct_tcpip("localhost", 22, src).await? {
         Ok(mut ch) => {
             log::debug!("CONFIRM {:?}", ch);

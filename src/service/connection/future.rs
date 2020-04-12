@@ -156,32 +156,47 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                         }
                     }
                 }
-                OutboundRequest::OpenSession(_) => todo!(),
-                OutboundRequest::OpenDirectTcpIp(x) => {
-                    if let Some(local_id) = self.channels.get_free_id() {
-                        let local_ws = self.channel_max_buffer_size as u32;
-                        let local_ps = self.channel_max_packet_size as u32;
-                        let msg = MsgChannelOpen::<DirectTcpIp> {
-                            sender_channel: local_id,
-                            initial_window_size: local_ws,
-                            maximum_packet_size: local_ps,
-                            channel_type: x.open.clone(),
-                        };
+                OutboundRequest::OpenSession(x) => {
+                    if let Some(id) = self.channels.get_free_id() {
+                        let ws = self.channel_max_buffer_size as u32;
+                        let ps = self.channel_max_packet_size as u32;
+                        let msg =
+                            MsgChannelOpen::<Session<Client>>::new(id, ws, ps, x.open.clone());
                         match self.transport.poll_send(cx, &msg) {
-                            Poll::Ready(Ok(())) => {
-                                let st = ChannelState::new(local_id, local_ws, local_ps, x.reply);
-                                self.channels.insert(local_id, st)?;
-                            }
                             Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+                            Poll::Ready(Ok(())) => {
+                                let st = ChannelState::new(id, ws, ps, x.reply);
+                                self.channels.insert(id, st)?;
+                            }
+                            Poll::Pending => {
+                                self.request_rx.0 = Some(OutboundRequest::OpenSession(x));
+                                return Poll::Pending;
+                            }
+                        }
+                    } else {
+                        let e = ChannelOpenFailureReason::RESOURCE_SHORTAGE;
+                        x.reply.send(Ok(Err(e)));
+                    }
+                }
+                OutboundRequest::OpenDirectTcpIp(x) => {
+                    if let Some(id) = self.channels.get_free_id() {
+                        let ws = self.channel_max_buffer_size as u32;
+                        let ps = self.channel_max_packet_size as u32;
+                        let msg = MsgChannelOpen::<DirectTcpIp>::new(id, ws, ps, x.open.clone());
+                        match self.transport.poll_send(cx, &msg) {
+                            Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+                            Poll::Ready(Ok(())) => {
+                                let st = ChannelState::new(id, ws, ps, x.reply);
+                                self.channels.insert(id, st)?;
+                            }
                             Poll::Pending => {
                                 self.request_rx.0 = Some(OutboundRequest::OpenDirectTcpIp(x));
                                 return Poll::Pending;
                             }
                         }
                     } else {
-                        x.reply
-                            .send(Ok(Err(ChannelOpenFailureReason::RESOURCE_SHORTAGE)));
-                        continue;
+                        let e = ChannelOpenFailureReason::RESOURCE_SHORTAGE;
+                        x.reply.send(Ok(Err(e)));
                     }
                 }
             }

@@ -9,6 +9,17 @@ pub(crate) struct MsgChannelOpen<T: Channel> {
     pub channel_type: T::Open,
 }
 
+impl<T: Channel> MsgChannelOpen<T> {
+    pub fn new(id: u32, ws: u32, ps: u32, params: T::Open) -> Self {
+        Self {
+            sender_channel: id,
+            initial_window_size: ws,
+            maximum_packet_size: ps,
+            channel_type: params,
+        }
+    }
+}
+
 impl<'a, T: Channel> Message for MsgChannelOpen<T> {
     const NUMBER: u8 = 90;
 }

@@ -111,11 +111,18 @@ impl Connection {
     pub async fn open_session(
         &mut self,
     ) -> Result<Result<Session<Client>, ChannelOpenFailureReason>, ConnectionError> {
-        /*
-        let req: OpenRequest<Session<Client>> = OpenRequest { specific: () };
-        self.requests.request(req).await
-        */
-        todo!("SESSION 1234")
+        let (tx, rx) = oneshot::channel();
+        let req: OpenRequest<Session<Client>> = OpenRequest {
+            open: (),
+            reply: tx,
+        };
+        self.request_tx
+            .send(OutboundRequest::OpenSession(req))
+            .await
+            .ok_or(ConnectionError::Unknown)?;
+        rx.await
+            .unwrap_or(Err(ConnectionError::Unknown))
+            .map(|x| x.map(Session::new))
     }
 
     /// Request a direct-tcpip forwarding on top of an establied connection.
