@@ -7,6 +7,15 @@ pub(crate) struct MsgChannelData<'a> {
     pub data: &'a [u8],
 }
 
+impl<'a> MsgChannelData<'a> {
+    pub fn new(recipient_channel: u32, data: &'a [u8]) -> Self {
+        Self {
+            recipient_channel,
+            data,
+        }
+    }
+}
+
 impl<'a> Message for MsgChannelData<'a> {
     const NUMBER: u8 = 94;
 }

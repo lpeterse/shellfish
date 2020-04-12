@@ -1,4 +1,3 @@
-pub(crate) mod buffer;
 pub(crate) mod buffered;
 pub(crate) mod cipher;
 pub(crate) mod config;
@@ -24,7 +23,6 @@ pub(crate) mod session_id;
 pub(crate) mod socket;
 pub(crate) mod transceiver;
 
-pub use self::buffer::*;
 pub use self::buffered::*;
 pub use self::config::*;
 pub use self::error::*;

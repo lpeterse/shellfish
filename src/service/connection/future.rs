@@ -1,7 +1,3 @@
-mod channels;
-mod requests;
-mod transport;
-
 use super::channel::*;
 use super::*;
 
@@ -56,7 +52,6 @@ impl<T: TransportLayer> ConnectionFuture<T> {
 
     fn poll_events(&mut self, cx: &mut Context) -> Poll<ConnectionError> {
         loop {
-            log::debug!("FOOO");
             // Loop over all event sources until none of it makes progress anymore.
             // The transport shall not be flushed, but might be written to. A consolidated flush
             // will be performed afterwards. This is benefecial for networking performance as it
@@ -64,7 +59,6 @@ impl<T: TransportLayer> ConnectionFuture<T> {
             // and impedes traffic analysis.
             let mut made_progress = true;
             while made_progress {
-                log::debug!("ASHDAJH");
                 made_progress = false;
                 // Poll for local connection close
                 match Pin::new(&mut self.close).poll(cx) {
@@ -85,15 +79,14 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                     Poll::Ready(Err(e)) => return Poll::Ready(e),
                     _ => (),
                 }
-                log::debug!("2738947");
                 // Poll for incoming messages
-                match transport::poll(self, cx) {
+                match self.poll_transport(cx) {
                     Poll::Pending => (),
                     Poll::Ready(Ok(())) => made_progress = true,
                     Poll::Ready(Err(e)) => return Poll::Ready(e),
                 }
                 // Poll for channel events
-                match channels::poll(self, cx) {
+                match self.poll_channels(cx) {
                     Poll::Pending => (),
                     Poll::Ready(Ok(())) => made_progress = true,
                     Poll::Ready(Err(e)) => return Poll::Ready(e),
@@ -118,31 +111,24 @@ impl<T: TransportLayer> ConnectionFuture<T> {
         }
     }
 
-    /// Deliver a `ConnectionError` to all dependant users of this this connection (tasks waiting
-    /// on connection requests or channel I/O).
-    ///
-    /// This shall be the last thing to happen and has great similarity with `Drop` except that
-    /// it distributes an error.
-    fn terminate(&mut self, e: ConnectionError) {
-        if let Some(x) = self.request_rx.0.take() {
-            match x {
-                OutboundRequest::Global(mut x) => {
-                    x.reply.take().map(|x| x.send(Err(e))).unwrap_or(())
+    fn poll_channels(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        // Iterate over all channel slots and poll each present channel.
+        // Remove channel if the futures is ready (close has been sent _and_ received).
+        for slot in self.channels.iter_mut() {
+            if let Some(channel) = slot {
+                match channel.poll(cx, &mut self.transport) {
+                    Poll::Pending => (),
+                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                    Poll::Ready(Ok(())) => *slot = None,
                 }
-                OutboundRequest::OpenSession(_) => todo!(),
-                OutboundRequest::OpenDirectTcpIp(_) => todo!(),
             }
         }
-        while let Some(x) = self.pending_global.pop_front() {
-            x.send(Err(e))
-        }
-        // FIXME tx
-        self.channels.terminate(e);
+
+        Poll::Pending
     }
 
     fn poll_outbound_requests(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
         loop {
-            log::debug!("ASHD");
             let request = if let Some(request) = self.request_rx.0.take() {
                 request
             } else {
@@ -172,22 +158,19 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                 }
                 OutboundRequest::OpenSession(_) => todo!(),
                 OutboundRequest::OpenDirectTcpIp(x) => {
-                    log::debug!("OPEN {:?}", x);
-                    if let Some(id) = self.channels.get_free_id() {
+                    if let Some(local_id) = self.channels.get_free_id() {
                         let local_ws = self.channel_max_buffer_size as u32;
                         let local_ps = self.channel_max_packet_size as u32;
                         let msg = MsgChannelOpen::<DirectTcpIp> {
-                            sender_channel: id,
+                            sender_channel: local_id,
                             initial_window_size: local_ws,
                             maximum_packet_size: local_ps,
                             channel_type: x.open.clone(),
                         };
                         match self.transport.poll_send(cx, &msg) {
                             Poll::Ready(Ok(())) => {
-                                log::debug!("SENT {}", id);
-                                let st = ChannelState42::new_state(local_ws, local_ps, x.reply);
-                                self.channels.insert(id, st)?;
-                                log::debug!("INSERTED {}", id);
+                                let st = ChannelState::new(local_id, local_ws, local_ps, x.reply);
+                                self.channels.insert(local_id, st)?;
                             }
                             Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
                             Poll::Pending => {
@@ -197,37 +180,11 @@ impl<T: TransportLayer> ConnectionFuture<T> {
                         }
                     } else {
                         x.reply
-                            .send(Err(ChannelOpenFailureReason::RESOURCE_SHORTAGE));
+                            .send(Ok(Err(ChannelOpenFailureReason::RESOURCE_SHORTAGE)));
                         continue;
                     }
                 }
             }
-        }
-    }
-
-    fn push_global_request(
-        &mut self,
-        cx: &mut Context,
-        name: String,
-        data: Vec<u8>,
-        want_reply: bool,
-    ) -> Poll<Result<(), ConnectionError>> {
-        let mut req = GlobalRequest {
-            name,
-            data,
-            reply: None,
-        };
-        if want_reply {
-            let (tx, rx) = oneshot::channel();
-            req.reply = Some(tx);
-            let req = InboundRequest::Global(req);
-            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Unknown)?;
-            self.global_in_rx.1.push_back(rx);
-            Poll::Ready(Ok(()))
-        } else {
-            let req = InboundRequest::Global(req);
-            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Unknown)?;
-            Poll::Ready(Ok(()))
         }
     }
 
@@ -269,6 +226,207 @@ impl<T: TransportLayer> ConnectionFuture<T> {
 
         Poll::Ready(Ok(()))
     }
+
+    fn poll_transport(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        ready!(self.transport.poll_receive(cx))?;
+        // MSG_CHANNEL_DATA
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgChannelData = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_DATA ({} bytes)",
+                msg.recipient_channel,
+                msg.data.len()
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_data(msg.data)?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_EXTENDED_DATA
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgChannelExtendedData = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_EXTENDED_DATA ({} bytes)",
+                msg.recipient_channel,
+                msg.data.len()
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_extended_data(msg.data_type_code, msg.data)?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_WINDOW_ADJUST
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgChannelWindowAdjust = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST",
+                msg.recipient_channel
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_window_adjust(msg.bytes_to_add)?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_EOF
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgChannelEof = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_EOF",
+                msg.recipient_channel
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_eof()?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_CLOSE
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgChannelClose = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_CLOSE",
+                msg.recipient_channel
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_close()?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_OPEN (session)
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgChannelOpen<Session<Client>> = msg;
+            log::debug!("Received MSG_CHANNEL_OPEN (session)",);
+            todo!("MSG_CHANNEL_OPEN S")
+        }
+        // MSG_CHANNEL_OPEN (direct-tcpip)
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgChannelOpen<DirectTcpIp> = msg;
+            log::debug!("Received MSG_CHANNEL_OPEN (direct-tcpip)",);
+            todo!("MSG_CHANNEL_OPEN")
+        }
+        // MSG_CHANNEL_OPEN_CONFIRMATION
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgChannelOpenConfirmation = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION",
+                msg.recipient_channel
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_open_confirmation(
+                msg.sender_channel,
+                msg.initial_window_size,
+                msg.maximum_packet_size,
+            )?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_OPEN_FAILURE
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgChannelOpenFailure = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_OPEN_FAILURE",
+                msg.recipient_channel
+            );
+            let mut channel = self.channels.remove(msg.recipient_channel)?;
+            channel.push_open_failure(msg.reason)?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_REQUEST
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgChannelRequest<&[u8]> = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_REQUEST: {}",
+                msg.recipient_channel,
+                msg.request
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_request(msg.specific)?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_SUCCESS
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgChannelSuccess = msg;
+            log::debug!(
+                "Channel {}: Received MSG_CHANNEL_SUCCESS",
+                msg.recipient_channel
+            );
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_success()?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_CHANNEL_FAILURE
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgChannelFailure = msg;
+            log::debug!("Received MSG_CHANNEL_FAILURE");
+            let channel = self.channels.get(msg.recipient_channel)?;
+            channel.push_failure()?;
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_GLOBAL_REQUEST
+        if let Some(msg) = self.transport.decode() {
+            let _: MsgGlobalRequest = msg;
+            log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
+            ready!(self.push_global_request(cx, msg.name, msg.data, msg.want_reply));
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_REQUEST_SUCCESS
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgRequestSuccess = msg;
+            log::debug!("Received MSG_REQUEST_SUCCESS");
+            if let Some(tx) = self.pending_global.pop_front() {
+                tx.send(Ok(Some(msg.data.into())));
+            } else {
+                return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
+            }
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // MSG_REQUEST_FAILURE
+        if let Some(msg) = self.transport.decode_ref() {
+            let _: MsgRequestFailure = msg;
+            log::debug!("Received MSG_REQUEST_FAILURE");
+            if let Some(tx) = self.pending_global.pop_front() {
+                tx.send(Ok(None));
+            } else {
+                return Poll::Ready(Err(ConnectionError::GlobalRequestReplyUnexpected));
+            }
+            self.transport.consume();
+            return Poll::Ready(Ok(()));
+        }
+        // Otherwise try to send MSG_UNIMPLEMENTED and return error.
+        self.transport.send_unimplemented(cx);
+        Poll::Ready(Err(TransportError::MessageUnexpected.into()))
+    }
+
+    fn push_global_request(
+        &mut self,
+        cx: &mut Context,
+        name: String,
+        data: Vec<u8>,
+        want_reply: bool,
+    ) -> Poll<Result<(), ConnectionError>> {
+        let mut req = GlobalRequest {
+            name,
+            data,
+            reply: None,
+        };
+        if want_reply {
+            let (tx, rx) = oneshot::channel();
+            req.reply = Some(tx);
+            let req = InboundRequest::Global(req);
+            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Unknown)?;
+            self.global_in_rx.1.push_back(rx);
+            Poll::Ready(Ok(()))
+        } else {
+            let req = InboundRequest::Global(req);
+            ready!(self.request_tx.poll_send(cx, req)).ok_or(ConnectionError::Unknown)?;
+            Poll::Ready(Ok(()))
+        }
+    }
 }
 
 impl<T: TransportLayer> Future for ConnectionFuture<T> {
@@ -280,5 +438,29 @@ impl<T: TransportLayer> Future for ConnectionFuture<T> {
         log::debug!("Connection terminated due to {:?}", e);
         self_.terminate(e);
         Poll::Ready(e)
+    }
+}
+
+impl<T: TransportLayer> Terminate for ConnectionFuture<T> {
+    /// Deliver a `ConnectionError` to all dependant users of this this connection (tasks waiting
+    /// on connection requests or channel I/O).
+    ///
+    /// This shall be the last thing to happen and has great similarity with `Drop` except that
+    /// it distributes an error.
+    fn terminate(&mut self, e: ConnectionError) {
+        if let Some(x) = self.request_rx.0.take() {
+            match x {
+                OutboundRequest::Global(mut x) => {
+                    x.reply.take().map(|x| x.send(Err(e))).unwrap_or(())
+                }
+                OutboundRequest::OpenSession(_) => todo!(),
+                OutboundRequest::OpenDirectTcpIp(_) => todo!(),
+            }
+        }
+        while let Some(x) = self.pending_global.pop_front() {
+            x.send(Err(e))
+        }
+        // FIXME tx
+        self.channels.terminate(e);
     }
 }

@@ -3,7 +3,7 @@ use super::*;
 use std::slice::IterMut;
 
 #[derive(Debug)]
-pub(crate) struct Channels<T = ChannelState42> {
+pub(crate) struct Channels<T = ChannelState> {
     capacity: usize,
     elements: Vec<Option<T>>,
 }
@@ -25,7 +25,6 @@ impl<T> Channels<T> {
 
     pub fn get_free_id(&mut self) -> Option<u32> {
         for (i, c) in self.elements.iter().enumerate() {
-            log::debug!("ENUM {}", i);
             if c.is_none() {
                 return Some(i as u32);
             }
@@ -51,33 +50,22 @@ impl<T> Channels<T> {
     pub fn remove(&mut self, id: u32) -> Result<T, ConnectionError> {
         if let Some(x) = self.elements.get_mut(id as usize) {
             if let Some(ch) = x.take() {
-                return Ok(ch)
+                return Ok(ch);
             }
         }
         Err(ConnectionError::ChannelIdInvalid)
     }
 
-    pub fn iter<'a>(&'a mut self) -> ChannelsIterator<'a, T> {
-        ChannelsIterator(self.elements.iter_mut())
-    }
-
-    pub fn terminate(&mut self, _e: ConnectionError) {
-        // FIXME
-        //todo!("TERMINATE")
+    pub fn iter_mut<'a>(&'a mut self) -> IterMut<'a, Option<T>> {
+        self.elements.iter_mut()
     }
 }
 
-pub struct ChannelsIterator<'a, T>(IterMut<'a, Option<T>>);
-
-impl<'a, T> Iterator for ChannelsIterator<'a, T> {
-    type Item = &'a mut T;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match self.0.next() {
-                None => return None,
-                Some(None) => continue,
-                Some(Some(t)) => return Some(t),
+impl Terminate for Channels {
+    fn terminate(&mut self, e: ConnectionError) {
+        for slot in self.iter_mut() {
+            if let Some(channel) = slot {
+                channel.terminate(e)
             }
         }
     }

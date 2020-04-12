@@ -8,7 +8,10 @@ pub enum ConnectionError {
     GlobalRequestReplyUnexpected,
     ChannelOpenFailure(ChannelOpenFailureReason),
     ChannelOpenUnexpected,
+    ChannelWindowAdjustUnexpected,
+    ChannelWindowAdjustOverflow,
     ChannelIdInvalid,
+    ChannelExtendedDataCodeInvalid,
     ChannelRequestFailure,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
@@ -20,6 +23,10 @@ pub enum ConnectionError {
     RequestReceiverDropped,
     RequestUnexpectedResponse,
     Unknown
+}
+
+pub (crate) trait Terminate {
+    fn terminate(&mut self, e: ConnectionError);
 }
 
 impl From<std::io::Error> for ConnectionError {

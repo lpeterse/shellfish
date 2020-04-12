@@ -6,6 +6,12 @@ pub(crate) struct MsgChannelClose {
     pub recipient_channel: u32,
 }
 
+impl MsgChannelClose {
+    pub fn new(recipient_channel: u32) -> Self {
+        Self { recipient_channel }
+    }
+}
+
 impl Message for MsgChannelClose {
     const NUMBER: u8 = 97;
 }

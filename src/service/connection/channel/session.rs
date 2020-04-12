@@ -1,10 +1,8 @@
-mod channel;
 mod exit;
 mod process;
 mod request;
 mod signal;
 
-pub(crate) use self::channel::*;
 pub(crate) use self::exit::*;
 pub(crate) use self::process::*;
 pub(crate) use self::request::*;
@@ -24,7 +22,6 @@ use crate::codec::*;
 #[derive(Debug)]
 pub struct Session<R: Role> {
     role: std::marker::PhantomData<R>,
-    pub(crate) state: SessionState,
 }
 
 impl Session<Client> {
@@ -47,6 +44,7 @@ impl Session<Client> {
     }
 
     async fn request(self, request: SessionRequest) -> Result<Self, ConnectionError> {
+        /*
         let mut state = (self.state)
             .0
             .lock()
@@ -76,18 +74,8 @@ impl Session<Client> {
         })
         .await?;
         Ok(self)
-    }
-}
-
-impl<R: Role> Drop for Session<R> {
-    fn drop(&mut self) {
-        match (self.state).0.lock() {
-            Err(_) => (),
-            Ok(mut state) => {
-                state.outer_done = Some(());
-                //state.inner_wake(); // FIXME
-            }
-        }
+        */
+        todo!()
     }
 }
 

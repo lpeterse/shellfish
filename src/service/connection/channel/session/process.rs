@@ -40,6 +40,7 @@ impl<R: Role> Stream for Process<R> {
     type Item = Result<ProcessEvent, ConnectionError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
+        /*
         let mut state = ((self.0).state)
             .0
             .lock()
@@ -51,7 +52,7 @@ impl<R: Role> Stream for Process<R> {
         }
         if let Some(done) = state.inner_done.take() {
             Err(done)?
-        }
+        }*/
 
         Poll::Pending
     }

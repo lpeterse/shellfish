@@ -21,11 +21,15 @@ async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
             while ch.read(&mut buf).await? > 0 {
                 log::debug!("Received {:?}", buf);
             }
+            log::debug!("EOF");
         }
         Err(reason) => {
             log::debug!("FAILURE {:?}", reason);
         }
     }
+
+    log::debug!("Waiting for connection requests");
+
     while let Some(request) = conn.next().await {
         match request? {
             InboundRequest::Global(r) => {

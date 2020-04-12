@@ -121,16 +121,17 @@ impl Connection {
     /// Request a direct-tcpip forwarding on top of an establied connection.
     pub async fn open_direct_tcpip<S: Into<String>>(
         &mut self,
-        dst_host: S, dst_port: u16, src: std::net::SocketAddr,
+        dst_host: S,
+        dst_port: u16,
+        src: std::net::SocketAddr,
     ) -> Result<Result<DirectTcpIp, ChannelOpenFailureReason>, ConnectionError> {
         let (tx, rx) = oneshot::channel();
         let params = DirectTcpIpOpen {
             dst_host: dst_host.into(),
             dst_port: dst_port as u32,
             src_addr: src.ip().to_string(),
-            src_port: src.port() as u32
+            src_port: src.port() as u32,
         };
-        log::debug!("{:?}", params);
         let req: OpenRequest<DirectTcpIp> = OpenRequest {
             open: params,
             reply: tx,
@@ -139,7 +140,9 @@ impl Connection {
             .send(OutboundRequest::OpenDirectTcpIp(req))
             .await
             .ok_or(ConnectionError::Unknown)?;
-        rx.await.ok_or(ConnectionError::Unknown).map(|x| x.map(DirectTcpIp))
+        rx.await
+            .unwrap_or(Err(ConnectionError::Unknown))
+            .map(|x| x.map(DirectTcpIp))
     }
 }
 
@@ -178,7 +181,7 @@ pub(crate) enum OutboundRequest {
 #[derive(Debug)]
 pub(crate) struct OpenRequest<T: ChannelOpen> {
     open: <T as ChannelOpen>::Open,
-    reply: oneshot::Sender<Result<ChannelState42, ChannelOpenFailureReason>>,
+    reply: oneshot::Sender<Result<Result<ChannelState, ChannelOpenFailureReason>, ConnectionError>>,
 }
 
 impl Stream for Connection {
