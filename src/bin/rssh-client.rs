@@ -1,11 +1,10 @@
 use rssh::client::*;
-use rssh::service::connection::future::*;
 use rssh::service::connection::*;
 use rssh::transport::*;
 
+use async_std::io::ReadExt;
 use async_std::net::TcpStream;
 use async_std::stream::StreamExt;
-use async_std::io::ReadExt;
 
 use futures_timer::Delay;
 use rssh::util::oneshot;
@@ -17,7 +16,7 @@ async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
     match conn.open_direct_tcpip("localhost", 22, src).await? {
         Ok(mut ch) => {
             log::debug!("CONFIRM {:?}", ch);
-            let mut buf: [u8;32] = [0;32];
+            let mut buf: [u8; 32] = [0; 32];
             while ch.read(&mut buf).await? > 0 {
                 log::debug!("Received {:?}", buf);
             }
@@ -65,7 +64,11 @@ fn main() {
         std::mem::size_of::<Transport<Client, TcpStream>>(),
     );
     log::error!("ClientKex: {}", std::mem::size_of::<ClientKex>(),);
-    log::error!("Delay: {}", std::mem::size_of::<Delay>(),);
+    log::error!("Waker: {}", std::mem::size_of::<async_std::task::Waker>(),);
+    log::error!(
+        "ChannelStateInner: {}",
+        std::mem::size_of::<ChannelStateInner>(),
+    );
     log::error!(
         "ConnectionFuture: {}",
         std::mem::size_of::<ConnectionFuture<Transport<Client, TcpStream>>>()

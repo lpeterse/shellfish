@@ -118,6 +118,13 @@ impl Buffer {
         len
     }
 
+    /*
+    pub fn write(&mut self, buf: &[u8]) -> usize {
+        let len = std::cmp::min(buf.len(), self.capacity() - self.window.len());
+        self.write_all(&buf[..len]);
+        len
+    }*/
+
     pub fn write_all(&mut self, buf: &[u8]) {
         if self.available() < buf.len() {
             let required_capacity = self.len() + buf.len();

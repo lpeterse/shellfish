@@ -7,7 +7,6 @@ pub use self::session::*;
 use super::*;
 use crate::buffer::*;
 
-use async_std::io::Read;
 use async_std::task::Poll;
 use async_std::task::Waker;
 use std::sync::{Arc, Mutex};
@@ -34,7 +33,7 @@ type OpenReply =
 pub(crate) struct ChannelState(Arc<Mutex<ChannelStateInner>>);
 
 #[derive(Debug)]
-pub(crate) struct ChannelStateInner {
+pub struct ChannelStateInner {
     local_id: u32,
     local_window_size: u32,
     local_max_window_size: u32,
@@ -46,7 +45,6 @@ pub(crate) struct ChannelStateInner {
 
     eof_rx: bool,
     eof_tx: Option<bool>,
-
     close_rx: bool,
     close_tx: Option<bool>,
 
@@ -67,7 +65,7 @@ impl ChannelState {
         local_id: u32,
         local_max_window_size: u32,
         local_max_packet_size: u32,
-        reply: oneshot::Sender<Result<Result<Self, ChannelOpenFailureReason>, ConnectionError>>,
+        reply: OpenReply,
     ) -> Self {
         log::debug!(
             "Channel {}: Created (mws: {}, mps: {})",
@@ -217,7 +215,7 @@ impl ChannelState {
         use std::ops::DerefMut;
         let mut guard = self.0.lock().map_err(|_| ConnectionError::Unknown)?;
         let x: &mut ChannelStateInner = guard.deref_mut();
-        if x.open_reply.is_none() {
+        if x.close_tx != Some(true) {
             while !x.data_out.is_empty() {
                 let len = std::cmp::min(x.remote_max_packet_size, x.data_out.len() as u32);
                 let len = std::cmp::min(x.remote_window_size, len);
@@ -245,12 +243,13 @@ impl ChannelState {
                 log::debug!("Channel {}: Sent MSG_CHANNEL_CLOSE", x.local_id);
                 x.close_tx = Some(true);
             }
-            if x.close_rx && x.close_tx == Some(true) {
-                return Poll::Ready(Ok(()));
-            }
         }
-        x.register_inner_task(cx);
-        Poll::Pending
+        if x.close_tx == Some(true) && x.close_rx {
+            Poll::Ready(Ok(()))
+        } else {
+            x.register_inner_task(cx);
+            Poll::Pending
+        }
     }
 }
 
@@ -264,6 +263,9 @@ impl ChannelStateInner {
     }
 
     fn register_inner_task(&mut self, cx: &mut Context) {
+        log::debug!("WAKER {:?}", cx.waker());
+        log::debug!("WAKER {:?}", cx.waker());
+        log::debug!("WAKER {:?}", cx.waker().clone());
         if let Some(ref waker) = self.inner_task {
             if waker.will_wake(cx.waker()) {
                 return;
@@ -282,11 +284,15 @@ impl ChannelStateInner {
     }
 
     fn wake_inner_task(&mut self) {
-        self.inner_task.take().map(Waker::wake).unwrap_or(())
+        if let Some(ref task) = self.inner_task {
+            task.wake_by_ref();
+        }
     }
 
     fn wake_outer_task(&mut self) {
-        self.outer_task.take().map(Waker::wake).unwrap_or(())
+        if let Some(ref task) = self.outer_task {
+            task.wake_by_ref();
+        }
     }
 }
 
@@ -310,7 +316,7 @@ impl Terminate for ChannelStateInner {
             reply.send(Err(e));
         } else {
             self.inner_error = Some(e);
-            self.outer_task.take().map(Waker::wake).unwrap_or(());
+            self.wake_outer_task();
         }
     }
 }

@@ -2,7 +2,7 @@ mod channel;
 mod channels;
 mod config;
 mod error;
-pub mod future;
+mod future;
 mod global;
 mod msg;
 
@@ -11,9 +11,9 @@ pub use self::error::*;
 pub use self::future::*;
 pub use self::global::*;
 
-use self::channel::*;
+pub use self::channel::*;
 use self::channels::*;
-use self::future::ConnectionFuture;
+pub use self::future::ConnectionFuture;
 use self::msg::*;
 use super::*;
 

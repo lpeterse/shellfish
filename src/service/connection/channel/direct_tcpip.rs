@@ -4,6 +4,9 @@ use super::*;
 
 pub(crate) use self::open::*;
 
+use async_std::io::{Read, Write};
+use std::io::Result;
+
 #[derive(Debug)]
 pub struct DirectTcpIp(pub(crate) ChannelState);
 pub enum DirectTcpIpRequest {}
@@ -60,6 +63,53 @@ impl Read for DirectTcpIp {
         } else {
             x.register_outer_task(cx);
             Poll::Pending
+        }
+    }
+}
+
+impl Write for DirectTcpIp {
+    fn poll_write(self: Pin<&mut Self>, cx: &mut Context, buf: &[u8]) -> Poll<Result<usize>> {
+        let mut x = (self.0).0.lock().unwrap();
+        let l1 = x.data_out.len();
+        let l2 = x.local_max_window_size as usize;
+        assert!(l1 <= l2);
+        let len = l2 - l1;
+        if len == 0 {
+            x.register_outer_task(cx);
+            Poll::Pending
+        } else {
+            x.data_out.write_all(&buf[..len]);
+            Poll::Ready(Ok(len))
+        }
+    }
+
+    /// Flushing just waits until all data has been sent.
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<()>> {
+        let mut x = (self.0).0.lock().unwrap();
+        if x.data_out.is_empty() && x.eof_tx != Some(false) {
+            Poll::Ready(Ok(()))
+        } else {
+            x.register_outer_task(cx);
+            Poll::Pending
+        }
+    }
+
+    /// Closing the stream shall be translated to eof (meaning that there won't be any more data).
+    /// The internal connection handler will first transmit any pending data and then signal eof.
+    /// Close gets sent automatically on drop (after sending pending data and eventually eof).
+    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<()>> {
+        let mut x = (self.0).0.lock().unwrap();
+        match x.eof_tx {
+            Some(true) => Poll::Ready(Ok(())),
+            Some(false) => {
+                x.register_outer_task(cx);
+                Poll::Pending
+            }
+            None => {
+                x.eof_tx = Some(false);
+                x.wake_inner_task();
+                Poll::Ready(Ok(()))
+            }
         }
     }
 }
