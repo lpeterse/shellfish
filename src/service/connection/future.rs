@@ -30,8 +30,8 @@ pub struct ConnectionFuture<T: TransportLayer> {
 }
 
 impl<T: TransportLayer> ConnectionFuture<T> {
-    pub(crate) fn new<C: ConnectionConfig>(
-        config: &C,
+    pub(crate) fn new(
+        config: &Arc<ConnectionConfig>,
         transport: T,
         close: oneshot::Receiver<DisconnectReason>,
         request_tx: manyshot::Sender<InboundRequest>,
@@ -40,9 +40,9 @@ impl<T: TransportLayer> ConnectionFuture<T> {
         Self {
             transport,
             close,
-            channel_max_buffer_size: config.channel_max_buffer_size(),
-            channel_max_packet_size: config.channel_max_packet_size(),
-            channels: Channels::new(config.channel_max_count()),
+            channel_max_buffer_size: config.channel_max_buffer_size,
+            channel_max_packet_size: config.channel_max_packet_size,
+            channels: Channels::new(config.channel_max_count),
             request_tx,
             request_rx: (None, request_rx),
             global_in_rx: (None, VecDeque::with_capacity(1)),
@@ -384,7 +384,7 @@ impl<T: TransportLayer> ConnectionFuture<T> {
         if let Some(msg) = self.transport.decode() {
             let _: MsgGlobalRequest = msg;
             log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
-            ready!(self.push_global_request(cx, msg.name, msg.data, msg.want_reply));
+            ready!(self.push_global_request(cx, msg.name, msg.data, msg.want_reply))?;
             self.transport.consume();
             return Poll::Ready(Ok(()));
         }

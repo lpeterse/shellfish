@@ -17,8 +17,8 @@ use std::sync::Arc;
 pub struct Client {
     config: ClientConfig,
     username: Option<String>,
-    auth_agent: Arc<Box<dyn AuthAgent>>,
-    hostkey_verifier: Arc<Box<dyn HostKeyVerifier>>,
+    auth_agent: Arc<dyn AuthAgent>,
+    hostkey_verifier: Arc<dyn HostKeyVerifier>,
 }
 
 impl Client {
@@ -35,10 +35,12 @@ impl Client {
         socket: S,
     ) -> Result<Connection, ClientError> {
         let verifier = self.hostkey_verifier.clone();
-        let t = Transport::<Client, S>::connect(&self.config, verifier, hostname, socket).await?;
+        let tc = &self.config.transport;
+        let cc = &self.config.connection;
+        let t = Transport::<S>::connect(tc, &verifier, hostname, socket).await?;
         Ok(match self.username {
-            Some(ref user) => UserAuth::request(t, &self.config, user, &self.auth_agent).await?,
-            None => Connection::request(t, &self.config).await?,
+            Some(ref user) => UserAuth::request(t, cc, user, &self.auth_agent).await?,
+            None => Connection::request(cc, t).await?,
         })
     }
 
@@ -50,11 +52,11 @@ impl Client {
         &mut self.username
     }
 
-    pub fn auth_agent(&mut self) -> &mut Arc<Box<dyn AuthAgent>> {
+    pub fn auth_agent(&mut self) -> &mut Arc<dyn AuthAgent> {
         &mut self.auth_agent
     }
 
-    pub fn hostkey_verifier(&mut self) -> &mut Arc<Box<dyn HostKeyVerifier>> {
+    pub fn hostkey_verifier(&mut self) -> &mut Arc<dyn HostKeyVerifier> {
         &mut self.hostkey_verifier
     }
 }
@@ -66,11 +68,11 @@ impl Default for Client {
             username: std::env::var("LOGNAME")
                 .or_else(|_| std::env::var("USER"))
                 .ok(),
-            auth_agent: Arc::new(match LocalAgent::new_env() {
-                Some(agent) => Box::new(agent),
-                None => Box::new(()),
-            }),
-            hostkey_verifier: Arc::new(Box::new(KnownHosts::default())),
+            auth_agent: match LocalAgent::new_env() {
+                Some(agent) => Arc::new(agent),
+                None => Arc::new(()),
+            },
+            hostkey_verifier: Arc::new(KnownHosts::default()),
         }
     }
 }

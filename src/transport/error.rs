@@ -9,6 +9,7 @@ pub enum TransportError {
     DecoderError,
     ProtocolError,
     BadPacketLength,
+    InvalidState,
     InvalidSignature,
     HostKeyUnverifiable,
     MessageIntegrity,

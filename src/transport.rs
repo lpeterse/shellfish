@@ -42,11 +42,8 @@ use self::msg_unimplemented::*;
 use self::packet::*;
 use self::transceiver::*;
 
-use crate::client::Client;
 use crate::codec::*;
 use crate::host::*;
-use crate::role::*;
-use crate::server::Server;
 
 use async_std::future::poll_fn;
 use async_std::net::TcpStream;
@@ -162,52 +159,49 @@ impl TransportLayerExt {
 /// likely `TcpStream` but other types are used for testing).
 /// The only difference between client and server is the key exchange mechanism and the
 /// implementation is chosen at compile time dependant on the role parameter.
-pub struct Transport<R: Role, S: Socket = TcpStream> {
+pub struct Transport<S: Socket = TcpStream> {
     trx: Transceiver<S>,
-    kex: <R as Role>::Kex,
+    kex: ClientKex,
 }
 
-impl<S: Socket> Transport<Client, S> {
+impl<S: Socket> Transport<S> {
     /// Create a new transport acting as client.
     ///
     /// The initial key exchange has been completed successfully when function returns.
-    pub async fn connect<C: TransportConfig>(
-        config: &C,
-        verifier: Arc<Box<dyn HostKeyVerifier>>,
+    pub async fn connect(
+        config: &Arc<TransportConfig>,
+        verifier: &Arc<dyn HostKeyVerifier>,
         hostname: String,
         socket: S,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(config, socket);
-        trx.send_id(config.identification()).await?;
+        trx.send_id(&config.identification).await?;
         let id = trx.receive_id().await?;
-        let kex = ClientKex::new(config, verifier.clone(), id, hostname);
+        let kex = ClientKex::new(&config, &verifier, id, hostname);
         let mut transport = Self { trx, kex };
         transport.rekey().await?;
         Ok(transport)
     }
-}
 
-impl<S: Socket> Transport<Server, S> {
     /// Create a new transport acting as server.
     ///
     /// The initial key exchange has been completed successfully when function returns.
-    pub async fn accept<C: TransportConfig>(
-        _config: &C,
+    pub async fn accept(
+        _config: &Arc<TransportConfig>,
         _socket: S,
     ) -> Result<Self, TransportError> {
         unimplemented!()
     }
-}
 
-impl<R: Role, S: Socket> Transport<R, S> {
     /// Initiate a rekeying and wait for it to complete.
     async fn rekey(&mut self) -> Result<(), TransportError> {
-        self.kex.init();
+        self.kex
+            .init(self.trx.bytes_sent(), self.trx.bytes_received());
         poll_fn(|cx| {
             while self.kex.is_active() {
                 ready!(self.poll_kex(cx))?;
                 ready!(self.trx.poll_receive(cx))?;
-                if !self.consume_transport_message()? {
+                if !ready!(self.poll_consume_transport_message(cx))? {
                     self.send_unimplemented(cx);
                     return Poll::Ready(Err(TransportError::MessageUnexpected));
                 }
@@ -221,44 +215,45 @@ impl<R: Role, S: Socket> Transport<R, S> {
     fn poll_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         let k = &mut self.kex;
         let t = &mut self.trx;
-        // `poll` determines whether a kex is necessary or in progress and uses the lambda to send
-        // as many messages as necessary. It returns Pending in case sending blocks. The next
-        // invocation of this function will then proceed right where it blocked before.
-        k.poll(cx, t.bytes_sent(), t.bytes_received(), |cx, x| {
-            match x {
-                KexOutput::Init(msg) => {
-                    ready!(t.poll_send(cx, &msg))?;
-                    log::debug!("Sent MSG_KEX_INIT");
-                }
-                KexOutput::EcdhInit(msg) => {
-                    ready!(t.poll_send(cx, &msg))?;
-                    log::debug!("Sent MSG_ECDH_INIT");
-                }
-                KexOutput::EcdhReply(msg) => {
-                    ready!(t.poll_send(cx, &msg))?;
-                    log::debug!("Sent MSG_ECDH_REPLY");
-                }
-                KexOutput::NewKeys(enc) => {
-                    ready!(t.poll_send(cx, &MsgNewKeys {}))?;
-                    log::debug!("Sent MSG_NEWKEYS");
-                    t.encryption_ctx()
-                        .update(enc)
-                        .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-                }
-            }
-            t.poll_flush(cx)
-        })
+        if let Poll::Ready(x) = k.poll_init(cx, t.bytes_sent(), t.bytes_received()) {
+            ready!(t.poll_send(cx, &x?))?;
+            log::debug!("Sent MSG_KEX_INIT");
+            k.push_init_tx()?;
+        }
+        if let Poll::Ready(x) = k.poll_ecdh_init(cx) {
+            ready!(t.poll_send(cx, &x?))?;
+            log::debug!("Sent MSG_ECDH_INIT");
+            k.push_ecdh_init_tx()?;
+        }
+        if let Poll::Ready(x) = k.poll_ecdh_reply(cx) {
+            ready!(t.poll_send(cx, &x?))?;
+            log::debug!("Sent MSG_ECDH_REPLY");
+            k.push_ecdh_reply_tx()?;
+        }
+        if let Poll::Ready(x) = k.poll_new_keys_tx(cx) {
+            let enc = x?;
+            ready!(t.poll_send(cx, &MsgNewKeys {}))?;
+            log::debug!("Sent MSG_NEWKEYS");
+            t.encryption_ctx()
+                .update(enc.clone()) // FIXME clone
+                .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+            k.push_new_keys_tx()?;
+        }
+        t.poll_flush(cx)
     }
 
     /// Consumes message and returns true iff it is a transport message.
-    fn consume_transport_message(&mut self) -> Result<bool, TransportError> {
+    fn poll_consume_transport_message(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<bool, TransportError>> {
         // Try to interpret as MSG_DISCONNECT. If successful, convert it into an error and let
         // the callee handle the termination.
         match self.decode_ref() {
             Some(x) => {
                 let _: MsgDisconnect = x;
                 log::debug!("Received MSG_DISCONNECT");
-                Err(TransportError::DisconnectByPeer(x.reason))?;
+                return Poll::Ready(Err(TransportError::DisconnectByPeer(x.reason)));
             }
             None => (),
         }
@@ -270,7 +265,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 let _: MsgIgnore = x;
                 log::debug!("Received MSG_IGNORE");
                 self.consume();
-                return Ok(true);
+                return Poll::Ready(Ok(true));
             }
             None => (),
         }
@@ -279,7 +274,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
             Some(x) => {
                 let _: MsgUnimplemented = x;
                 log::debug!("Received MSG_UNIMPLEMENTED");
-                Err(TransportError::MessageUnimplemented)?;
+                return Poll::Ready(Err(TransportError::MessageUnimplemented));
             }
             None => (),
         }
@@ -289,7 +284,7 @@ impl<R: Role, S: Socket> Transport<R, S> {
                 let _: MsgDebug = x;
                 log::debug!("Received MSG_DEBUG: {:?}", x.message);
                 self.consume();
-                return Ok(true);
+                return Poll::Ready(Ok(true));
             }
             None => (),
         }
@@ -298,18 +293,18 @@ impl<R: Role, S: Socket> Transport<R, S> {
         match self.decode() {
             Some(msg) => {
                 log::debug!("Received MSG_KEX_INIT");
-                self.kex.push_init(msg)?;
+                self.kex.push_init_rx(msg)?;
                 self.consume();
-                return Ok(true);
+                return Poll::Ready(Ok(true));
             }
             None => (),
         }
         match self.decode() {
             Some(msg) => {
                 log::debug!("Received MSG_ECDH_REPLY");
-                self.kex.push_ecdh_reply(msg)?;
+                self.kex.push_ecdh_reply_rx(msg)?;
                 self.consume();
-                return Ok(true);
+                return Poll::Ready(Ok(true));
             }
             None => (),
         }
@@ -317,21 +312,20 @@ impl<R: Role, S: Socket> Transport<R, S> {
             Some(msg) => {
                 log::debug!("Received MSG_NEWKEYS");
                 let _: MsgNewKeys = msg;
-                let sent = self.trx.bytes_sent();
-                let rcvd = self.trx.bytes_received();
-                let dec = self.kex.push_new_keys(sent, rcvd)?;
+                let dec = ready!(self.kex.poll_new_keys_rx(cx))?;
                 let r = self.trx.decryption_ctx().update(dec);
                 r.ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+                self.kex.push_new_keys_rx()?;
                 self.consume();
-                return Ok(true);
+                return Poll::Ready(Ok(true));
             }
             None => (),
         }
-        Ok(false)
+        return Poll::Ready(Ok(false));
     }
 }
 
-impl<R: Role, S: Socket> TransportLayer for Transport<R, S> {
+impl<S: Socket> TransportLayer for Transport<S> {
     fn flushed(&self) -> bool {
         self.trx.flushed()
     }
@@ -367,7 +361,7 @@ impl<R: Role, S: Socket> TransportLayer for Transport<R, S> {
             ready!(self.poll_kex(cx))?;
             if self.kex.is_sending_critical() {
                 ready!(self.trx.poll_receive(cx))?;
-                if self.consume_transport_message()? {
+                if ready!(self.poll_consume_transport_message(cx))? {
                     continue;
                 } else {
                     self.send_unimplemented(cx);
@@ -390,7 +384,7 @@ impl<R: Role, S: Socket> TransportLayer for Transport<R, S> {
         loop {
             ready!(self.poll_kex(cx))?;
             ready!(self.trx.poll_receive(cx))?;
-            if self.consume_transport_message()? {
+            if ready!(self.poll_consume_transport_message(cx))? {
                 continue;
             }
             if self.kex.is_receiving_critical() {

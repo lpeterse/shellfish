@@ -5,6 +5,7 @@ use async_std::future::Future;
 
 /// The `Transceiver` handles the low-level part of the wire-protocol including framing and cipher.
 pub struct Transceiver<S: Socket> {
+    config: Arc<TransportConfig>,
     socket: Buffered<S>,
     receiver_state: ReceiverState,
     bytes_sent: u64,
@@ -14,9 +15,9 @@ pub struct Transceiver<S: Socket> {
     encryption_ctx: CipherContext,
     decryption_ctx: CipherContext,
     local_inactivity_timer: Delay,
-    local_inactivity_timeout: std::time::Duration,
+    local_inactivity_timeout: std::time::Duration, // FIXME
     remote_inactivity_timer: Delay,
-    remote_inactivity_timeout: std::time::Duration,
+    remote_inactivity_timeout: std::time::Duration, // FIXME
 }
 
 impl<S: Socket> Transceiver<S> {
@@ -24,8 +25,9 @@ impl<S: Socket> Transceiver<S> {
     ///
     /// This function also performs the identification string exchange which may fail for different
     /// reasons. An error is returned in this case.
-    pub fn new<C: TransportConfig>(config: &C, socket: S) -> Self {
+    pub fn new(config: &Arc<TransportConfig>, socket: S) -> Self {
         Self {
+            config: config.clone(),
             socket: Buffered::new(socket),
             receiver_state: ReceiverState::new(),
             bytes_sent: 0,
@@ -34,10 +36,10 @@ impl<S: Socket> Transceiver<S> {
             packets_received: 0,
             encryption_ctx: CipherContext::new(),
             decryption_ctx: CipherContext::new(),
-            local_inactivity_timer: Delay::new(config.alive_interval()),
-            local_inactivity_timeout: config.alive_interval(),
-            remote_inactivity_timer: Delay::new(config.inactivity_timeout()),
-            remote_inactivity_timeout: config.inactivity_timeout(),
+            local_inactivity_timer: Delay::new(config.alive_interval),
+            local_inactivity_timeout: config.alive_interval,
+            remote_inactivity_timer: Delay::new(config.inactivity_timeout),
+            remote_inactivity_timeout: config.inactivity_timeout,
         }
     }
 

@@ -9,7 +9,7 @@ impl ServerKex {
 }
 
 impl Kex for ServerKex {
-    fn init(&mut self) {
+    fn init(&mut self, tx: u64, rx: u64) {
         unimplemented!()
     }
     fn is_active(&self) -> bool {
@@ -21,30 +21,66 @@ impl Kex for ServerKex {
     fn is_receiving_critical(&self) -> bool {
         unimplemented!()
     }
-    fn push_init(&mut self, msg: MsgKexInit) -> Result<(), TransportError> {
-        unimplemented!()
-    }
-    fn push_ecdh_init(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError> {
-        unimplemented!()
-    }
-    fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
-        unimplemented!()
-    }
-    fn push_new_keys(&mut self, bytes_sent: u64, bytes_received: u64) -> Result<CipherConfig, TransportError> {
-        unimplemented!()
-    }
-    fn poll<F>(
+    fn poll_init(
         &mut self,
         cx: &mut Context,
-        bytes_sent: u64,
-        bytes_received: u64,
-        f: F,
-    ) -> Poll<Result<(), TransportError>>
-    where
-        F: FnMut(&mut Context, KexOutput) -> Poll<Result<(), TransportError>>,
-    {
-        unimplemented!()
+        tx: u64,
+        rx: u64,
+    ) -> Poll<Result<MsgKexInit<&'static str>, TransportError>> {
+        todo!()
     }
+    fn push_init_tx(&mut self) -> Result<(), TransportError> {
+        todo!()
+    }
+    fn push_init_rx(&mut self, msg: MsgKexInit) -> Result<(), TransportError> {
+        todo!()
+    }
+
+    fn poll_ecdh_init(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>> {
+        todo!()
+    }
+    fn push_ecdh_init_tx(&mut self) -> Result<(), TransportError> {
+        todo!()
+    }
+    fn push_ecdh_init_rx(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError> {
+        todo!()
+    }
+
+    fn poll_ecdh_reply(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<MsgKexEcdhReply<X25519>, TransportError>> {
+        todo!()
+    }
+    fn push_ecdh_reply_tx(&mut self) -> Result<(), TransportError> {
+        todo!()
+    }
+    fn push_ecdh_reply_rx(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
+        todo!()
+    }
+
+    fn poll_new_keys_tx(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<EncryptionConfig, TransportError>> {
+        todo!()
+    }
+    fn poll_new_keys_rx(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<DecryptionConfig, TransportError>> {
+        todo!()
+    }
+    fn push_new_keys_tx(&mut self) -> Result<(), TransportError> {
+        todo!()
+    }
+    fn push_new_keys_rx(&mut self) -> Result<(), TransportError> {
+        todo!()
+    }
+
     fn session_id(&self) -> &SessionId {
         unimplemented!()
     }

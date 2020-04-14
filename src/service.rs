@@ -1,11 +1,14 @@
 pub mod connection;
 pub mod user_auth;
 
-use crate::role::Role;
 use crate::transport::TransportLayer;
 
-pub trait Service<R: Role> {
+use std::sync::Arc;
+
+pub trait Service {
+    type Config;
+
     const NAME: &'static str;
 
-    fn new<T: TransportLayer>(config: &R::Config, transport: T) -> Self;
+    fn new<T: TransportLayer>(config: &Arc<Self::Config>, transport: T) -> Self;
 }

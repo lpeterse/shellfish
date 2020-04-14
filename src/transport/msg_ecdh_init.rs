@@ -6,6 +6,12 @@ pub struct MsgKexEcdhInit<A: EcdhAlgorithm> {
     pub dh_public: A::PublicKey,
 }
 
+impl<A: EcdhAlgorithm> MsgKexEcdhInit<A> {
+    pub fn new(dh_public: A::PublicKey) -> Self {
+        Self { dh_public }
+    }
+}
+
 impl<A: EcdhAlgorithm> Message for MsgKexEcdhInit<A> {
     const NUMBER: u8 = 30;
 }
@@ -65,18 +71,12 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(
-            &[30][..],
-            &BEncoder::encode(&msg)[..]
-        );
+        assert_eq!(&[30][..], &BEncoder::encode(&msg)[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(
-            &Some(msg),
-            &BDecoder::decode(&[30][..])
-        );
+        assert_eq!(&Some(msg), &BDecoder::decode(&[30][..]));
     }
 }

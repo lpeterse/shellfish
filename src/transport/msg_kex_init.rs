@@ -1,4 +1,5 @@
 use super::*;
+use crate::algorithm::*;
 use crate::codec::*;
 use crate::message::*;
 
@@ -41,6 +42,20 @@ impl<T: Clone> MsgKexInit<T> {
             languages_server_to_client: vec![],
             first_packet_follows: false,
         }
+    }
+}
+
+impl MsgKexInit<&'static str> {
+    pub fn new_from_config(
+        cookie: KexCookie,
+        config: &Arc<TransportConfig>,
+    ) -> MsgKexInit<&'static str> {
+        let ka = intersection(&config.kex_algorithms, &KEX_ALGORITHMS[..]);
+        let ma = intersection(&config.mac_algorithms, &MAC_ALGORITHMS[..]);
+        let ha = intersection(&config.host_key_algorithms, &HOST_KEY_ALGORITHMS[..]);
+        let ea = intersection(&config.encryption_algorithms, &ENCRYPTION_ALGORITHMS[..]);
+        let ca = intersection(&config.compression_algorithms, &COMPRESSION_ALGORITHMS[..]);
+        MsgKexInit::new(cookie, ka, ha, ea, ma, ca)
     }
 }
 

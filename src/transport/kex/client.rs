@@ -1,29 +1,20 @@
 use super::super::config::*;
 use super::kex::*;
 use crate::algorithm::kex::*;
-use crate::algorithm::*;
 
 use async_std::future::Future;
-use std::time::Duration;
 
 /// The client side state machine for key exchange.
 pub struct ClientKex {
+    config: Arc<TransportConfig>,
     /// Host key verifier
-    verifier: Arc<Box<dyn HostKeyVerifier>>,
+    verifier: Arc<dyn HostKeyVerifier>,
     /// Mutable state (when kex in progress)
     state: Option<Box<State>>,
-    /// Local identification string
-    local_id: Identification<&'static str>,
-    /// Local MSG_KEX_INIT (cookie shall be updated before re-exchange)
-    local_init: MsgKexInit<&'static str>,
     /// Remote identification string
     remote_id: Identification,
     /// Remote name (hostname) for host key verification
     remote_name: String,
-    /// Rekeying interval (bytes sent or received)
-    interval_bytes: u64,
-    /// Rekeying interval (time passed since last kex)
-    interval_duration: Duration,
     /// Rekeying timeout (reset after successful kex)
     next_at: Delay,
     /// Rekeying threshold (updated after successful kex)
@@ -35,30 +26,65 @@ pub struct ClientKex {
 }
 
 impl ClientKex {
-    pub fn new<C: TransportConfig>(
-        config: &C,
-        verifier: Arc<Box<dyn HostKeyVerifier>>,
+    pub fn new(
+        config: &Arc<TransportConfig>,
+        verifier: &Arc<dyn HostKeyVerifier>,
         remote_id: Identification<String>,
         remote_name: String,
     ) -> Self {
-        let ka = intersection(config.kex_algorithms(), &KEX_ALGORITHMS[..]);
-        let ma = intersection(config.mac_algorithms(), &MAC_ALGORITHMS[..]);
-        let ha = intersection(config.host_key_algorithms(), &HOST_KEY_ALGORITHMS[..]);
-        let ea = intersection(config.encryption_algorithms(), &ENCRYPTION_ALGORITHMS[..]);
-        let ca = intersection(config.compression_algorithms(), &COMPRESSION_ALGORITHMS[..]);
         Self {
-            verifier,
+            config: config.clone(),
+            verifier: verifier.clone(),
             state: None,
-            local_id: config.identification().clone(),
-            local_init: MsgKexInit::new(KexCookie::random(), ka, ha, ea, ma, ca),
             remote_id,
             remote_name,
-            interval_bytes: config.kex_interval_bytes(),
-            interval_duration: config.kex_interval_duration(),
-            next_at: Delay::new(config.kex_interval_duration()),
-            next_at_bytes_sent: config.kex_interval_bytes(),
-            next_at_bytes_received: config.kex_interval_bytes(),
+            next_at: Delay::new(config.kex_interval_duration),
+            next_at_bytes_sent: config.kex_interval_bytes,
+            next_at_bytes_received: config.kex_interval_bytes,
             session_id: SessionId::default(),
+        }
+    }
+}
+
+struct State {
+    cookie: KexCookie,
+    secret: <X25519 as EcdhAlgorithm>::EphemeralSecret,
+    cipher: Option<(EncryptionConfig, DecryptionConfig)>,
+    init_tx: bool,
+    init_rx: Option<MsgKexInit>,
+    ecdh_tx: bool,
+    ecdh_rx: Option<Result<(), VerificationFuture>>,
+    newkeys_tx: bool,
+    newkeys_rx: bool,
+}
+
+impl State {
+    pub fn new() -> Self {
+        Self {
+            cookie: KexCookie::random(),
+            secret: X25519::new(),
+            cipher: None,
+            init_tx: false,
+            init_rx: None,
+            ecdh_tx: false,
+            ecdh_rx: None,
+            newkeys_tx: false,
+            newkeys_rx: false,
+        }
+    }
+}
+
+impl State {
+    fn poll_host_key_verified(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        if let Some(ref mut hkv) = self.ecdh_rx {
+            if let Err(ref mut hkv) = hkv {
+                let e = TransportError::HostKeyUnverifiable;
+                ready!(Pin::new(hkv).poll(cx)).map_err(|_| e)?;
+                self.ecdh_rx = Some(Ok(()))
+            }
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
         }
     }
 }
@@ -69,81 +95,139 @@ impl Kex for ClientKex {
     }
 
     fn is_sending_critical(&self) -> bool {
-        match self.state {
-            None => false,
-            Some(ref x) => match x.as_ref() {
-                State::Init(ref x) => x.local_init.is_some(),
-                State::NewKeysSent(_) => false,
-                _ => true,
-            },
+        if let Some(ref state) = self.state {
+            state.init_tx && !state.newkeys_tx
+        } else {
+            false
         }
     }
 
     fn is_receiving_critical(&self) -> bool {
-        match self.state {
-            None => false,
-            Some(ref x) => match x.as_ref() {
-                State::Init(ref x) => x.remote_init.is_some(),
-                State::NewKeysReceived(_) => false,
-                _ => true,
-            },
+        if let Some(ref state) = self.state {
+            state.init_rx.is_some() && !state.newkeys_rx
+        } else {
+            false
         }
     }
 
-    fn init(&mut self) {
-        match self.state {
-            None => {
-                let state = State::Init(Init {
-                    local_init: None,
-                    remote_init: None,
-                });
-                self.state = Some(Box::new(state))
+    fn init(&mut self, tx: u64, rx: u64) {
+        if self.state.is_none() {
+            self.next_at.reset(self.config.kex_interval_duration);
+            self.next_at_bytes_sent = tx + self.config.kex_interval_bytes;
+            self.next_at_bytes_received = rx + self.config.kex_interval_bytes;
+            self.state = Some(Box::new(State::new()))
+        }
+    }
+
+    fn poll_init(
+        &mut self,
+        cx: &mut Context,
+        tx: u64,
+        rx: u64,
+    ) -> Poll<Result<MsgKexInit<&'static str>, TransportError>> {
+        // Determine whether kex is required according to timeout or traffic.
+        // This might evaluate to true even if kex is already in progress, but is harmless.
+        let a = Pin::new(&mut self.next_at).poll(cx).is_ready();
+        let b = tx > self.next_at_bytes_sent;
+        let c = rx > self.next_at_bytes_received;
+        if a || b || c {
+            self.init(tx, rx);
+        }
+        if let Some(ref state) = self.state {
+            if !state.init_tx {
+                let msg = MsgKexInit::new_from_config(state.cookie, &self.config);
+                return Poll::Ready(Ok(msg));
             }
-            _ => (),
         }
+        Poll::Pending
     }
 
-    fn push_init(&mut self, remote_init: MsgKexInit) -> Result<(), TransportError> {
-        match self.state {
-            None => {
-                let state = State::Init(Init {
-                    local_init: None,
-                    remote_init: Some(remote_init),
-                });
-                self.state = Some(Box::new(state));
+    fn push_init_tx(&mut self) -> Result<(), TransportError> {
+        if let Some(ref mut state) = self.state {
+            if !state.init_tx {
+                state.init_tx = true;
                 return Ok(());
             }
-            Some(ref mut x) => match x.as_mut() {
-                State::Init(ref mut i) if i.remote_init.is_none() => {
-                    i.remote_init = Some(remote_init);
-                    return Ok(());
-                }
-                _ => (),
-            },
         }
-        Err(TransportError::ProtocolError)?
-    }
-
-    fn push_ecdh_init(&mut self, _: MsgKexEcdhInit<X25519>) -> Result<(), TransportError> {
         Err(TransportError::ProtocolError)
     }
 
-    fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
-        match std::mem::replace(&mut self.state, None) {
-            Some(x) => match *x {
-                State::Ecdh(mut ecdh) => {
+    fn push_init_rx(&mut self, msg: MsgKexInit) -> Result<(), TransportError> {
+        if let Some(ref mut state) = self.state {
+            if state.init_rx.is_none() {
+                state.init_rx = Some(msg);
+                return Ok(());
+            }
+        }
+        Err(TransportError::ProtocolError)
+    }
+
+    fn poll_ecdh_init(
+        &mut self,
+        _cx: &mut Context,
+    ) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>> {
+        if let Some(ref mut state) = self.state {
+            if state.init_tx && !state.ecdh_tx {
+                if let Some(ref remote) = state.init_rx {
+                    use crate::algorithm::KEX_ALGORITHMS;
+                    let ka = intersection(&self.config.kex_algorithms, &KEX_ALGORITHMS[..]);
+                    let ka = common(&ka, &remote.kex_algorithms);
+                    if ka == Some(Curve25519Sha256::NAME)
+                        || ka == Some(Curve25519Sha256AtLibsshDotOrg::NAME)
+                    {
+                        let msg = MsgKexEcdhInit::new(X25519::public(&state.secret));
+                        return Poll::Ready(Ok(msg));
+                    }
+                    let e = TransportError::NoCommonKexAlgorithm;
+                    return Poll::Ready(Err(e));
+                }
+            }
+        }
+        Poll::Pending
+    }
+
+    fn push_ecdh_init_tx(&mut self) -> Result<(), TransportError> {
+        if let Some(ref mut state) = self.state {
+            if state.init_tx && !state.ecdh_tx {
+                state.ecdh_tx = true;
+                return Ok(());
+            }
+        }
+        Err(TransportError::ProtocolError)
+    }
+
+    fn push_ecdh_init_rx(&mut self, _msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError> {
+        Err(TransportError::ProtocolError)
+    }
+
+    fn poll_ecdh_reply(
+        &mut self,
+        _cx: &mut Context,
+    ) -> Poll<Result<MsgKexEcdhReply<X25519>, TransportError>> {
+        Poll::Pending
+    }
+
+    fn push_ecdh_reply_tx(&mut self) -> Result<(), TransportError> {
+        Err(TransportError::ProtocolError)
+    }
+
+    fn push_ecdh_reply_rx(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
+        if let Some(ref mut state) = self.state {
+            if state.ecdh_tx && state.ecdh_rx.is_none() {
+                if let Some(ref remote) = state.init_rx {
+                    let local = MsgKexInit::new_from_config(state.cookie, &self.config);
                     // Compute the DH shared secret (create a new placeholder while
                     // the actual secret get consumed in the operation).
-                    let dh_secret = std::mem::replace(&mut ecdh.dh_secret, X25519::new());
+                    let dh_secret = std::mem::replace(&mut state.secret, X25519::new());
                     let dh_public = X25519::public(&dh_secret);
                     let k = X25519::diffie_hellman(dh_secret, &msg.dh_public);
                     let k = X25519::secret_as_ref(&k);
                     // Compute the exchange hash over the data exchanged so far.
                     let h: [u8; 32] = KexEcdhHash::<X25519> {
-                        client_identification: &self.local_id,
+                        client_identification: &self.config.identification,
                         server_identification: &self.remote_id,
-                        client_kex_init: &self.local_init,
-                        server_kex_init: &ecdh.remote_init,
+                        client_kex_init: &local,
+                        server_kex_init: &remote,
                         server_host_key: &msg.host_key,
                         dh_client_key: &dh_public,
                         dh_server_key: &msg.dh_public,
@@ -156,125 +240,88 @@ impl Kex for ClientKex {
                         .ok_or(TransportError::InvalidSignature)?;
                     // The session id is only computed during first kex and constant afterwards
                     self.session_id.update(h);
+                    let algos = AlgorithmAgreement::agree(&local, &remote)?;
                     let keys = KeyStreams::new_sha256(k, &h, &self.session_id);
                     let enc = CipherConfig {
-                        ea: ecdh.algos.ea_c2s,
-                        ca: ecdh.algos.ca_c2s,
-                        ma: ecdh.algos.ma_c2s,
+                        ea: algos.ea_c2s,
+                        ca: algos.ca_c2s,
+                        ma: algos.ma_c2s,
                         ke: keys.c(),
                     };
                     let dec = CipherConfig {
-                        ea: ecdh.algos.ea_s2c,
-                        ca: ecdh.algos.ca_s2c,
-                        ma: ecdh.algos.ma_s2c,
+                        ea: algos.ea_s2c,
+                        ca: algos.ca_s2c,
+                        ma: algos.ma_s2c,
                         ke: keys.d(),
                     };
                     let fut = self.verifier.verify(&self.remote_name, &msg.host_key);
-                    self.state = Some(Box::new(State::HostKeyVerification((fut, enc, dec))));
+                    state.ecdh_rx = Some(Err(fut));
+                    state.cipher = Some((enc, dec));
                     return Ok(());
                 }
-                _ => (),
-            },
-            _ => (),
+            }
         }
         Err(TransportError::ProtocolError)
     }
 
-    fn push_new_keys(
-        &mut self,
-        bytes_sent: u64,
-        bytes_received: u64,
-    ) -> Result<CipherConfig, TransportError> {
-        self.next_at.reset(self.interval_duration);
-        self.next_at_bytes_sent = bytes_sent + self.interval_bytes;
-        self.next_at_bytes_received = bytes_received + self.interval_bytes;
-
-        match std::mem::replace(&mut self.state, None) {
-            Some(x) => match *x {
-                State::NewKeysSent(dec) => return Ok(dec),
-                State::NewKeys((enc, dec)) => {
-                    let state = State::NewKeysReceived(enc.clone());
-                    self.state = Some(Box::new(state));
-                    return Ok(dec);
-                }
-                _ => (),
-            },
-            _ => (),
-        }
-        Err(TransportError::ProtocolError)
-    }
-
-    fn poll<F: FnMut(&mut Context, KexOutput) -> Poll<Result<(), TransportError>>>(
+    fn poll_new_keys_tx(
         &mut self,
         cx: &mut Context,
-        bytes_sent: u64,
-        bytes_received: u64,
-        mut send: F,
-    ) -> Poll<Result<(), TransportError>> {
-        // Determine whether kex is required according to timeout or traffic.
-        // This might evaluate to true even if kex is already in progress, but is harmless.
-        let a = Pin::new(&mut self.next_at).poll(cx).is_ready();
-        let b = self.next_at_bytes_sent <= bytes_sent;
-        let c = self.next_at_bytes_received <= bytes_received;
-        if a || b || c {
-            self.init();
+    ) -> Poll<Result<EncryptionConfig, TransportError>> {
+        if let Some(ref mut state) = self.state {
+            ready!(state.poll_host_key_verified(cx))?;
+            return if let Some((ref enc, _)) = state.cipher {
+                Poll::Ready(Ok(enc.clone()))
+            } else {
+                Poll::Ready(Err(TransportError::ProtocolError))
+            };
         }
-        // Pop all pending kex messages from the state machine. Return Ready if no more messages
-        // available or Pending if sending such a message failed.
-        loop {
-            match self.state {
-                Some(ref mut s) => match s.as_mut() {
-                    State::Init(ref mut i) => {
-                        if i.local_init.is_none() {
-                            self.local_init.cookie = KexCookie::random();
-                            ready!(send(cx, KexOutput::Init(self.local_init.clone())))?;
-                            i.local_init = Some(());
-                        }
-                        if let Some(si) = i.remote_init.as_ref() {
-                            let algos = AlgorithmAgreement::agree(&self.local_init, &si)?;
-                            let state = match algos.ka {
-                                Curve25519Sha256::NAME => State::Ecdh(Ecdh::new(si.clone(), algos)),
-                                Curve25519Sha256AtLibsshDotOrg::NAME => {
-                                    State::Ecdh(Ecdh::new(si.clone(), algos))
-                                }
-                                _ => Err(TransportError::NoCommonKexAlgorithm)?,
-                            };
-                            self.state = Some(Box::new(state));
-                            continue;
-                        }
-                    }
-                    State::Ecdh(ref mut i) => {
-                        if !i.sent {
-                            let msg: MsgKexEcdhInit<X25519> = MsgKexEcdhInit {
-                                dh_public: X25519::public(&i.dh_secret),
-                            };
-                            ready!(send(cx, KexOutput::EcdhInit(msg)))?;
-                            i.sent = true;
-                            continue;
-                        }
-                    }
-                    State::HostKeyVerification((verified, enc, dec)) => {
-                        ready!(core::pin::Pin::as_mut(verified).poll(cx))
-                            .map_err(|_| TransportError::HostKeyUnverifiable)?;
-                        self.state = Some(Box::new(State::NewKeys((enc.clone(), dec.clone()))));
-                        continue;
-                    }
-                    State::NewKeys((enc, dec)) => {
-                        ready!(send(cx, KexOutput::NewKeys(enc.clone())))?;
-                        self.state = Some(Box::new(State::NewKeysSent(dec.clone())));
-                        continue;
-                    }
-                    State::NewKeysReceived(cipher) => {
-                        ready!(send(cx, KexOutput::NewKeys(cipher.clone())))?;
+        Poll::Pending
+    }
+
+    fn poll_new_keys_rx(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<EncryptionConfig, TransportError>> {
+        if let Some(ref mut state) = self.state {
+            ready!(state.poll_host_key_verified(cx))?;
+            return if let Some((_, ref dec)) = state.cipher {
+                Poll::Ready(Ok(dec.clone()))
+            } else {
+                Poll::Ready(Err(TransportError::ProtocolError))
+            };
+        }
+        Poll::Pending
+    }
+
+    fn push_new_keys_tx(&mut self) -> Result<(), TransportError> {
+        if let Some(ref mut state) = self.state {
+            if let Some(Ok(())) = state.ecdh_rx {
+                if !state.newkeys_tx {
+                    state.newkeys_tx = true;
+                    if state.newkeys_rx {
                         self.state = None;
-                        continue;
                     }
-                    State::NewKeysSent(_) => (),
-                },
-                None => (),
+                    return Ok(());
+                }
             }
-            return Poll::Ready(Ok(()));
         }
+        Err(TransportError::ProtocolError)
+    }
+
+    fn push_new_keys_rx(&mut self) -> Result<(), TransportError> {
+        if let Some(ref mut state) = self.state {
+            if let Some(Ok(())) = state.ecdh_rx {
+                if !state.newkeys_rx {
+                    state.newkeys_rx = true;
+                    if state.newkeys_tx {
+                        self.state = None;
+                    }
+                    return Ok(());
+                }
+            }
+        }
+        Err(TransportError::ProtocolError)
     }
 
     fn session_id(&self) -> &SessionId {
@@ -282,38 +329,7 @@ impl Kex for ClientKex {
     }
 }
 
-enum State {
-    Init(Init),
-    Ecdh(Ecdh<X25519>),
-    HostKeyVerification((VerificationFuture, EncryptionConfig, DecryptionConfig)),
-    NewKeys((EncryptionConfig, DecryptionConfig)),
-    NewKeysSent(DecryptionConfig),
-    NewKeysReceived(EncryptionConfig),
-}
-
-struct Init {
-    local_init: Option<()>,
-    remote_init: Option<MsgKexInit>,
-}
-
-struct Ecdh<A: EcdhAlgorithm> {
-    remote_init: MsgKexInit,
-    algos: AlgorithmAgreement,
-    dh_secret: A::EphemeralSecret,
-    sent: bool,
-}
-
-impl Ecdh<X25519> {
-    fn new(remote_init: MsgKexInit, algos: AlgorithmAgreement) -> Self {
-        Self {
-            remote_init,
-            algos,
-            dh_secret: X25519::new(),
-            sent: false,
-        }
-    }
-}
-
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -847,3 +863,4 @@ mod tests {
         assert!(kex.push_new_keys(0, 0).is_err());
     }
 }
+*/

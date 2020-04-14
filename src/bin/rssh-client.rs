@@ -6,7 +6,6 @@ use async_std::io::ReadExt;
 use async_std::net::TcpStream;
 use async_std::stream::StreamExt;
 
-use futures_timer::Delay;
 use rssh::util::oneshot;
 use std::collections::VecDeque;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -69,10 +68,7 @@ async fn foobar(mut conn: Connection) -> Result<(), ConnectionError> {
 fn main() {
     env_logger::init();
 
-    log::error!(
-        "Transport: {}",
-        std::mem::size_of::<Transport<Client, TcpStream>>(),
-    );
+    log::error!("Transport: {}", std::mem::size_of::<Transport<TcpStream>>(),);
     log::error!("ClientKex: {}", std::mem::size_of::<ClientKex>(),);
     log::error!("Waker: {}", std::mem::size_of::<async_std::task::Waker>(),);
     log::error!(
@@ -81,7 +77,7 @@ fn main() {
     );
     log::error!(
         "ConnectionFuture: {}",
-        std::mem::size_of::<ConnectionFuture<Transport<Client, TcpStream>>>()
+        std::mem::size_of::<ConnectionFuture<Transport<TcpStream>>>()
     );
     log::error!(
         "VecDequeue: {}",

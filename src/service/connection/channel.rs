@@ -197,7 +197,7 @@ impl ChannelState {
         }
     }
 
-    pub fn push_request(&mut self, request: &[u8]) -> Result<(), ConnectionError> {
+    pub fn push_request(&mut self, _request: &[u8]) -> Result<(), ConnectionError> {
         Ok(())
     }
     pub fn push_success(&mut self) -> Result<(), ConnectionError> {

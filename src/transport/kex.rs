@@ -17,23 +17,33 @@ use async_std::task::Poll;
 
 /// A state machine for key exchange.
 pub trait Kex {
-    fn init(&mut self);
+    fn init(&mut self, tx: u64, rx: u64);
     fn is_active(&self) -> bool;
     fn is_sending_critical(&self) -> bool;
     fn is_receiving_critical(&self) -> bool;
-    fn push_init(&mut self, msg: MsgKexInit) -> Result<(), TransportError>;
-    fn push_ecdh_init(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError>;
-    fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError>;
-    fn push_new_keys(&mut self, bytes_sent: u64, bytes_received: u64) -> Result<CipherConfig, TransportError>;
-    fn poll<F>(
+
+    fn poll_init(
         &mut self,
         cx: &mut Context,
-        bytes_sent: u64,
-        bytes_received: u64,
-        f: F,
-    ) -> Poll<Result<(), TransportError>>
-    where
-        F: FnMut(&mut Context, KexOutput) -> Poll<Result<(), TransportError>>;
+        tx: u64,
+        rx: u64,
+    ) -> Poll<Result<MsgKexInit<&'static str>, TransportError>>;
+    fn push_init_tx(&mut self) -> Result<(), TransportError>;
+    fn push_init_rx(&mut self, msg: MsgKexInit) -> Result<(), TransportError>;
+
+    fn poll_ecdh_init(&mut self, cx: &mut Context) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>>;
+    fn push_ecdh_init_tx(&mut self) -> Result<(), TransportError>;
+    fn push_ecdh_init_rx(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError>;
+
+    fn poll_ecdh_reply(&mut self, cx: &mut Context) -> Poll<Result<MsgKexEcdhReply<X25519>, TransportError>>;
+    fn push_ecdh_reply_tx(&mut self) -> Result<(), TransportError>;
+    fn push_ecdh_reply_rx(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError>;
+
+    fn poll_new_keys_tx(&mut self, cx: &mut Context) -> Poll<Result<EncryptionConfig, TransportError>>;
+    fn poll_new_keys_rx(&mut self, cx: &mut Context) -> Poll<Result<DecryptionConfig, TransportError>>;
+    fn push_new_keys_tx(&mut self) -> Result<(), TransportError>;
+    fn push_new_keys_rx(&mut self) -> Result<(), TransportError>;
+
     fn session_id(&self) -> &SessionId;
 }
 
@@ -178,7 +188,7 @@ mod tests {
     }
 
     #[test]
-    fn test_algorithm_agreement_01 () {
+    fn test_algorithm_agreement_01() {
         let client_init = MsgKexInit::<&'static str> {
             cookie: KexCookie::random(),
             kex_algorithms: vec!["ka", "ka_"],

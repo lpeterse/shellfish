@@ -28,6 +28,7 @@ use async_std::future::Future;
 use async_std::stream::Stream;
 use async_std::task::ready;
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{Context, Poll};
 
 /// The connection protocol offers channel multiplexing for a variety of applications like remote
@@ -48,7 +49,7 @@ impl Connection {
     ///
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
-    fn new<C: ConnectionConfig, T: TransportLayer>(config: &C, transport: T) -> Connection {
+    fn new<T: TransportLayer>(config: &Arc<ConnectionConfig>, transport: T) -> Connection {
         let (close_tx, close_rx) = oneshot::channel();
         let (error_tx, error_rx) = oneshot::channel();
         let (request_tx, rx) = manyshot::new();
@@ -68,12 +69,12 @@ impl Connection {
     /// This method consumes a `Transport` object and requests the `ssh-connection` protocol.
     /// Upon server confirmation it returns a protocol specific `Connection` handle which offers
     /// all service specific operations.
-    pub async fn request<C: ConnectionConfig, T: TransportLayer>(
+    pub async fn request<T: TransportLayer>(
+        config: &Arc<ConnectionConfig>,
         transport: T,
-        config: &C,
     ) -> Result<Self, ConnectionError> {
         let transport =
-            TransportLayerExt::request_service(transport, <Self as Service<Client>>::NAME).await?;
+            TransportLayerExt::request_service(transport, <Self as Service>::NAME).await?;
         Ok(Self::new(config, transport))
     }
 
@@ -162,13 +163,12 @@ impl Drop for Connection {
     }
 }
 
-impl<R: Role> Service<R> for Connection
-where
-    R::Config: ConnectionConfig,
-{
+impl Service for Connection {
+    type Config = ConnectionConfig;
+
     const NAME: &'static str = "ssh-connection";
 
-    fn new<T: TransportLayer>(config: &R::Config, transport: T) -> Self {
+    fn new<T: TransportLayer>(config: &Arc<Self::Config>, transport: T) -> Self {
         Self::new(config, transport)
     }
 }

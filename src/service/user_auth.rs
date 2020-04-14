@@ -12,7 +12,6 @@ use self::signature::*;
 
 use crate::agent::*;
 use crate::algorithm::auth::*;
-use crate::client::*;
 use crate::codec::*;
 use crate::service::Service;
 use crate::transport::*;
@@ -30,20 +29,20 @@ impl UserAuth {
     pub const NAME: &'static str = "ssh-userauth";
 
     /// Request another service with user authentication.
-    pub async fn request<T: TransportLayer, S: Service<Client>>(
+    pub async fn request<T: TransportLayer, S: Service>(
         transport: T,
-        config: &ClientConfig,
+        config: &Arc<<S as Service>::Config>,
         user: &str,
-        agent: &Arc<Box<dyn AuthAgent>>,
+        agent: &Arc<dyn AuthAgent>,
     ) -> Result<S, UserAuthError> {
         let mut t = TransportLayerExt::request_service(transport, Self::NAME).await?;
-        let service = <S as Service<Client>>::NAME;
+        let service = <S as Service>::NAME;
         let identities = agent.identities().await?;
 
         for (id, comment) in identities {
             log::debug!("Trying identity: {} ({})", comment, id.algorithm());
             if Self::try_pubkey::<T>(&mut t, &agent, service, user, id).await? {
-                return Ok(<S as Service<Client>>::new(config, t));
+                return Ok(<S as Service>::new(config, t));
             }
         }
 
@@ -52,7 +51,7 @@ impl UserAuth {
 
     async fn try_pubkey<T: TransportLayer>(
         transport: &mut T,
-        agent: &Arc<Box<dyn AuthAgent>>,
+        agent: &Arc<dyn AuthAgent>,
         service: &str,
         user: &str,
         identity: Identity,
