@@ -11,6 +11,17 @@ pub(crate) struct MsgChannelOpenFailure {
     pub language: String,
 }
 
+impl MsgChannelOpenFailure {
+    pub fn new(recipient_channel: u32, reason: ChannelOpenFailureReason) -> Self {
+        Self {
+            recipient_channel,
+            reason,
+            description: "".into(),
+            language: "".into(),
+        }
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub struct ChannelOpenFailureReason(u32);
 
@@ -24,9 +35,15 @@ impl ChannelOpenFailureReason {
 impl fmt::Debug for ChannelOpenFailureReason {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            &Self::ADMINISTRATIVELY_PROHIBITED => write!(f, "ChannelOpenFailureReason::ADMINISTRATIVELY_PROHIBITED"),
-            &Self::OPEN_CONNECT_FAILED => write!(f, "ChannelOpenFailureReason::OPEN_CONNECT_FAILED"),
-            &Self::UNKNOWN_CHANNEL_TYPE => write!(f, "ChannelOpenFailureReason::UNKNOWN_CHANNEL_TYPE"),
+            &Self::ADMINISTRATIVELY_PROHIBITED => {
+                write!(f, "ChannelOpenFailureReason::ADMINISTRATIVELY_PROHIBITED")
+            }
+            &Self::OPEN_CONNECT_FAILED => {
+                write!(f, "ChannelOpenFailureReason::OPEN_CONNECT_FAILED")
+            }
+            &Self::UNKNOWN_CHANNEL_TYPE => {
+                write!(f, "ChannelOpenFailureReason::UNKNOWN_CHANNEL_TYPE")
+            }
             &Self::RESOURCE_SHORTAGE => write!(f, "ChannelOpenFailureReason::RESOURCE_SHORTAGE"),
             _ => write!(f, "ChannelOpenFailureReason({})", self.0),
         }
@@ -69,11 +86,29 @@ mod tests {
 
     #[test]
     fn test_debug_reason_01() {
-        assert_eq!(format!("{:?}", ChannelOpenFailureReason::ADMINISTRATIVELY_PROHIBITED), "ChannelOpenFailureReason::ADMINISTRATIVELY_PROHIBITED");
-        assert_eq!(format!("{:?}", ChannelOpenFailureReason::OPEN_CONNECT_FAILED), "ChannelOpenFailureReason::OPEN_CONNECT_FAILED");
-        assert_eq!(format!("{:?}", ChannelOpenFailureReason::UNKNOWN_CHANNEL_TYPE), "ChannelOpenFailureReason::UNKNOWN_CHANNEL_TYPE");
-        assert_eq!(format!("{:?}", ChannelOpenFailureReason::RESOURCE_SHORTAGE), "ChannelOpenFailureReason::RESOURCE_SHORTAGE");
-        assert_eq!(format!("{:?}", ChannelOpenFailureReason(5)), "ChannelOpenFailureReason(5)");
+        assert_eq!(
+            format!(
+                "{:?}",
+                ChannelOpenFailureReason::ADMINISTRATIVELY_PROHIBITED
+            ),
+            "ChannelOpenFailureReason::ADMINISTRATIVELY_PROHIBITED"
+        );
+        assert_eq!(
+            format!("{:?}", ChannelOpenFailureReason::OPEN_CONNECT_FAILED),
+            "ChannelOpenFailureReason::OPEN_CONNECT_FAILED"
+        );
+        assert_eq!(
+            format!("{:?}", ChannelOpenFailureReason::UNKNOWN_CHANNEL_TYPE),
+            "ChannelOpenFailureReason::UNKNOWN_CHANNEL_TYPE"
+        );
+        assert_eq!(
+            format!("{:?}", ChannelOpenFailureReason::RESOURCE_SHORTAGE),
+            "ChannelOpenFailureReason::RESOURCE_SHORTAGE"
+        );
+        assert_eq!(
+            format!("{:?}", ChannelOpenFailureReason(5)),
+            "ChannelOpenFailureReason(5)"
+        );
     }
 
     #[test]

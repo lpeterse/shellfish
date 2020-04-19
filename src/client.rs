@@ -8,6 +8,7 @@ use crate::agent::*;
 use crate::host::*;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
+use crate::service::Service;
 use crate::transport::*;
 
 use async_std::net::TcpStream;
@@ -22,25 +23,30 @@ pub struct Client {
 }
 
 impl Client {
-    pub async fn connect<H: HostName>(&self, host: H) -> Result<Connection, ClientError> {
+    pub async fn connect<H: Into<String>>(&self, hostname: H) -> Result<Connection, ClientError> {
         let e = ClientError::ConnectError;
-        let hostname = host.name();
-        let socket = TcpStream::connect(host).await.map_err(e)?;
-        self.handle(hostname, socket).await
+        let hostname = hostname.into();
+        let socket = TcpStream::connect(&hostname).await.map_err(e)?;
+        self.set_keepalive(&socket).map_err(e)?;
+        self.handle(socket, hostname).await
     }
 
-    pub async fn handle<S: Socket>(
+    pub async fn handle(
         &self,
+        socket: TcpStream,
         hostname: String,
-        socket: S,
     ) -> Result<Connection, ClientError> {
         let verifier = self.hostkey_verifier.clone();
         let tc = &self.config.transport;
         let cc = &self.config.connection;
-        let t = Transport::<S>::connect(tc, &verifier, hostname, socket).await?;
+        let t = Transport::connect(tc, &verifier, hostname, socket).await?;
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, cc, user, &self.auth_agent).await?,
-            None => Connection::request(cc, t).await?,
+            None => {
+                let n = <Connection as Service>::NAME;
+                let t = TransportLayerExt::request_service(t, n).await?;
+                Connection::new(cc, t)
+            }
         })
     }
 
@@ -58,6 +64,50 @@ impl Client {
 
     pub fn hostkey_verifier(&mut self) -> &mut Arc<dyn HostKeyVerifier> {
         &mut self.hostkey_verifier
+    }
+
+    // FIXME: Remove as soon as this is supported by std.
+    fn set_keepalive(&self, socket: &TcpStream) -> Result<(), std::io::Error> {
+        if let Some(ref keepalive) = self.config.tcp.keepalive {
+            use libc::{c_int, c_void, socklen_t};
+            use libc::{SOL_SOCKET, SOL_TCP, SO_KEEPALIVE};
+            use libc::{TCP_KEEPCNT, TCP_KEEPIDLE, TCP_KEEPINTVL};
+            use std::os::unix::io::AsRawFd;
+            fn set_opt(sock: c_int, opt: c_int, val: c_int, payload: c_int) -> c_int {
+                unsafe {
+                    libc::setsockopt(
+                        sock,
+                        opt,
+                        val,
+                        &payload as *const c_int as *const c_void,
+                        std::mem::size_of::<c_int>() as socklen_t,
+                    )
+                }
+            }
+            let fd = socket.as_raw_fd();
+            let msg = "Setting TCP keepalive failed";
+            let err = Err(std::io::Error::new(std::io::ErrorKind::Other, msg));
+
+            if set_opt(fd, SOL_SOCKET, SO_KEEPALIVE, 1) != 0 {
+                return err;
+            }
+            if let Some(x) = keepalive.time {
+                if set_opt(fd, SOL_TCP, TCP_KEEPIDLE, x.as_secs() as c_int) != 0 {
+                    return err;
+                }
+            }
+            if let Some(x) = keepalive.intvl {
+                if set_opt(fd, SOL_TCP, TCP_KEEPINTVL, x.as_secs() as c_int) != 0 {
+                    return err;
+                }
+            }
+            if let Some(x) = keepalive.probes {
+                if set_opt(fd, SOL_TCP, TCP_KEEPCNT, x as c_int) != 0 {
+                    return err;
+                }
+            }
+        }
+        Ok(())
     }
 }
 

@@ -19,6 +19,7 @@ pub enum ConnectionError {
     ChannelWindowSizeOverflow,
     ChannelMaxPacketSizeExceeded,
     ChannelBufferSizeExceeded,
+    ChannelTypeMismatch,
     RequestSenderDropped,
     RequestReceiverDropped,
     RequestUnexpectedResponse,
@@ -53,7 +54,7 @@ mod tests {
 
     #[test]
     fn test_debug_01() {
-        assert_eq!("Terminated", format!("{:?}", ConnectionError::Unknown));
+        assert_eq!("Unknown", format!("{:?}", ConnectionError::Unknown));
         assert_eq!(
             "IoError(Other)",
             format!("{:?}", ConnectionError::IoError(std::io::ErrorKind::Other))

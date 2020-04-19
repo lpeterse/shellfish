@@ -3,7 +3,7 @@ use async_std::net::TcpStream;
 use async_std::os::unix::net::UnixStream;
 
 pub trait Socket:
-    Read + ReadExt + Write + Unpin + Send + 'static
+    std::fmt::Debug + Read + ReadExt + Write + Unpin + Send + 'static
 {
 }
 

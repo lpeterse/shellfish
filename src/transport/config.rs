@@ -74,15 +74,15 @@ mod tests {
     #[test]
     fn test_default_01() {
         let c = TransportConfig::default();
-        assert_eq!(c.identification, &Identification::default());
+        assert_eq!(c.identification, Identification::default());
         assert_eq!(c.kex_interval_bytes, 1024 * 1024 * 1024);
         assert_eq!(c.kex_interval_duration, Duration::from_secs(3600));
         assert_eq!(c.alive_interval, Duration::from_secs(300));
         assert_eq!(c.inactivity_timeout, Duration::from_secs(3600));
-        assert_eq!(c.kex_algorithms, &KEX_ALGORITHMS.to_vec());
-        assert_eq!(c.host_key_algorithms, &HOST_KEY_ALGORITHMS.to_vec());
-        assert_eq!(c.encryption_algorithms, &ENCRYPTION_ALGORITHMS.to_vec());
-        assert_eq!(c.compression_algorithms, &COMPRESSION_ALGORITHMS.to_vec());
-        assert_eq!(c.mac_algorithms, &MAC_ALGORITHMS.to_vec());
+        assert_eq!(c.kex_algorithms, KEX_ALGORITHMS.to_vec());
+        assert_eq!(c.host_key_algorithms, HOST_KEY_ALGORITHMS.to_vec());
+        assert_eq!(c.encryption_algorithms, ENCRYPTION_ALGORITHMS.to_vec());
+        assert_eq!(c.compression_algorithms, COMPRESSION_ALGORITHMS.to_vec());
+        assert_eq!(c.mac_algorithms, MAC_ALGORITHMS.to_vec());
     }
 }

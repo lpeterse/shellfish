@@ -152,7 +152,8 @@ impl Kex for ClientKex {
         Err(TransportError::ProtocolError)
     }
 
-    fn push_init_rx(&mut self, msg: MsgKexInit) -> Result<(), TransportError> {
+    fn push_init_rx(&mut self, tx: u64, rx: u64, msg: MsgKexInit) -> Result<(), TransportError> {
+        self.init(tx, rx);
         if let Some(ref mut state) = self.state {
             if state.init_rx.is_none() {
                 state.init_rx = Some(msg);

@@ -293,7 +293,9 @@ impl<S: Socket> Transport<S> {
         match self.decode() {
             Some(msg) => {
                 log::debug!("Received MSG_KEX_INIT");
-                self.kex.push_init_rx(msg)?;
+                let tx = self.trx.bytes_sent();
+                let rx = self.trx.bytes_received();
+                self.kex.push_init_rx(tx, rx, msg)?;
                 self.consume();
                 return Poll::Ready(Ok(true));
             }
@@ -310,13 +312,13 @@ impl<S: Socket> Transport<S> {
         }
         match self.decode() {
             Some(msg) => {
-                log::debug!("Received MSG_NEWKEYS");
                 let _: MsgNewKeys = msg;
                 let dec = ready!(self.kex.poll_new_keys_rx(cx))?;
                 let r = self.trx.decryption_ctx().update(dec);
                 r.ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
                 self.kex.push_new_keys_rx()?;
                 self.consume();
+                log::debug!("Received MSG_NEWKEYS");
                 return Poll::Ready(Ok(true));
             }
             None => (),
@@ -420,6 +422,86 @@ impl<S: Socket> TransportLayer for Transport<S> {
 }
 
 #[cfg(test)]
-mod tests {
-    //use super::*;
+pub mod tests {
+    use super::*;
+
+    use std::sync::Mutex;
+
+    pub struct TestTransport(Arc<Mutex<TestTransportState>>);
+    pub struct TestTransportState {
+        pub send_count: usize,
+        pub receive_count: usize,
+        pub consume_count: usize,
+        pub flush_count: usize,
+    }
+
+    impl TestTransport {
+        pub fn new() -> Self {
+            Self(Arc::new(Mutex::new(TestTransportState {
+                send_count: 0,
+                receive_count: 0,
+                consume_count: 0,
+                flush_count: 0,
+            })))
+        }
+    }
+
+    impl TestTransport {
+        pub fn send_count(&self) -> usize {
+            (self.0).lock().unwrap().send_count
+        }
+        pub fn receive_count(&self) -> usize {
+            (self.0).lock().unwrap().receive_count
+        }
+        pub fn consume_count(&self) -> usize {
+            (self.0).lock().unwrap().consume_count
+        }
+        pub fn flush_count(&self) -> usize {
+            (self.0).lock().unwrap().flush_count
+        }
+    }
+
+    impl TransportLayer for TestTransport {
+        fn decode<Msg: Decode>(&mut self) -> Option<Msg> {
+            todo!("decode")
+        }
+        fn decode_ref<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
+            todo!("decode_ref")
+        }
+        fn consume(&mut self) {
+            let mut x = (self.0).lock().unwrap();
+            x.consume_count += 1;
+        }
+        fn flushed(&self) -> bool {
+            todo!("flushed")
+        }
+        fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+            let mut x = (self.0).lock().unwrap();
+            x.flush_count += 1;
+            Poll::Ready(Ok(()))
+        }
+        fn poll_send<M: Encode>(
+            &mut self,
+            cx: &mut Context,
+            msg: &M,
+        ) -> Poll<Result<(), TransportError>> {
+            let mut x = (self.0).lock().unwrap();
+            x.send_count += 1;
+            Poll::Pending
+        }
+        fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+            let mut x = (self.0).lock().unwrap();
+            x.receive_count += 1;
+            Poll::Pending
+        }
+        fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+            todo!("send_disconnect")
+        }
+        fn send_unimplemented(&mut self, cx: &mut Context) {
+            todo!("send_unimplemented")
+        }
+        fn session_id(&self) -> &SessionId {
+            todo!("session_id")
+        }
+    }
 }

@@ -54,6 +54,30 @@ impl<T> Drop for Sender<T> {
     }
 }
 
+impl<T> Receiver<T> {
+    pub fn try_receive(self) -> Option<T> {
+        match self.0.lock() {
+            Err(_) => None,
+            Ok(mut guard) => guard.token.take().flatten(),
+        }
+    }
+}
+
+impl<T: Clone> Receiver<T> {
+    pub fn peek(&mut self, cx: &mut Context) -> Poll<Option<T>> {
+        match self.0.lock() {
+            Err(_) => Poll::Ready(None),
+            Ok(mut guard) => match guard.token {
+                Some(ref t) => Poll::Ready(t.clone()),
+                None => {
+                    guard.waker = Some(cx.waker().clone());
+                    Poll::Pending
+                }
+            },
+        }
+    }
+}
+
 impl<T> Future for Receiver<T> {
     type Output = Option<T>;
 

@@ -1,6 +1,5 @@
 pub mod glob;
 pub mod oneshot;
-pub mod manyshot;
 
 use std::future::Future;
 

@@ -25,7 +25,7 @@ impl<T> RequestState<T> {
 }
 
 #[derive(Debug)]
-pub(crate) enum SessionRequest {
+pub enum SessionRequest {
     EnvRequest(EnvRequest),
     PtyRequest(PtyRequest),
     ExecRequest(ExecRequest),
@@ -67,7 +67,7 @@ impl Encode for SessionRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct EnvRequest {
+pub struct EnvRequest {
     name: String,
     value: String,
 }
@@ -89,7 +89,7 @@ impl Encode for EnvRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct PtyRequest {}
+pub struct PtyRequest {}
 
 impl ChannelRequest for PtyRequest {
     fn name(&self) -> &'static str {
@@ -107,7 +107,7 @@ impl Encode for PtyRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct ExecRequest {
+pub struct ExecRequest {
     pub command: String,
 }
 
@@ -127,7 +127,7 @@ impl Encode for ExecRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct ShellRequest {}
+pub struct ShellRequest {}
 
 impl ChannelRequest for ShellRequest {
     fn name(&self) -> &'static str {
@@ -145,7 +145,7 @@ impl Encode for ShellRequest {
 }
 
 #[derive(Debug)]
-pub(crate) struct SubsystemRequest {
+pub struct SubsystemRequest {
     pub subsystem: String,
 }
 

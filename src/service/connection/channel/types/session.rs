@@ -9,10 +9,10 @@ pub(crate) use self::request::*;
 pub(crate) use self::signal::*;
 
 use super::super::*;
-use super::*;
 use crate::client::Client;
 
 use crate::codec::*;
+use crate::role::Role;
 
 /// A session is a remote execution of a program.  The program may be a
 /// shell, an application, a system command, or some built-in subsystem.
@@ -21,11 +21,11 @@ use crate::codec::*;
 #[derive(Debug)]
 pub struct Session<R: Role> {
     role: std::marker::PhantomData<R>,
-    channel: ChannelState,
+    channel: ChannelHandle,
 }
 
 impl<R: Role> Session<R> {
-    pub(crate) fn new(channel: ChannelState) -> Self {
+    pub(crate) fn new(channel: ChannelHandle) -> Self {
         Self {
             role: Default::default(),
             channel,
@@ -54,7 +54,7 @@ impl Session<Client> {
 
     pub async fn request_env(&self) -> Result<(), ConnectionError> {
         Ok(())
-    } 
+    }
 
     async fn request(self, request: SessionRequest) -> Result<Self, ConnectionError> {
         /*
@@ -92,21 +92,17 @@ impl Session<Client> {
     }
 }
 
-impl<R: Role> ChannelOpen for Session<R> {
-    type Open = ();
-    type Confirmation = ();
-}
-
 impl<R: Role> Channel for Session<R> {
-    type Request = SessionRequest;
-
+    type Open = ();
+    //    type Request = SessionRequest;
     const NAME: &'static str = "session";
-}
 
-impl<R: Role> Drop for Session<R> {
-    fn drop(&mut self) {
-        let mut x = self.channel.0.lock().unwrap();
-        x.close_tx = Some(false);
-        x.wake_inner_task();
+    fn new(channel: ChannelHandle) -> Self {
+        Self {
+            role: Default::default(),
+            channel,
+        }
     }
 }
+
+// FIXME session drop implemented?

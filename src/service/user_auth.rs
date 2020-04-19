@@ -29,8 +29,8 @@ impl UserAuth {
     pub const NAME: &'static str = "ssh-userauth";
 
     /// Request another service with user authentication.
-    pub async fn request<T: TransportLayer, S: Service>(
-        transport: T,
+    pub async fn request<S: Service>(
+        transport: S::Transport,
         config: &Arc<<S as Service>::Config>,
         user: &str,
         agent: &Arc<dyn AuthAgent>,
@@ -41,7 +41,7 @@ impl UserAuth {
 
         for (id, comment) in identities {
             log::debug!("Trying identity: {} ({})", comment, id.algorithm());
-            if Self::try_pubkey::<T>(&mut t, &agent, service, user, id).await? {
+            if Self::try_pubkey::<S::Transport>(&mut t, &agent, service, user, id).await? {
                 return Ok(<S as Service>::new(config, t));
             }
         }

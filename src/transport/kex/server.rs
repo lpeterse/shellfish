@@ -32,7 +32,7 @@ impl Kex for ServerKex {
     fn push_init_tx(&mut self) -> Result<(), TransportError> {
         todo!()
     }
-    fn push_init_rx(&mut self, msg: MsgKexInit) -> Result<(), TransportError> {
+    fn push_init_rx(&mut self, tx: u64, rx: u64, msg: MsgKexInit) -> Result<(), TransportError> {
         todo!()
     }
 

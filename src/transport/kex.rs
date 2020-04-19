@@ -29,7 +29,7 @@ pub trait Kex {
         rx: u64,
     ) -> Poll<Result<MsgKexInit<&'static str>, TransportError>>;
     fn push_init_tx(&mut self) -> Result<(), TransportError>;
-    fn push_init_rx(&mut self, msg: MsgKexInit) -> Result<(), TransportError>;
+    fn push_init_rx(&mut self, tx: u64, rx: u64, msg: MsgKexInit) -> Result<(), TransportError>;
 
     fn poll_ecdh_init(&mut self, cx: &mut Context) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>>;
     fn push_ecdh_init_tx(&mut self) -> Result<(), TransportError>;
