@@ -6,6 +6,12 @@ pub(crate) struct MsgRequestSuccess<'a> {
     pub data: &'a [u8],
 }
 
+impl<'a> MsgRequestSuccess<'a> {
+    pub fn new(data: &'a [u8]) -> Self {
+        Self { data }
+    }
+}
+
 impl<'a> Message for MsgRequestSuccess<'a> {
     const NUMBER: u8 = 81;
 }

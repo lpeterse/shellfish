@@ -433,6 +433,10 @@ pub mod tests {
         pub receive_count: usize,
         pub consume_count: usize,
         pub flush_count: usize,
+
+        pub tx_buf: Vec<Vec<u8>>,
+        pub tx_sent: Vec<Vec<Vec<u8>>>,
+        pub tx_ready: bool,
     }
 
     impl TestTransport {
@@ -442,6 +446,9 @@ pub mod tests {
                 receive_count: 0,
                 consume_count: 0,
                 flush_count: 0,
+                tx_buf: vec![],
+                tx_sent: vec![],
+                tx_ready: false,
             })))
         }
     }
@@ -458,6 +465,14 @@ pub mod tests {
         }
         pub fn flush_count(&self) -> usize {
             (self.0).lock().unwrap().flush_count
+        }
+        pub fn set_tx_ready(&self, ready: bool) {
+            let mut x = (self.0).lock().unwrap();
+            x.tx_ready = ready;
+        }
+        pub fn tx_sent(&self) -> Vec<Vec<Vec<u8>>> {
+            let x = (self.0).lock().unwrap();
+            x.tx_sent.clone()
         }
     }
 
@@ -478,7 +493,13 @@ pub mod tests {
         fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
             let mut x = (self.0).lock().unwrap();
             x.flush_count += 1;
-            Poll::Ready(Ok(()))
+            if !x.tx_buf.is_empty() {
+                let buf = std::mem::replace(&mut x.tx_buf, vec![]);
+                x.tx_sent.push(buf);
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Ready(Ok(()))
+            }
         }
         fn poll_send<M: Encode>(
             &mut self,
@@ -487,7 +508,12 @@ pub mod tests {
         ) -> Poll<Result<(), TransportError>> {
             let mut x = (self.0).lock().unwrap();
             x.send_count += 1;
-            Poll::Pending
+            if x.tx_ready {
+                x.tx_buf.push(BEncoder::encode(msg));
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
         }
         fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
             let mut x = (self.0).lock().unwrap();

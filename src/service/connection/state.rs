@@ -14,12 +14,12 @@ pub(crate) struct ConnectionState<T: TransportLayer> {
     error: Result<(), ConnectionError>,
     disconnect: Option<DisconnectReason>,
     channels: ChannelSlots,
-    global_in_request: VecDeque<GlobalRequest>,
-    global_in_replies: VecDeque<oneshot::Receiver<Result<Option<Vec<u8>>, ConnectionError>>>,
-    global_out_request: VecDeque<GlobalRequest>,
-    global_out_replies: VecDeque<oneshot::Sender<Result<Option<Vec<u8>>, ConnectionError>>>,
-    inner_task: Option<Waker>,
-    outer_task: Option<Waker>,
+    global_in_requests: VecDeque<GlobalRequest>,
+    global_in_replies: VecDeque<oneshot::Receiver<Result<Vec<u8>, ConnectionError>>>,
+    global_out_requests: VecDeque<GlobalRequest>,
+    global_out_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
+    future_task: Option<Waker>,
+    handle_task: Option<Waker>,
 }
 
 #[derive(Debug)]
@@ -36,17 +36,17 @@ impl<T: TransportLayer> ConnectionState<T> {
             error: Ok(()),
             disconnect: None,
             channels: ChannelSlots::new(&config),
-            global_in_request: VecDeque::with_capacity(1),
+            global_in_requests: VecDeque::with_capacity(1),
             global_in_replies: VecDeque::with_capacity(1),
-            global_out_request: VecDeque::with_capacity(1),
+            global_out_requests: VecDeque::with_capacity(1),
             global_out_replies: VecDeque::with_capacity(1),
-            inner_task: None,
-            outer_task: None,
+            future_task: None,
+            handle_task: None,
         }
     }
 
     pub fn poll(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        self.register_inner_task(cx);
+        self.register_future_task(cx);
         // Check disconnect flag (returns error if set)
         if let Poll::Ready(x) = self.poll_disconnect(cx) {
             x?
@@ -81,29 +81,29 @@ impl<T: TransportLayer> ConnectionState<T> {
         cx: &mut Context,
     ) -> Poll<Result<ConnectionRequest, ConnectionError>> {
         self.error?;
-        if let Some(request) = self.global_in_request.pop_front() {
-            self.outer_task = None;
-            self.wake_inner_task();
+        if let Some(request) = self.global_in_requests.pop_front() {
+            self.handle_task = None;
+            self.wake_future_task();
             return Poll::Ready(Ok(ConnectionRequest::Global(request)));
         }
         if let Some(request) = self.channels.take_open_request() {
-            self.outer_task = None;
+            self.handle_task = None;
             return Poll::Ready(Ok(ConnectionRequest::ChannelOpen(request)));
         }
-        self.register_outer_task(cx);
+        self.register_handle_task(cx);
         Poll::Pending
     }
 
     pub fn request_global(&mut self, name: String, data: Vec<u8>) {
         let request = GlobalRequest::new(name, data);
-        self.global_out_request.push_back(request);
-        self.wake_inner_task();
+        self.global_out_requests.push_back(request);
+        self.wake_future_task();
     }
 
     pub fn request_global_want_reply(&mut self, name: String, data: Vec<u8>) -> ReplyFuture {
         let (request, reply) = GlobalRequest::new_want_reply(name, data);
-        self.global_out_request.push_back(request);
-        self.wake_inner_task();
+        self.global_out_requests.push_back(request);
+        self.wake_future_task();
         reply
     }
 
@@ -116,7 +116,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             .channels
             .open_outbound(C::NAME, BEncoder::encode(&params))
         {
-            self.wake_inner_task();
+            self.wake_future_task();
             rx
         } else {
             let (tx, rx) = oneshot::channel();
@@ -128,37 +128,33 @@ impl<T: TransportLayer> ConnectionState<T> {
 
     pub fn disconnect(&mut self, reason: DisconnectReason) {
         self.disconnect = Some(reason);
-        self.wake_inner_task();
+        self.wake_future_task();
     }
 
-    // PRIVATE METHODS
-    fn transport(&mut self) -> &mut T {
-        &mut self.transport
-    }
-    fn wake_inner_task(&mut self) {
-        if let Some(ref task) = self.inner_task {
+    fn wake_future_task(&mut self) {
+        if let Some(ref task) = self.future_task {
             task.wake_by_ref();
         }
     }
 
-    fn register_outer_task(&mut self, cx: &mut Context) {
-        if let Some(ref waker) = self.outer_task {
+    fn register_handle_task(&mut self, cx: &mut Context) {
+        if let Some(ref waker) = self.handle_task {
             if waker.will_wake(cx.waker()) {
                 return;
             }
         }
-        self.outer_task = Some(cx.waker().clone());
+        self.handle_task = Some(cx.waker().clone());
     }
 
-    pub fn wake_outer_task(&mut self) {
-        if let Some(ref task) = self.outer_task {
+    pub fn wake_handle_task(&mut self) {
+        if let Some(ref task) = self.handle_task {
             task.wake_by_ref();
         }
     }
 
-    fn register_inner_task(&mut self, cx: &mut Context) {
-        if self.inner_task.is_none() {
-            self.inner_task = Some(cx.waker().clone());
+    fn register_future_task(&mut self, cx: &mut Context) {
+        if self.future_task.is_none() {
+            self.future_task = Some(cx.waker().clone());
         }
     }
 
@@ -230,14 +226,14 @@ impl<T: TransportLayer> ConnectionState<T> {
     }
 
     fn poll_global_requests(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        while let Some(ref request) = self.global_out_request.front() {
+        while let Some(ref request) = self.global_out_requests.front() {
             let msg = MsgGlobalRequest {
                 name: request.name.clone(),
                 data: request.data.clone(),
                 want_reply: request.reply.is_some(),
             };
             ready!(self.transport.poll_send(cx, &msg))?;
-            if let Some(ref mut request) = self.global_out_request.pop_front() {
+            if let Some(ref mut request) = self.global_out_requests.pop_front() {
                 if let Some(reply) = request.reply.take() {
                     self.global_out_replies.push_back(reply);
                 }
@@ -246,37 +242,21 @@ impl<T: TransportLayer> ConnectionState<T> {
         Poll::Pending
     }
 
+    /// Try all pending replies in the correct order (sic!).
+    /// Stop on the first one that is not ready.
     fn poll_global_replies(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        // Try all replies in the correct order (sic!).
-        // Stop on the first that is not ready.
         while let Some(ref mut future) = self.global_in_replies.front_mut() {
-            let reply = ready!(future.peek(cx)).unwrap_or(Ok(None))?;
-            ready!(Self::poll_send_global_reply(
-                &mut self.transport,
-                cx,
-                &reply
-            ))?;
+            if let Some(data) = ready!(future.peek(cx)) {
+                ready!(self
+                    .transport
+                    .poll_send(cx, &MsgRequestSuccess::new(&data?)))?;
+            } else {
+                ready!(self.transport.poll_send(cx, &MsgRequestFailure))?;
+            };
             let _ = self.global_in_replies.pop_front();
-            self.wake_outer_task();
+            self.wake_handle_task();
         }
         Poll::Pending
-    }
-
-    fn poll_send_global_reply(
-        transport: &mut T,
-        cx: &mut Context,
-        reply: &Option<Vec<u8>>,
-    ) -> Poll<Result<(), ConnectionError>> {
-        if let Some(data) = reply {
-            let msg = MsgRequestSuccess {
-                data: data.as_ref(),
-            };
-            ready!(transport.poll_send(cx, &msg))?;
-        } else {
-            ready!(transport.poll_send(cx, &MsgRequestFailure))?;
-        }
-
-        Poll::Ready(Ok(()))
     }
 
     fn poll_transport(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
@@ -351,7 +331,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             let _: MsgChannelOpen = msg;
             log::debug!("Received MSG_CHANNEL_OPEN ({})", msg.name);
             self.channels.open_inbound(msg);
-            self.wake_outer_task();
+            self.wake_handle_task();
             return Ok(());
         }
         // MSG_CHANNEL_OPEN_CONFIRMATION
@@ -425,7 +405,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             let _: MsgRequestSuccess = msg;
             log::debug!("Received MSG_REQUEST_SUCCESS");
             if let Some(tx) = self.global_out_replies.pop_front() {
-                tx.send(Ok(Some(msg.data.into())));
+                tx.send(Ok(msg.data.into()));
             } else {
                 return Err(ConnectionError::GlobalRequestReplyUnexpected);
             }
@@ -436,7 +416,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             let _: MsgRequestFailure = msg;
             log::debug!("Received MSG_REQUEST_FAILURE");
             if let Some(tx) = self.global_out_replies.pop_front() {
-                tx.send(Ok(None));
+                drop(tx);
             } else {
                 return Err(ConnectionError::GlobalRequestReplyUnexpected);
             }
@@ -464,8 +444,8 @@ impl<T: TransportLayer> ConnectionState<T> {
             request.reply = Some(tx);
             self.global_in_replies.push_back(rx);
         }
-        self.global_in_request.push_back(request);
-        self.wake_outer_task();
+        self.global_in_requests.push_back(request);
+        self.wake_handle_task();
         Ok(())
     }
 }
@@ -477,7 +457,7 @@ impl<T: TransportLayer> Terminate for ConnectionState<T> {
     /// This shall be the last thing to happen and has great similarity with `Drop` except that
     /// it distributes an error.
     fn terminate(&mut self, e: ConnectionError) {
-        while let Some(mut x) = self.global_out_request.pop_front() {
+        while let Some(mut x) = self.global_out_requests.pop_front() {
             x.reply.take().map(|x| x.send(Err(e))).unwrap_or(())
         }
         while let Some(x) = self.global_out_replies.pop_front() {
@@ -485,7 +465,7 @@ impl<T: TransportLayer> Terminate for ConnectionState<T> {
         }
         self.channels.terminate(e);
         self.error = Err(e);
-        self.wake_outer_task();
+        self.wake_handle_task();
     }
 }
 
@@ -501,13 +481,14 @@ mod tests {
         let c = Arc::new(ConnectionConfig::default());
         let t = TestTransport::new();
         let x = ConnectionState::new(&c, t);
+
         assert!(x.error.is_ok());
         assert!(x.disconnect.is_none());
-        assert!(x.inner_task.is_none());
-        assert!(x.outer_task.is_none());
+        assert!(x.future_task.is_none());
+        assert!(x.handle_task.is_none());
     }
 
-    /// Test polling after creation.
+    /// Test poll after creation.
     #[test]
     fn test_connection_state_poll_01() {
         use async_std::future::poll_fn;
@@ -515,19 +496,20 @@ mod tests {
         let c = Arc::new(ConnectionConfig::default());
         let t = TestTransport::new();
         let mut x = ConnectionState::new(&c, t);
+
         block_on(poll_fn(|cx| {
             assert_eq!(x.poll(cx), Poll::Pending, "poll");
             assert_eq!(x.transport.send_count(), 0, "send_count");
             assert_eq!(x.transport.receive_count(), 1, "receive_count");
             assert_eq!(x.transport.consume_count(), 0, "consume_count");
             assert_eq!(x.transport.flush_count(), 2, "flush_count");
-            assert!(x.inner_task.is_some(), "inner_task");
-            assert!(x.outer_task.is_none(), "outer_task");
+            assert!(x.future_task.is_some(), "future_task");
+            assert!(x.handle_task.is_none(), "handle_task");
             Poll::Ready(())
         }));
     }
 
-    /// Test polling after disconnect.
+    /// Test poll after disconnect.
     #[test]
     fn test_connection_state_poll_02() {
         use async_std::future::poll_fn;
@@ -535,14 +517,99 @@ mod tests {
         let c = Arc::new(ConnectionConfig::default());
         let t = TestTransport::new();
         let mut x = ConnectionState::new(&c, t);
+
         block_on(poll_fn(|cx| {
             assert_eq!(x.poll(cx), Poll::Pending, "poll");
             assert_eq!(x.transport.send_count(), 0, "send_count");
             assert_eq!(x.transport.receive_count(), 1, "receive_count");
             assert_eq!(x.transport.consume_count(), 0, "consume_count");
             assert_eq!(x.transport.flush_count(), 2, "flush_count");
-            assert!(x.inner_task.is_some(), "inner_task");
-            assert!(x.outer_task.is_none(), "outer_task");
+            assert!(x.future_task.is_some(), "future_task");
+            assert!(x.handle_task.is_none(), "handle_task");
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test poll with ready global reply (transport ready).
+    #[test]
+    fn test_connection_state_poll_03() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+        x.transport.set_tx_ready(true);
+
+        // Accept
+        let (tx, rx) = oneshot::channel();
+        tx.send(Ok(b"abc"[..].into()));
+        x.global_in_replies.push_back(rx);
+
+        // Reject
+        let (_, rx) = oneshot::channel();
+        x.global_in_replies.push_back(rx);
+
+        block_on(poll_fn(|cx| {
+            assert_eq!(x.poll(cx), Poll::Pending, "poll");
+            assert!(x.future_task.is_some(), "future_task");
+            assert!(x.handle_task.is_none(), "handle_task");
+            assert_eq!(
+                x.transport.tx_sent(),
+                vec![vec![vec![81, 97, 98, 99], vec![82]]]
+            );
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test poll with ready global request (transport ready).
+    #[test]
+    fn test_connection_state_poll_04() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+        x.transport.set_tx_ready(true);
+
+        let req = GlobalRequest::new("abc".into(), vec![1, 2, 3]);
+        x.global_out_requests.push_back(req);
+
+        block_on(poll_fn(|cx| {
+            assert_eq!(x.poll(cx), Poll::Pending, "poll");
+            assert!(x.future_task.is_some(), "future_task");
+            assert!(x.handle_task.is_none(), "handle_task");
+            assert_eq!(
+                x.transport.tx_sent(),
+                vec![vec![vec![80, 0, 0, 0, 3, 97, 98, 99, 0, 1, 2, 3]]]
+            );
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test poll with ready channel open request (transport ready).
+    #[test]
+    fn test_connection_state_poll_05() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+        x.transport.set_tx_ready(true);
+        
+        #[allow(unused_variables)]
+        let _ = x.open_channel::<Session<Client>>(());
+
+        block_on(poll_fn(|cx| {
+            assert_eq!(x.poll(cx), Poll::Pending, "poll");
+            assert!(x.future_task.is_some(), "future_task");
+            assert!(x.handle_task.is_none(), "handle_task");
+            assert_eq!(
+                x.transport.tx_sent(),
+                vec![vec![vec![
+                    90, 0, 0, 0, 7, 115, 101, 115, 115, 105, 111, 110, 0, 0, 0, 0, 0, 16, 0, 0, 0,
+                    0, 128, 0
+                ]]]
+            );
             Poll::Ready(())
         }));
     }

@@ -8,7 +8,7 @@ use core::pin::*;
 pub struct GlobalRequest {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
-    pub(crate) reply: Option<oneshot::Sender<Result<Option<Vec<u8>>, ConnectionError>>>,
+    pub(crate) reply: Option<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
 }
 
 impl GlobalRequest {
@@ -30,7 +30,7 @@ impl GlobalRequest {
     pub fn accept(self, data: Vec<u8>) {
         let mut self_ = self;
         if let Some(reply) = self_.reply.take() {
-            reply.send(Ok(Some(data)))
+            reply.send(Ok(data))
         }
     }
 
@@ -48,16 +48,8 @@ impl GlobalRequest {
     }
 }
 
-impl Drop for GlobalRequest {
-    fn drop(&mut self) {
-        if let Some(reply) = self.reply.take() {
-            reply.send(Ok(None))
-        }
-    }
-}
-
 #[derive(Debug)]
-pub struct ReplyFuture(oneshot::Receiver<Result<Option<Vec<u8>>, ConnectionError>>);
+pub struct ReplyFuture(oneshot::Receiver<Result<Vec<u8>, ConnectionError>>);
 
 impl Future for ReplyFuture {
     type Output = Result<Option<Vec<u8>>, ConnectionError>;
@@ -65,6 +57,6 @@ impl Future for ReplyFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         Pin::new(&mut self.as_mut().0)
             .poll(cx)
-            .map(|x| x.unwrap_or(Err(ConnectionError::Unknown)))
+            .map(|x| x.map(|y| y.map(Some)).unwrap_or(Ok(None)))
     }
 }
