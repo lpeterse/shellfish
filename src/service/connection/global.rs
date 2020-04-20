@@ -20,11 +20,11 @@ impl GlobalRequest {
         }
     }
 
-    pub(crate) fn new_want_reply(name: String, data: Vec<u8>) -> (Self, ReplyFuture) {
+    pub(crate) fn new_want_reply(name: String, data: Vec<u8>) -> (Self, GlobalReplyFuture) {
         let (tx, rx) = oneshot::channel();
         let mut self_ = Self::new(name, data);
         self_.reply = Some(tx);
-        (self_, ReplyFuture(rx))
+        (self_, GlobalReplyFuture(rx))
     }
 
     pub fn accept(self, data: Vec<u8>) {
@@ -49,9 +49,15 @@ impl GlobalRequest {
 }
 
 #[derive(Debug)]
-pub struct ReplyFuture(oneshot::Receiver<Result<Vec<u8>, ConnectionError>>);
+pub struct GlobalReplyFuture(oneshot::Receiver<Result<Vec<u8>, ConnectionError>>);
 
-impl Future for ReplyFuture {
+impl GlobalReplyFuture {
+    pub(crate) fn new(rx: oneshot::Receiver<Result<Vec<u8>, ConnectionError>>) -> Self {
+        Self(rx)
+    }
+}
+
+impl Future for GlobalReplyFuture {
     type Output = Result<Option<Vec<u8>>, ConnectionError>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

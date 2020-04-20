@@ -69,9 +69,7 @@ impl ChannelSlots {
         }
     }
 
-    pub fn open_outbound(&mut self, name: &'static str, data: Vec<u8>) -> Option<OpenOutboundRx> {
-        let id = self.alloc()?;
-        let slot = self.elements.get_mut(id)?;
+    pub fn open_outbound(&mut self, name: &'static str, data: Vec<u8>) -> OpenOutboundRx {
         let (tx, rx) = oneshot::channel();
         let opening = OpeningOutbound {
             name,
@@ -79,8 +77,15 @@ impl ChannelSlots {
             sent: false,
             tx,
         };
-        *slot = ChannelSlot::OpeningOutbound(Box::new(opening));
-        Some(rx)
+        let opening = ChannelSlot::OpeningOutbound(Box::new(opening));
+        if let Some(id) = self.alloc() {
+            if let Some(slot) = self.elements.get_mut(id) {
+                *slot = opening;
+                return rx;
+            }
+        }
+        self.elements.push(opening);
+        return rx;
     }
 
     pub fn get_open(&mut self, id: u32) -> Result<&mut ChannelHandle, ConnectionError> {

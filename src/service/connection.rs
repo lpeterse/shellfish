@@ -3,7 +3,6 @@ mod config;
 mod error;
 mod future;
 mod global;
-mod handle;
 mod msg;
 mod state;
 
@@ -14,8 +13,9 @@ pub use self::global::*;
 pub use self::msg::ChannelOpenFailureReason;
 pub use self::state::ConnectionRequest;
 
-use self::handle::*;
+use self::future::*;
 use self::msg::*;
+use self::state::*;
 
 use crate::client::Client;
 use crate::codec::*;
@@ -24,8 +24,9 @@ use crate::transport::{DisconnectReason, Transport, TransportLayer};
 use crate::util::oneshot;
 
 use async_std::stream::Stream;
+use async_std::task::ready;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
 
 /// The connection protocol offers channel multiplexing for a variety of applications like remote
@@ -34,7 +35,7 @@ use std::task::{Context, Poll};
 /// Unless client or server request a service on top of this protocol the connection just keeps
 /// itself alive and does nothing. Dropping the connection object will close the connection and
 /// free all resources. It will also terminate all dependant channels (shells and forwardings etc).
-pub struct Connection<T: TransportLayer = Transport>(ConnectionHandle<T>);
+pub struct Connection<T: TransportLayer = Transport>(Arc<Mutex<ConnectionState<T>>>);
 
 impl<T: TransportLayer> Connection<T> {
     /// Create a new connection.
@@ -42,19 +43,25 @@ impl<T: TransportLayer> Connection<T> {
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
     fn new(config: &Arc<ConnectionConfig>, transport: T) -> Self {
-        Self(ConnectionHandle::new(config, transport))
+        let state = ConnectionState::new(config, transport);
+        let state = Arc::new(Mutex::new(state));
+        let future = ConnectionFuture::new(&state);
+        async_std::task::spawn(future);
+        Self(state)
     }
 
     pub fn request<N: Into<String>, D: Into<Vec<u8>>>(&mut self, name: N, data: D) {
-        self.0.request(name.into(), data.into())
+        let mut x = self.0.lock().unwrap();
+        x.request(name.into(), data.into())
     }
 
     pub fn request_want_reply<N: Into<String>, D: Into<Vec<u8>>>(
         &mut self,
         name: N,
         data: D,
-    ) -> ReplyFuture {
-        self.0.request_want_reply(name.into(), data.into())
+    ) -> GlobalReplyFuture {
+        let mut x = self.0.lock().unwrap();
+        x.request_want_reply(name.into(), data.into())
     }
 
     /// Request a new session on top of an established connection.
@@ -64,7 +71,8 @@ impl<T: TransportLayer> Connection<T> {
     /// (due to config limitiation) or the server hits a limit on the number of concurrent
     /// channels per connection.
     pub fn open_session(&mut self) -> ChannelOpenFuture<Session<Client>> {
-        self.0.open(())
+        let mut x = self.0.lock().unwrap();
+        x.open(())
     }
 
     /// Request a direct-tcpip forwarding on top of an establied connection.
@@ -75,7 +83,8 @@ impl<T: TransportLayer> Connection<T> {
         src_addr: std::net::IpAddr,
         src_port: u16,
     ) -> ChannelOpenFuture<DirectTcpIp> {
-        self.0.open(DirectTcpIpOpen {
+        let mut x = self.0.lock().unwrap();
+        x.open(DirectTcpIpOpen {
             dst_host: dst_host.into(),
             dst_port: dst_port as u32,
             src_addr: src_addr.to_string(),
@@ -86,7 +95,8 @@ impl<T: TransportLayer> Connection<T> {
 
 impl<T: TransportLayer> Drop for Connection<T> {
     fn drop(&mut self) {
-        self.0.disconnect(DisconnectReason::BY_APPLICATION)
+        let mut x = self.0.lock().unwrap();
+        x.disconnect(DisconnectReason::BY_APPLICATION)
     }
 }
 
@@ -105,6 +115,7 @@ impl<T: TransportLayer> Stream for Connection<T> {
     type Item = Result<ConnectionRequest, ConnectionError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        Pin::into_inner(self).0.poll_next_request(cx)
+        let mut x = self.0.lock().unwrap();
+        Poll::Ready(Some(ready!(x.poll_next(cx))))
     }
 }

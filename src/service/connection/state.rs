@@ -19,7 +19,7 @@ pub(crate) struct ConnectionState<T: TransportLayer> {
     global_out_requests: VecDeque<GlobalRequest>,
     global_out_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
     future_task: Option<Waker>,
-    handle_task: Option<Waker>,
+    stream_task: Option<Waker>,
 }
 
 #[derive(Debug)]
@@ -41,7 +41,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             global_out_requests: VecDeque::with_capacity(1),
             global_out_replies: VecDeque::with_capacity(1),
             future_task: None,
-            handle_task: None,
+            stream_task: None,
         }
     }
 
@@ -82,47 +82,45 @@ impl<T: TransportLayer> ConnectionState<T> {
     ) -> Poll<Result<ConnectionRequest, ConnectionError>> {
         self.error?;
         if let Some(request) = self.global_in_requests.pop_front() {
-            self.handle_task = None;
+            self.stream_task = None;
             self.wake_future_task();
             return Poll::Ready(Ok(ConnectionRequest::Global(request)));
         }
         if let Some(request) = self.channels.take_open_request() {
-            self.handle_task = None;
+            self.stream_task = None;
             return Poll::Ready(Ok(ConnectionRequest::ChannelOpen(request)));
         }
-        self.register_handle_task(cx);
+        self.register_stream_task(cx);
         Poll::Pending
     }
 
-    pub fn request_global(&mut self, name: String, data: Vec<u8>) {
+    pub fn request(&mut self, name: String, data: Vec<u8>) {
         let request = GlobalRequest::new(name, data);
         self.global_out_requests.push_back(request);
         self.wake_future_task();
     }
 
-    pub fn request_global_want_reply(&mut self, name: String, data: Vec<u8>) -> ReplyFuture {
+    pub fn request_want_reply(&mut self, name: String, data: Vec<u8>) -> GlobalReplyFuture {
+        if let Err(e) = self.error {
+            let (tx, rx) = oneshot::channel();
+            tx.send(Err(e));
+            return GlobalReplyFuture::new(rx);
+        }
         let (request, reply) = GlobalRequest::new_want_reply(name, data);
         self.global_out_requests.push_back(request);
         self.wake_future_task();
         reply
     }
 
-    pub fn open_channel<C: Channel>(&mut self, params: C::Open) -> ChannelOpenFuture<C> {
-        let rx = if let Err(e) = self.error {
+    pub fn open<C: Channel>(&mut self, o: C::Open) -> ChannelOpenFuture<C> {
+        if let Err(e) = self.error {
             let (tx, rx) = oneshot::channel();
             tx.send(Err(e));
-            rx
-        } else if let Some(rx) = self
-            .channels
-            .open_outbound(C::NAME, BEncoder::encode(&params))
-        {
-            self.wake_future_task();
-            rx
-        } else {
-            let (tx, rx) = oneshot::channel();
-            tx.send(Ok(Err(ChannelOpenFailureReason::RESOURCE_SHORTAGE)));
-            rx
-        };
+            return ChannelOpenFuture::new(rx);
+        }
+
+        let rx = self.channels.open_outbound(C::NAME, BEncoder::encode(&o));
+        self.wake_future_task();
         ChannelOpenFuture::new(rx)
     }
 
@@ -137,17 +135,17 @@ impl<T: TransportLayer> ConnectionState<T> {
         }
     }
 
-    fn register_handle_task(&mut self, cx: &mut Context) {
-        if let Some(ref waker) = self.handle_task {
+    fn register_stream_task(&mut self, cx: &mut Context) {
+        if let Some(ref waker) = self.stream_task {
             if waker.will_wake(cx.waker()) {
                 return;
             }
         }
-        self.handle_task = Some(cx.waker().clone());
+        self.stream_task = Some(cx.waker().clone());
     }
 
-    pub fn wake_handle_task(&mut self) {
-        if let Some(ref task) = self.handle_task {
+    pub fn wake_stream_task(&mut self) {
+        if let Some(ref task) = self.stream_task {
             task.wake_by_ref();
         }
     }
@@ -254,7 +252,7 @@ impl<T: TransportLayer> ConnectionState<T> {
                 ready!(self.transport.poll_send(cx, &MsgRequestFailure))?;
             };
             let _ = self.global_in_replies.pop_front();
-            self.wake_handle_task();
+            self.wake_stream_task();
         }
         Poll::Pending
     }
@@ -331,7 +329,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             let _: MsgChannelOpen = msg;
             log::debug!("Received MSG_CHANNEL_OPEN ({})", msg.name);
             self.channels.open_inbound(msg);
-            self.wake_handle_task();
+            self.wake_stream_task();
             return Ok(());
         }
         // MSG_CHANNEL_OPEN_CONFIRMATION
@@ -445,7 +443,7 @@ impl<T: TransportLayer> ConnectionState<T> {
             self.global_in_replies.push_back(rx);
         }
         self.global_in_requests.push_back(request);
-        self.wake_handle_task();
+        self.wake_stream_task();
         Ok(())
     }
 }
@@ -465,7 +463,7 @@ impl<T: TransportLayer> Terminate for ConnectionState<T> {
         }
         self.channels.terminate(e);
         self.error = Err(e);
-        self.wake_handle_task();
+        self.wake_stream_task();
     }
 }
 
@@ -485,7 +483,7 @@ mod tests {
         assert!(x.error.is_ok());
         assert!(x.disconnect.is_none());
         assert!(x.future_task.is_none());
-        assert!(x.handle_task.is_none());
+        assert!(x.stream_task.is_none());
     }
 
     /// Test poll after creation.
@@ -504,7 +502,7 @@ mod tests {
             assert_eq!(x.transport.consume_count(), 0, "consume_count");
             assert_eq!(x.transport.flush_count(), 2, "flush_count");
             assert!(x.future_task.is_some(), "future_task");
-            assert!(x.handle_task.is_none(), "handle_task");
+            assert!(x.stream_task.is_none(), "stream_task");
             Poll::Ready(())
         }));
     }
@@ -525,7 +523,7 @@ mod tests {
             assert_eq!(x.transport.consume_count(), 0, "consume_count");
             assert_eq!(x.transport.flush_count(), 2, "flush_count");
             assert!(x.future_task.is_some(), "future_task");
-            assert!(x.handle_task.is_none(), "handle_task");
+            assert!(x.stream_task.is_none(), "stream_task");
             Poll::Ready(())
         }));
     }
@@ -552,7 +550,7 @@ mod tests {
         block_on(poll_fn(|cx| {
             assert_eq!(x.poll(cx), Poll::Pending, "poll");
             assert!(x.future_task.is_some(), "future_task");
-            assert!(x.handle_task.is_none(), "handle_task");
+            assert!(x.stream_task.is_none(), "stream_task");
             assert_eq!(
                 x.transport.tx_sent(),
                 vec![vec![vec![81, 97, 98, 99], vec![82]]]
@@ -577,7 +575,7 @@ mod tests {
         block_on(poll_fn(|cx| {
             assert_eq!(x.poll(cx), Poll::Pending, "poll");
             assert!(x.future_task.is_some(), "future_task");
-            assert!(x.handle_task.is_none(), "handle_task");
+            assert!(x.stream_task.is_none(), "stream_task");
             assert_eq!(
                 x.transport.tx_sent(),
                 vec![vec![vec![80, 0, 0, 0, 3, 97, 98, 99, 0, 1, 2, 3]]]
@@ -595,14 +593,13 @@ mod tests {
         let t = TestTransport::new();
         let mut x = ConnectionState::new(&c, t);
         x.transport.set_tx_ready(true);
-        
-        #[allow(unused_variables)]
-        let _ = x.open_channel::<Session<Client>>(());
+
+        let _ = x.open::<Session<Client>>(());
 
         block_on(poll_fn(|cx| {
             assert_eq!(x.poll(cx), Poll::Pending, "poll");
             assert!(x.future_task.is_some(), "future_task");
-            assert!(x.handle_task.is_none(), "handle_task");
+            assert!(x.stream_task.is_none(), "stream_task");
             assert_eq!(
                 x.transport.tx_sent(),
                 vec![vec![vec![
@@ -612,5 +609,117 @@ mod tests {
             );
             Poll::Ready(())
         }));
+    }
+
+    /// Test poll_next after creation.
+    #[test]
+    fn test_connection_state_poll_next_01() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+
+        block_on(poll_fn(|cx| {
+            if let Poll::Ready(_) = x.poll_next(cx) {
+                panic!("shall not be ready")
+            }
+            assert!(x.future_task.is_none(), "future_task");
+            assert!(x.stream_task.is_some(), "stream_task");
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test poll_next after error occured.
+    #[test]
+    fn test_connection_state_poll_next_02() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+
+        let e = ConnectionError::ChannelIdInvalid;
+        x.error = Err(e);
+
+        block_on(poll_fn(|cx| {
+            match x.poll_next(cx) {
+                Poll::Ready(Err(e2)) => assert_eq!(e2, e),
+                _ => panic!("expected error"),
+            }
+            assert!(x.future_task.is_none(), "future_task");
+            assert!(x.stream_task.is_none(), "stream_task");
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test poll_next when global request present.
+    #[test]
+    fn test_connection_state_poll_next_03() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+
+        let req = GlobalRequest::new("abc".into(), vec![1, 2, 3]);
+        x.global_in_requests.push_back(req);
+
+        block_on(poll_fn(|cx| {
+            match x.poll_next(cx) {
+                Poll::Ready(Ok(ConnectionRequest::Global(_))) => (),
+                _ => panic!("expected global request"),
+            }
+            assert!(x.future_task.is_none(), "future_task");
+            assert!(x.stream_task.is_none(), "stream_task");
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test poll_next when channel open request present.
+    #[test]
+    fn test_connection_state_poll_next_04() {
+        use async_std::future::poll_fn;
+        use async_std::task::*;
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+
+        let msg = MsgChannelOpen::new("session".into(), 0, 0, 0, vec![]);
+        x.channels.open_inbound(msg);
+
+        block_on(poll_fn(|cx| {
+            match x.poll_next(cx) {
+                Poll::Ready(Ok(ConnectionRequest::ChannelOpen(_))) => (),
+                _ => panic!("expected channel open request"),
+            }
+            assert!(x.future_task.is_none(), "future_task");
+            assert!(x.stream_task.is_none(), "stream_task");
+            Poll::Ready(())
+        }));
+    }
+
+    /// Test request_global.
+    #[test]
+    fn test_connection_state_request_global_01() {
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+
+        assert_eq!(x.global_out_requests.len(), 0);
+        x.request("abc".into(), vec![123]);
+        assert_eq!(x.global_out_requests.len(), 1);
+    }
+
+    /// Test request_global_want_reply.
+    #[test]
+    fn test_connection_state_request_global_want_reply_01() {
+        let c = Arc::new(ConnectionConfig::default());
+        let t = TestTransport::new();
+        let mut x = ConnectionState::new(&c, t);
+
+        assert_eq!(x.global_out_requests.len(), 0);
+        x.request_want_reply("abc".into(), vec![123]);
+        assert_eq!(x.global_out_requests.len(), 1);
     }
 }
