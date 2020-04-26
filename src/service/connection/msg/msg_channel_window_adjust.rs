@@ -7,6 +7,15 @@ pub(crate) struct MsgChannelWindowAdjust {
     pub bytes_to_add: u32,
 }
 
+impl MsgChannelWindowAdjust {
+    pub fn new(recipient_channel: u32, bytes_to_add: u32) -> Self {
+        Self {
+            recipient_channel,
+            bytes_to_add,
+        }
+    }
+}
+
 impl Message for MsgChannelWindowAdjust {
     const NUMBER: u8 = 93;
 }

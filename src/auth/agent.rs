@@ -4,13 +4,13 @@ use async_std::os::unix::net::UnixStream;
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
-/// An interface to the local `ssh-agent`.
+/// A client for the local `ssh-agent`.
 #[derive(Debug, Clone)]
-pub struct LocalAgent {
+pub struct Agent {
     path: PathBuf,
 }
 
-impl LocalAgent {
+impl Agent {
     const SSH_AUTH_SOCK: &'static str = "SSH_AUTH_SOCK";
 
     /// Create a new agent client by path designating the unix domain socket.
@@ -57,7 +57,7 @@ impl LocalAgent {
     }
 }
 
-impl AuthAgent for LocalAgent {
+impl AuthAgent for Agent {
     fn identities(&self) -> BoxFuture<Result<Vec<(Identity, String)>, AuthAgentError>> {
         let self_ = self.clone();
         Box::pin(async move { Self::identities(&self_).await })

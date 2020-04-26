@@ -22,6 +22,9 @@ pub trait Decoder<'a>: Clone {
     fn take_decode<T: Decode>(&mut self) -> Option<T> {
         Decode::decode(self)
     }
+    fn take_decode_ref<T: DecodeRef<'a>>(&mut self) -> Option<T> {
+        DecodeRef::decode(self)
+    }
     fn expect_u8(&mut self, x: u8) -> Option<()>;
     fn expect_u32be(&mut self, x: u32) -> Option<()>;
     fn expect_true(&mut self) -> Option<()>;

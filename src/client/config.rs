@@ -33,7 +33,7 @@ pub struct TcpKeepaliveConfig {
 impl Default for TcpKeepaliveConfig {
     fn default() -> Self {
         Self {
-            time: Some(std::time::Duration::from_secs(20)),
+            time: Some(std::time::Duration::from_secs(300)),
             intvl: Some(std::time::Duration::from_secs(5)),
             probes: Some(5),
         }

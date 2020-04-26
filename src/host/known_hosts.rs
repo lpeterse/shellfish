@@ -1,8 +1,8 @@
 use super::verification::{HostKeyVerifier, VerificationError, VerificationFuture};
 use crate::algorithm::auth::*;
 use crate::codec::*;
-use crate::util::*;
 use crate::util::glob::*;
+use crate::util::*;
 
 use async_std::fs::File;
 use async_std::io::{BufReader, Read};
@@ -16,11 +16,7 @@ pub struct KnownHosts {
 
 impl KnownHosts {
     /// Loop through all files and lines until either a match or a revocation has been found.
-    pub async fn verify(
-        &self,
-        name: &str,
-        identity: &Identity,
-    ) -> Result<(), VerificationError> {
+    pub async fn verify(&self, name: &str, identity: &Identity) -> Result<(), VerificationError> {
         for path in &self.paths {
             log::debug!("Looking for {} in {:?}", name, path);
             match Self::verify_path(&path, name, identity).await {
@@ -82,6 +78,7 @@ impl HostKeyVerifier for KnownHosts {
     }
 }
 
+#[allow(deprecated)] // FIXME
 impl Default for KnownHosts {
     fn default() -> Self {
         let mut paths = vec![];

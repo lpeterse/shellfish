@@ -13,7 +13,7 @@ mod msg_global_request;
 mod msg_request_failure;
 mod msg_request_success;
 
-pub use msg_channel_open_failure::ChannelOpenFailureReason;
+pub use msg_channel_open_failure::ChannelOpenFailure;
 
 pub(crate) use msg_channel_close::*;
 pub(crate) use msg_channel_data::*;

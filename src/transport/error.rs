@@ -19,7 +19,6 @@ pub enum TransportError {
     NoCommonEncryptionAlgorithm,
     NoCommonKexAlgorithm,
     NoCommonMacAlgorith,
-    InactivityTimeout,
     DisconnectByUs(DisconnectReason),
     DisconnectByPeer(DisconnectReason),
 }

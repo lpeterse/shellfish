@@ -1,5 +1,14 @@
 #[derive(Clone, Debug)]
 pub struct ConnectionConfig {
+    /// The maximum number of queued requests/replies per connection.
+    ///
+    /// This is not an actually allocated queue size, but a limit on the summed
+    /// length of all queues at which the connection shall safely terminate with
+    /// an error instead of performing unbounded allocation in order to avoid
+    /// DoS attacks.
+    ///
+    /// Defaults to 256.
+    pub queued_max_count: u32,
     /// The maximum number of local channels per connection.
     ///
     /// Defaults to 256.
@@ -17,6 +26,7 @@ pub struct ConnectionConfig {
 impl Default for ConnectionConfig {
     fn default() -> Self {
         Self {
+            queued_max_count: 256,
             channel_max_count: 256,
             channel_max_window_size: 1024 * 1024,
             channel_max_packet_size: 32768,
@@ -31,6 +41,7 @@ mod tests {
     #[test]
     fn test_default_01() {
         let c = ConnectionConfig::default();
+        assert_eq!(c.queued_max_count, 256);
         assert_eq!(c.channel_max_count, 256);
         assert_eq!(c.channel_max_window_size, 1024 * 1024);
         assert_eq!(c.channel_max_packet_size, 32768);

@@ -4,8 +4,18 @@ use crate::message::*;
 #[derive(Debug)]
 pub(crate) struct MsgGlobalRequest {
     pub name: String,
-    pub want_reply: bool,
     pub data: Vec<u8>,
+    pub want_reply: bool,
+}
+
+impl MsgGlobalRequest {
+    pub fn new<N: Into<String>, D: Into<Vec<u8>>>(name: N, data: D, want_reply: bool) -> Self {
+        Self {
+            name: name.into(),
+            data: data.into(),
+            want_reply,
+        }
+    }
 }
 
 impl Message for MsgGlobalRequest {
@@ -48,7 +58,7 @@ mod tests {
             data: b"data"[..].into(),
         };
         assert_eq!(
-            "MsgGlobalRequest { name: \"name\", want_reply: true, data: [100, 97, 116, 97] }",
+            "MsgGlobalRequest { name: \"name\", data: [100, 97, 116, 97], want_reply: true }",
             format!("{:?}", msg)
         );
     }

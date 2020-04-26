@@ -1,17 +1,13 @@
 use crate::codec::*;
 
-#[derive(Copy, Clone)]
+use zeroize::*;
+
+#[derive(Clone)]
 pub struct SessionId([u8; 32]);
 
 impl SessionId {
     pub fn new(x: [u8; 32]) -> Self {
         Self(x)
-    }
-
-    pub fn update(&mut self, x: [u8; 32]) {
-        if self.0 == Self::default().0 {
-            self.0 = x;
-        }
     }
 }
 
@@ -31,12 +27,6 @@ impl Encode for SessionId {
     }
 }
 
-impl Default for SessionId {
-    fn default() -> Self {
-        Self([0; 32])
-    }
-}
-
 impl std::fmt::Debug for SessionId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "SessionId(")?;
@@ -47,24 +37,21 @@ impl std::fmt::Debug for SessionId {
     }
 }
 
+impl Zeroize for SessionId {
+    fn zeroize(&mut self) {
+        self.0.zeroize()
+    }
+}
+
+impl Drop for SessionId {
+    fn drop(&mut self) {
+        self.zeroize()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_update_01() {
-        let mut x = SessionId::default();
-        x.update([1;32]);
-        assert_eq!(x.as_ref(), [1;32]);
-    }
-
-    #[test]
-    fn test_update_02() {
-        let mut x = SessionId::default();
-        x.update([1;32]);
-        x.update([2;32]);
-        assert_eq!(x.as_ref(), [1;32]);
-    }
 
     #[test]
     fn test_debug_01() {

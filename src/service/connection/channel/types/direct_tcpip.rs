@@ -14,7 +14,6 @@ pub struct DirectTcpIp(pub(crate) ChannelHandle);
 
 impl Channel for DirectTcpIp {
     type Open = DirectTcpIpOpen;
-    //    type Request = DirectTcpIpRequest;
 
     const NAME: &'static str = "direct-tcpip";
 

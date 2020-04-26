@@ -5,13 +5,15 @@ use crate::transport::TransportError;
 pub enum ConnectionError {
     IoError(std::io::ErrorKind),
     TransportError(TransportError),
-    GlobalRequestReplyUnexpected,
-    ChannelOpenFailure(ChannelOpenFailureReason),
+    ChannelOpenFailure(ChannelOpenFailure),
     ChannelOpenUnexpected,
     ChannelWindowAdjustUnexpected,
     ChannelWindowAdjustOverflow,
     ChannelIdInvalid,
-    ChannelExtendedDataCodeInvalid,
+    ChannelDataUnexpected,
+    ChannelEofUnexpected,
+    ChannelCloseUnexpected,
+    ChannelExtendedDataUnexpected,
     ChannelRequestFailure,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
@@ -20,14 +22,9 @@ pub enum ConnectionError {
     ChannelMaxPacketSizeExceeded,
     ChannelBufferSizeExceeded,
     ChannelTypeMismatch,
-    RequestSenderDropped,
-    RequestReceiverDropped,
-    RequestUnexpectedResponse,
-    Unknown
-}
-
-pub (crate) trait Terminate {
-    fn terminate(&mut self, e: ConnectionError);
+    GlobalReplyUnexpected,
+    ResourceExhaustion,
+    Unknown,
 }
 
 impl From<std::io::Error> for ConnectionError {
@@ -42,9 +39,18 @@ impl From<TransportError> for ConnectionError {
     }
 }
 
-impl From<ChannelOpenFailureReason> for ConnectionError {
-    fn from(e: ChannelOpenFailureReason) -> Self {
+impl From<ChannelOpenFailure> for ConnectionError {
+    fn from(e: ChannelOpenFailure) -> Self {
         Self::ChannelOpenFailure(e)
+    }
+}
+
+impl From<Result<DisconnectReason, ConnectionError>> for ConnectionError {
+    fn from(e: Result<DisconnectReason, ConnectionError>) -> Self {
+        match e {
+            Ok(reason) => ConnectionError::TransportError(TransportError::DisconnectByPeer(reason)),
+            Err(e) => e,
+        }
     }
 }
 
@@ -89,18 +95,6 @@ mod tests {
         assert_eq!(
             "ChannelWindowSizeOverflow",
             format!("{:?}", ConnectionError::ChannelWindowSizeOverflow)
-        );
-        assert_eq!(
-            "RequestSenderDropped",
-            format!("{:?}", ConnectionError::RequestSenderDropped)
-        );
-        assert_eq!(
-            "RequestReceiverDropped",
-            format!("{:?}", ConnectionError::RequestReceiverDropped)
-        );
-        assert_eq!(
-            "RequestUnexpectedResponse",
-            format!("{:?}", ConnectionError::RequestUnexpectedResponse)
         );
     }
 

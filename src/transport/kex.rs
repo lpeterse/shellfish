@@ -44,14 +44,7 @@ pub trait Kex {
     fn push_new_keys_tx(&mut self) -> Result<(), TransportError>;
     fn push_new_keys_rx(&mut self) -> Result<(), TransportError>;
 
-    fn session_id(&self) -> &SessionId;
-}
-
-pub enum KexOutput {
-    Init(MsgKexInit<&'static str>),
-    EcdhInit(MsgKexEcdhInit<X25519>),
-    EcdhReply(MsgKexEcdhReply<X25519>),
-    NewKeys(EncryptionConfig),
+    fn session_id(&self) -> Result<&SessionId, TransportError>;
 }
 
 #[derive(Clone, Debug)]

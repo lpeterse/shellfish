@@ -3,6 +3,7 @@ use super::kex::*;
 use crate::algorithm::kex::*;
 
 use async_std::future::Future;
+use futures_timer::Delay;
 
 /// The client side state machine for key exchange.
 pub struct ClientKex {
@@ -22,7 +23,7 @@ pub struct ClientKex {
     /// Rekeying threshold (updates after successful kex)
     next_at_bytes_received: u64,
     /// Session id (only after after initial kex, constant afterwards)
-    session_id: SessionId,
+    session_id: Option<SessionId>,
 }
 
 impl ClientKex {
@@ -41,7 +42,7 @@ impl ClientKex {
             next_at: Delay::new(config.kex_interval_duration),
             next_at_bytes_sent: config.kex_interval_bytes,
             next_at_bytes_received: config.kex_interval_bytes,
-            session_id: SessionId::default(),
+            session_id: None,
         }
     }
 }
@@ -49,7 +50,7 @@ impl ClientKex {
 struct State {
     cookie: KexCookie,
     secret: <X25519 as EcdhAlgorithm>::EphemeralSecret,
-    cipher: Option<(EncryptionConfig, DecryptionConfig)>,
+    cipher: Option<(CipherConfig, CipherConfig)>,
     init_tx: bool,
     init_rx: Option<MsgKexInit>,
     ecdh_tx: bool,
@@ -218,13 +219,13 @@ impl Kex for ClientKex {
                 if let Some(ref remote) = state.init_rx {
                     let local = MsgKexInit::new_from_config(state.cookie, &self.config);
                     // Compute the DH shared secret (create a new placeholder while
-                    // the actual secret get consumed in the operation).
+                    // the actual secret gets consumed in the operation).
                     let dh_secret = std::mem::replace(&mut state.secret, X25519::new());
                     let dh_public = X25519::public(&dh_secret);
                     let k = X25519::diffie_hellman(dh_secret, &msg.dh_public);
-                    let k = X25519::secret_as_ref(&k);
+                    //let k = X25519::secret_as_ref(&k);
                     // Compute the exchange hash over the data exchanged so far.
-                    let h: [u8; 32] = KexEcdhHash::<X25519> {
+                    let h: SessionId = KexEcdhHash::<X25519> {
                         client_identification: &self.config.identification,
                         server_identification: &self.remote_id,
                         client_kex_init: &local,
@@ -232,28 +233,28 @@ impl Kex for ClientKex {
                         server_host_key: &msg.host_key,
                         dh_client_key: &dh_public,
                         dh_server_key: &msg.dh_public,
-                        dh_secret: k,
+                        dh_secret: X25519::secret_as_ref(&k),
                     }
                     .sha256();
                     // Verify the host key signature
                     msg.signature
-                        .verify(&msg.host_key.public_key(), &h[..])
+                        .verify(&msg.host_key.public_key(), h.as_ref())
                         .ok_or(TransportError::InvalidSignature)?;
                     // The session id is only computed during first kex and constant afterwards
-                    self.session_id.update(h);
+                    let sid = self.session_id.get_or_insert_with(|| h.clone());
                     let algos = AlgorithmAgreement::agree(&local, &remote)?;
-                    let keys = KeyStreams::new_sha256(k, &h, &self.session_id);
+                    let gks: GenericKeyStream = KeyStreamX25519::new(k, h, sid).into();
                     let enc = CipherConfig {
                         ea: algos.ea_c2s,
                         ca: algos.ca_c2s,
                         ma: algos.ma_c2s,
-                        ke: keys.c(),
+                        ke: gks.c2s(),
                     };
                     let dec = CipherConfig {
                         ea: algos.ea_s2c,
                         ca: algos.ca_s2c,
                         ma: algos.ma_s2c,
-                        ke: keys.d(),
+                        ke: gks.s2c(),
                     };
                     let fut = self.verifier.verify(&self.remote_name, &msg.host_key);
                     state.ecdh_rx = Some(Err(fut));
@@ -325,8 +326,8 @@ impl Kex for ClientKex {
         Err(TransportError::ProtocolError)
     }
 
-    fn session_id(&self) -> &SessionId {
-        &self.session_id
+    fn session_id(&self) -> Result<&SessionId, TransportError> {
+        self.session_id.as_ref().ok_or(TransportError::InvalidState)
     }
 }
 

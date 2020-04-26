@@ -1,11 +1,8 @@
 use super::*;
 use crate::util::assume;
 
-use async_std::future::Future;
-
 /// The `Transceiver` handles the low-level part of the wire-protocol including framing and cipher.
 pub struct Transceiver<S: Socket> {
-    config: Arc<TransportConfig>,
     socket: Buffered<S>,
     receiver_state: ReceiverState,
     bytes_sent: u64,
@@ -14,10 +11,6 @@ pub struct Transceiver<S: Socket> {
     packets_received: u64,
     encryption_ctx: CipherContext,
     decryption_ctx: CipherContext,
-    local_inactivity_timer: Delay,
-    local_inactivity_timeout: std::time::Duration, // FIXME
-    remote_inactivity_timer: Delay,
-    remote_inactivity_timeout: std::time::Duration, // FIXME
 }
 
 impl<S: Socket> Transceiver<S> {
@@ -25,9 +18,8 @@ impl<S: Socket> Transceiver<S> {
     ///
     /// This function also performs the identification string exchange which may fail for different
     /// reasons. An error is returned in this case.
-    pub fn new(config: &Arc<TransportConfig>, socket: S) -> Self {
+    pub fn new(socket: S) -> Self {
         Self {
-            config: config.clone(),
             socket: Buffered::new(socket),
             receiver_state: ReceiverState::new(),
             bytes_sent: 0,
@@ -36,10 +28,6 @@ impl<S: Socket> Transceiver<S> {
             packets_received: 0,
             encryption_ctx: CipherContext::new(),
             decryption_ctx: CipherContext::new(),
-            local_inactivity_timer: Delay::new(config.alive_interval),
-            local_inactivity_timeout: config.alive_interval,
-            remote_inactivity_timer: Delay::new(config.inactivity_timeout),
-            remote_inactivity_timeout: config.inactivity_timeout,
         }
     }
 
@@ -91,7 +79,6 @@ impl<S: Socket> Transceiver<S> {
         self.encryption_ctx.encrypt(self.packets_sent, buffer);
         self.packets_sent += 1;
         self.bytes_sent += packet.size() as u64;
-        self.reset_local_inactivity_timer(cx)?;
         Poll::Ready(Ok(()))
     }
 
@@ -129,7 +116,6 @@ impl<S: Socket> Transceiver<S> {
             s.receiver_state.packet_len = packet_len;
         }
         // Case 3: The packet is complete and decrypted in buffer.
-        s.reset_remote_inactivity_timer(cx)?;
         return Poll::Ready(Ok(()));
     }
 
@@ -156,31 +142,6 @@ impl<S: Socket> Transceiver<S> {
         self.bytes_received += buffer_len as u64;
         self.socket.consume(buffer_len);
         self.receiver_state.reset();
-    }
-
-    /// Send a keep alive message when determined to be required.
-    /// Like above, the call registers the timer for wakeup. The alive timer is reset
-    /// automatically when the message has been sent successfully.
-    pub fn poll_keepalive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        match Future::poll(Pin::new(&mut self.local_inactivity_timer), cx) {
-            Poll::Pending => (),
-            Poll::Ready(()) => {
-                ready!(self.poll_send(cx, &MsgIgnore::new()))?;
-                log::debug!("Sent MSG_IGNORE (as keep-alive)");
-                ready!(self.poll_flush(cx))?;
-            }
-        }
-        Poll::Ready(Ok(()))
-    }
-
-    /// The inactivity check causes an error in case of timeout and falls through else.
-    /// Calling it also registers the timer for wakeup (consider this when reordering code).
-    pub fn poll_inactivity(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        match Future::poll(Pin::new(&mut self.remote_inactivity_timer), cx) {
-            Poll::Pending => (),
-            Poll::Ready(()) => Err(TransportError::InactivityTimeout)?,
-        }
-        Poll::Ready(Ok(()))
     }
 
     /// Send the local identification string.
@@ -222,28 +183,6 @@ impl<S: Socket> Transceiver<S> {
         let id = Decode::decode(&mut d).ok_or(TransportError::DecoderError)?;
         self.socket.consume(len + 2);
         Ok(id)
-    }
-
-    /// Resets the local inactivity timer to the configured timespan and registers it for wakeup.
-    fn reset_local_inactivity_timer(&mut self, cx: &mut Context) -> Result<(), TransportError> {
-        self.local_inactivity_timer
-            .reset(self.local_inactivity_timeout);
-        match Future::poll(Pin::new(&mut self.local_inactivity_timer), cx) {
-            Poll::Pending => Ok(()),
-            // Shall not happen, but if it does we rather convert it to an error instead of a panic
-            _ => Err(TransportError::InactivityTimeout),
-        }
-    }
-
-    /// Resets the remote inactivity timer to the configured timespan and registers it for wakeup.
-    fn reset_remote_inactivity_timer(&mut self, cx: &mut Context) -> Result<(), TransportError> {
-        self.remote_inactivity_timer
-            .reset(self.remote_inactivity_timeout);
-        match Future::poll(Pin::new(&mut self.remote_inactivity_timer), cx) {
-            Poll::Pending => Ok(()),
-            // Shall not happen, but if it does we rather convert it to an error instead of a panic
-            _ => Err(TransportError::InactivityTimeout),
-        }
     }
 }
 

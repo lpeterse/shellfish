@@ -1,120 +1,92 @@
+use super::SessionId;
 use crate::codec::*;
+
 use sha2::{Digest, Sha256};
-
-#[derive(Clone, Debug)]
-pub enum KeyStreams {
-    KeyStreamsSha256(KeyStreamsSha256),
-}
-
-impl KeyStreams {
-    pub fn new_sha256<S: AsRef<[u8]>>(k: &[u8], h: &[u8], sid: S) -> Self {
-        Self::KeyStreamsSha256(KeyStreamsSha256::new(k, h, sid.as_ref()))
-    }
-
-    pub fn c(&self) -> KeyStream {
-        match self {
-            Self::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.c()),
-        }
-    }
-
-    pub fn d(&self) -> KeyStream {
-        match self {
-            Self::KeyStreamsSha256(ks) => KeyStream::KeyStreamSha256(ks.d()),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub struct KeyStreamsSha256 {
-    h: Vec<u8>,
-    k: Vec<u8>,
-    sid: Vec<u8>,
-}
-
-impl KeyStreamsSha256 {
-    fn new(k: &[u8], h: &[u8], sid: &[u8]) -> Self {
-        Self {
-            k: Vec::from(k),
-            h: Vec::from(h),
-            sid: Vec::from(sid),
-        }
-    }
-
-    fn c(&self) -> KeyStreamSha256 {
-        KeyStreamSha256::new(self.k.clone(), self.h.clone(), self.sid.clone(), 'C')
-    }
-
-    fn d(&self) -> KeyStreamSha256 {
-        KeyStreamSha256::new(self.k.clone(), self.h.clone(), self.sid.clone(), 'D')
-    }
-}
-
-impl std::fmt::Debug for KeyStreamsSha256 {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "KeyStreams256 (..)")
-    }
-}
+use std::sync::Arc;
+use x25519_dalek::SharedSecret;
+use zeroize::*;
 
 #[derive(Clone, Debug)]
 pub enum KeyStream {
-    KeyStreamSha256(KeyStreamSha256),
+    C2S(GenericKeyStream),
+    S2C(GenericKeyStream),
 }
 
 impl KeyStream {
-    pub fn read(&mut self, buf: &mut [u8]) {
+    pub fn encryption_32_32(&self, k1: &mut [u8; 32], k2: &mut [u8; 32]) {
         match self {
-            KeyStream::KeyStreamSha256(ks) => ks.read(buf),
+            Self::C2S(x) => x.key_32_32('C', k1, k2),
+            Self::S2C(x) => x.key_32_32('D', k1, k2),
         }
     }
 }
 
 #[derive(Clone, Debug)]
-pub struct KeyStreamSha256 {
-    k: Vec<u8>,
-    h: Vec<u8>,
-    state: Sha256,
-    stream: Vec<u8>,
-    position: usize,
+pub enum GenericKeyStream {
+    X25519(Arc<KeyStreamX25519>),
 }
 
-impl KeyStreamSha256 {
-    const DIGEST_SIZE: usize = 32;
+impl GenericKeyStream {
+    pub fn c2s(&self) -> KeyStream {
+        KeyStream::C2S(self.clone())
+    }
 
-    fn new(k: Vec<u8>, h: Vec<u8>, sid: Vec<u8>, idx: char) -> Self {
-        let mut state = Sha256::new();
+    pub fn s2c(&self) -> KeyStream {
+        KeyStream::S2C(self.clone())
+    }
+
+    pub fn key_32_32(&self, idx: char, k1: &mut [u8; 32], k2: &mut [u8; 32]) {
+        match self {
+            Self::X25519(x) => x.key_32_32(idx, k1, k2),
+        }
+    }
+}
+
+impl KeyStreamX25519 {
+    pub fn new(k: SharedSecret, h: SessionId, sid: &SessionId) -> Self {
+        let sid = sid.clone();
+        Self { k, h, sid }
+    }
+
+    pub fn key_32_32(&self, idx: char, k1: &mut [u8; 32], k2: &mut [u8; 32]) {
+        let mut sha2 = Sha256::new();
         // RFC: "Here K is encoded as mpint and "A" as byte and session_id as raw
         //       data.  "A" means the single character A, ASCII 65."
-        Encode::encode(&MPInt(&k[..]), &mut state);
-        state.input(&h[..]);
-        state.input([idx as u8]);
-        state.input(sid);
-        let mut stream = Vec::with_capacity(2 * Self::DIGEST_SIZE);
-        stream.extend_from_slice(&state.result_reset());
-        Self {
-            k,
-            h,
-            state,
-            stream,
-            position: 0,
-        }
-    }
-
-    pub fn read(&mut self, buf: &mut [u8]) {
-        let requested = buf.len();
-        let mut available = self.stream.len() - self.position;
-        while requested > available {
-            Encode::encode(&MPInt(&self.k[..]), &mut self.state);
-            self.state.input(&self.h[..]);
-            self.state.input(&self.stream);
-            self.stream
-                .extend_from_slice(&self.state.result_reset()[..]);
-            available += Self::DIGEST_SIZE;
-        }
-        buf.copy_from_slice(&self.stream[self.position..self.position + requested]);
-        self.position += requested;
+        Encode::encode(&MPInt(self.k.as_bytes()), &mut sha2);
+        sha2.input(self.h.as_ref());
+        sha2.input([idx as u8]);
+        sha2.input(self.sid.as_ref());
+        let mut k1_ = sha2.result_reset();
+        Encode::encode(&MPInt(self.k.as_bytes()), &mut sha2);
+        sha2.input(self.h.as_ref());
+        sha2.input(&k1_);
+        let mut k2_ = sha2.result_reset();
+        k1.copy_from_slice(&k1_[..]);
+        k2.copy_from_slice(&k2_[..]);
+        k1_.zeroize();
+        k2_.zeroize();
     }
 }
 
+pub struct KeyStreamX25519 {
+    k: SharedSecret,
+    h: SessionId,
+    sid: SessionId,
+}
+
+impl std::fmt::Debug for KeyStreamX25519 {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KeyStreamX25519(...)")
+    }
+}
+
+impl Into<GenericKeyStream> for KeyStreamX25519 {
+    fn into(self) -> GenericKeyStream {
+        GenericKeyStream::X25519(Arc::new(self))
+    }
+}
+
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -129,7 +101,7 @@ mod tests {
             143, 162, 77, 88, 20, 122, 164, 90, 216, 15, 8, 149, 23, 47, 66, 157, 242, 12, 176, 63,
             153, 120, 103, 133, 17, 36, 10, 69, 6, 145, 250, 211,
         ];
-        let sid = h;
+        let sid = SessionId::new(h);
         let c1 = [
             35, 83, 168, 202, 23, 231, 195, 6, 115, 123, 255, 191, 43, 255, 229, 67, 98, 137, 190,
             144, 108, 174, 108, 161, 250, 15, 170, 67, 142, 10, 102, 230,
@@ -137,10 +109,6 @@ mod tests {
         let c2 = [
             208, 1, 211, 152, 131, 216, 216, 233, 134, 111, 193, 40, 199, 147, 160, 146, 106, 253,
             28, 52, 89, 128, 0, 225, 61, 213, 79, 108, 116, 63, 4, 20,
-        ];
-        let c3 = [
-            94, 43, 166, 97, 133, 172, 152, 2, 25, 11, 160, 232, 103, 139, 27, 114, 221, 159, 190,
-            65, 59, 46, 138, 76, 237, 254, 51, 56, 37, 43, 86, 130,
         ];
         let d1 = [
             184, 79, 161, 100, 101, 46, 182, 213, 100, 94, 243, 107, 150, 176, 38, 24, 244, 253,
@@ -150,34 +118,20 @@ mod tests {
             172, 158, 149, 34, 60, 215, 124, 232, 242, 63, 133, 44, 219, 188, 109, 5, 24, 230, 203,
             243, 189, 84, 85, 5, 162, 99, 163, 190, 201, 197, 78, 27,
         ];
-        let d3 = [
-            22, 59, 101, 191, 103, 154, 108, 11, 161, 26, 111, 59, 28, 53, 216, 56, 218, 138, 28,
-            112, 145, 205, 14, 56, 169, 159, 134, 220, 119, 201, 5, 244,
-        ];
 
-        let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
-
-        let mut c = ks.c();
+        let ks = KeyStream::c2s_sha256(k.as_ref(), h, sid.clone());
         let mut c1_ = [0; 32];
-        c.read(&mut c1_);
-        assert_eq!(c1, c1_, "c1");
         let mut c2_ = [0; 32];
-        c.read(&mut c2_);
+        ks.encryption_32_32(&mut c1_, &mut c2_);
+        assert_eq!(c1, c1_, "c1");
         assert_eq!(c2, c2_, "c2");
-        let mut c3_ = [0; 32];
-        c.read(&mut c3_);
-        assert_eq!(c3, c3_, "c3");
 
-        let mut d = ks.d();
+        let ks = KeyStream::s2c_sha256(k.as_ref(), h, sid);
         let mut d1_ = [0; 32];
-        d.read(&mut d1_);
-        assert_eq!(d1, d1_, "d1");
         let mut d2_ = [0; 32];
-        d.read(&mut d2_);
+        ks.encryption_32_32(&mut d1_, &mut d2_);
+        assert_eq!(d1, d1_, "d1");
         assert_eq!(d2, d2_, "d2");
-        let mut d3_ = [0; 32];
-        d.read(&mut d3_);
-        assert_eq!(d3, d3_, "d3");
     }
 
     #[test]
@@ -191,27 +145,17 @@ mod tests {
             143, 162, 77, 88, 20, 122, 164, 90, 216, 15, 8, 149, 23, 47, 66, 157, 242, 12, 176, 63,
             153, 120, 103, 133, 17, 36, 10, 69, 6, 145, 250, 211,
         ];
-        let sid = h;
+        let sid = SessionId::new(h);
         let c1 = [
             125, 246, 53, 208, 237, 52, 170, 30, 97, 138, 151, 151, 199, 53, 83, 108, 130, 235,
             231, 87, 227, 10, 212, 137, 52, 16, 100, 244, 188, 104, 75, 76,
         ];
 
-        let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
-
-        let mut c = ks.c();
+        let ks = KeyStream::c2s_sha256(k.as_ref(), h, sid);
         let mut c1_ = [0; 32];
-        c.read(&mut c1_);
+        let mut c2_ = [0; 32];
+        ks.encryption_32_32(&mut c1_, &mut c2_);
         assert_eq!(c1, c1_, "c1");
     }
-
-    #[test]
-    fn test_key_streams_debug_01() {
-        let k = [];
-        let h = [];
-        let sid = h;
-
-        let ks = KeyStreams::new_sha256(&k[..], &h[..], &sid[..]);
-        assert_eq!("KeyStreamsSha256(KeyStreams256 (..))", format!("{:?}", ks))
-    }
 }
+*/

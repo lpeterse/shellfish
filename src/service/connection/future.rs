@@ -2,7 +2,7 @@ use super::state::*;
 use super::*;
 
 use async_std::future::Future;
-use async_std::task::{ready, Context, Poll};
+use async_std::task::{Context, Poll, Waker};
 use std::pin::*;
 use std::sync::{Arc, Mutex};
 
@@ -24,12 +24,12 @@ impl<T: TransportLayer> Future for ConnectionFuture<T> {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        log::debug!("Poll");
-        let mut x = Pin::into_inner(self).0.lock().unwrap();
-        if let Err(e) = ready!(x.poll(cx)) {
-            log::debug!("Connection failed with {:?}", e);
-            x.terminate(e);
+        let (poll, waker) = {
+            let mut x = self.0.lock().unwrap();
+            (x.poll(cx).map(|r| x.terminate(r)), x.outer_task_waker())
         };
-        Poll::Ready(())
+        // Wake the other task _after_ the Mutex lock has been released.
+        let _ = waker.map(Waker::wake);
+        poll
     }
 }

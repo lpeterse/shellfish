@@ -1,5 +1,7 @@
 use super::ecdh_algorithm::*;
 use super::msg_kex_init::MsgKexInit;
+use super::SessionId;
+
 use crate::algorithm::auth::*;
 use crate::codec::*;
 use crate::transport::identification::*;
@@ -20,27 +22,27 @@ pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
 impl<'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
     pub fn encode<E: Encoder>(&self, e: &mut E) {
         e.push_u32be(Encode::size(self.client_identification) as u32);
-        Encode::encode(self.client_identification, e);
+        e.push_encode(self.client_identification);
         e.push_u32be(Encode::size(self.server_identification) as u32);
-        Encode::encode(self.server_identification, e);
+        e.push_encode(self.server_identification);
         e.push_u32be(Encode::size(self.client_kex_init) as u32);
-        Encode::encode(self.client_kex_init, e);
+        e.push_encode(self.client_kex_init);
         e.push_u32be(Encode::size(self.server_kex_init) as u32);
-        Encode::encode(self.server_kex_init, e);
-        Encode::encode(self.server_host_key, e);
+        e.push_encode(self.server_kex_init);
+        e.push_encode(self.server_host_key);
         e.push_u32be(A::public_as_ref(self.dh_client_key).len() as u32);
         e.push_bytes(&A::public_as_ref(self.dh_client_key));
         e.push_u32be(A::public_as_ref(self.dh_server_key).len() as u32);
         e.push_bytes(&A::public_as_ref(self.dh_server_key));
-        Encode::encode(&MPInt(self.dh_secret), e);
+        e.push_encode(&MPInt(self.dh_secret));
     }
 
-    pub fn sha256(&self) -> [u8; 32] {
+    pub fn sha256(&self) -> SessionId {
         let mut sha256 = Sha256::new();
         self.encode(&mut sha256);
         let mut digest = [0; 32];
-        digest.copy_from_slice(sha256.result().as_slice());
-        digest
+        digest.copy_from_slice(sha256.result_reset().as_slice());
+        SessionId::new(digest)
     }
 }
 
@@ -128,6 +130,6 @@ mod tests {
             dh_secret: &dh_secret,
         };
 
-        assert_eq!(kex_hash.sha256(), sha256_digest);
+        assert_eq!(kex_hash.sha256().as_ref(), sha256_digest);
     }
 }

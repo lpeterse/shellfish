@@ -4,18 +4,19 @@ mod error;
 mod future;
 mod global;
 mod msg;
+mod request;
 mod state;
 
 pub use self::channel::*;
 pub use self::config::*;
 pub use self::error::*;
 pub use self::global::*;
-pub use self::msg::ChannelOpenFailureReason;
-pub use self::state::ConnectionRequest;
+pub use self::msg::ChannelOpenFailure;
+pub use self::request::ConnectionRequest;
 
 use self::future::*;
 use self::msg::*;
-use self::state::*;
+pub use self::state::*;
 
 use crate::client::Client;
 use crate::codec::*;
@@ -23,13 +24,13 @@ use crate::service::Service;
 use crate::transport::{DisconnectReason, Transport, TransportLayer};
 use crate::util::oneshot;
 
+use async_std::future::Future;
 use async_std::stream::Stream;
-use async_std::task::ready;
+use async_std::task::{Context, Poll, Waker};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll};
 
-/// The connection protocol offers channel multiplexing for a variety of applications like remote
+/// The `ssh-connection` service offers channel multiplexing for a variety of applications like remote
 /// shell and command execution as well as TCP/IP port forwarding and various other extensions.
 ///
 /// Unless client or server request a service on top of this protocol the connection just keeps
@@ -50,32 +51,31 @@ impl<T: TransportLayer> Connection<T> {
         Self(state)
     }
 
+    /// Perform a global request (without reply).
     pub fn request<N: Into<String>, D: Into<Vec<u8>>>(&mut self, name: N, data: D) {
-        let mut x = self.0.lock().unwrap();
-        x.request(name.into(), data.into())
+        self.with_state(|x| x.request(name.into(), data.into()))
     }
 
+    /// Perform a global request and return future resolving on peer response.
     pub fn request_want_reply<N: Into<String>, D: Into<Vec<u8>>>(
         &mut self,
         name: N,
         data: D,
     ) -> GlobalReplyFuture {
-        let mut x = self.0.lock().unwrap();
-        x.request_want_reply(name.into(), data.into())
+        self.with_state(|x| x.request_want_reply(name.into(), data.into()))
+    }
+
+    /// Request a new channel on top of an established connection.
+    pub fn open<C: Channel>(&mut self, params: C::Open) -> ChannelOpenFuture<C> {
+        self.with_state(|x| x.open(params))
     }
 
     /// Request a new session on top of an established connection.
-    ///
-    /// A connection is able to multiplex several sessions simultaneously so this method may be
-    /// called more than once on a given connection. This method may fail if either the client
-    /// (due to config limitiation) or the server hits a limit on the number of concurrent
-    /// channels per connection.
     pub fn open_session(&mut self) -> ChannelOpenFuture<Session<Client>> {
-        let mut x = self.0.lock().unwrap();
-        x.open(())
+        self.open(())
     }
 
-    /// Request a direct-tcpip forwarding on top of an establied connection.
+    /// Request a direct-tcpip forwarding on top of an established connection.
     pub fn open_direct_tcpip<S: Into<String>>(
         &mut self,
         dst_host: S,
@@ -83,20 +83,37 @@ impl<T: TransportLayer> Connection<T> {
         src_addr: std::net::IpAddr,
         src_port: u16,
     ) -> ChannelOpenFuture<DirectTcpIp> {
-        let mut x = self.0.lock().unwrap();
-        x.open(DirectTcpIpOpen {
+        self.open(DirectTcpIpOpen {
             dst_host: dst_host.into(),
-            dst_port: dst_port as u32,
-            src_addr: src_addr.to_string(),
-            src_port: src_port as u32,
+            dst_port,
+            src_addr,
+            src_port,
         })
+    }
+
+    /// Perform the given operation on the Mutex-protected connection state.
+    /// Wakeup the connection future task afterwards (if necessary).
+    ///
+    /// NB: This seemingly complicated mechanism's intention is to wakeup the
+    /// other task _after_ the Mutex lock has been released. Mutexes/Futexes are
+    /// cheap unless they are contended. This tries to minimize the contention
+    /// by not waking up the other task as long as we still hold the lock.
+    fn with_state<F, X>(&self, f: F) -> X
+    where
+        F: FnOnce(&mut ConnectionState<T>) -> X,
+    {
+        let (result, waker) = {
+            let mut state = self.0.lock().unwrap();
+            (f(&mut state), state.inner_task_waker())
+        };
+        let _ = waker.map(Waker::wake);
+        result
     }
 }
 
 impl<T: TransportLayer> Drop for Connection<T> {
     fn drop(&mut self) {
-        let mut x = self.0.lock().unwrap();
-        x.disconnect(DisconnectReason::BY_APPLICATION)
+        self.with_state(|x| x.disconnect(DisconnectReason::BY_APPLICATION))
     }
 }
 
@@ -112,10 +129,35 @@ impl<T: TransportLayer> Service for Connection<T> {
 }
 
 impl<T: TransportLayer> Stream for Connection<T> {
-    type Item = Result<ConnectionRequest, ConnectionError>;
+    type Item = ConnectionRequest;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        let mut x = self.0.lock().unwrap();
-        Poll::Ready(Some(ready!(x.poll_next(cx))))
+        self.with_state(|x| {
+            if let Some(request) = x.next() {
+                return Poll::Ready(Some(request));
+            }
+            if x.result().is_some() {
+                return Poll::Ready(None);
+            }
+            x.register_outer_task(cx);
+            Poll::Pending
+        })
+    }
+}
+
+impl<T: TransportLayer> Future for Connection<T> {
+    type Output = Result<DisconnectReason, ConnectionError>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        self.with_state(|x| {
+            if let Some(result) = x.result() {
+                return Poll::Ready(result);
+            }
+            while let Some(request) = x.next() {
+                drop(request)
+            }
+            x.register_outer_task(cx);
+            Poll::Pending
+        })
     }
 }

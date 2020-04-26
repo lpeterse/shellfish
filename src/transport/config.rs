@@ -17,17 +17,6 @@ pub struct TransportConfig {
     ///
     /// Defaults to 1h.
     pub kex_interval_duration: Duration,
-    /// The timespan after which a `MSG_IGNORE` packet is sent when no other data has been sent.
-    /// This is useful in order to keep the connection alive in the presence of stateful middle
-    /// boxes and firewalls. It will also help to detect broken connections early.
-    ///
-    /// Defaults to 5m.
-    pub alive_interval: Duration,
-    /// The timespan after which the connection is closed due to inactivity when no messages have
-    /// been received from peer.
-    ///
-    /// Defaults to 1h.
-    pub inactivity_timeout: Duration,
     /// List of key exchange algorithms to be used in order of preference.
     ///
     /// Defaults to `curve25519-sha256` and `curve25519-sha256@libssh.org`.
@@ -56,8 +45,6 @@ impl Default for TransportConfig {
             identification: Identification::default(),
             kex_interval_bytes: 1024 * 1024 * 1024,
             kex_interval_duration: Duration::from_secs(3600),
-            alive_interval: Duration::from_secs(300),
-            inactivity_timeout: Duration::from_secs(3600),
             kex_algorithms: KEX_ALGORITHMS.to_vec(),
             host_key_algorithms: HOST_KEY_ALGORITHMS.to_vec(),
             encryption_algorithms: ENCRYPTION_ALGORITHMS.to_vec(),
@@ -77,8 +64,6 @@ mod tests {
         assert_eq!(c.identification, Identification::default());
         assert_eq!(c.kex_interval_bytes, 1024 * 1024 * 1024);
         assert_eq!(c.kex_interval_duration, Duration::from_secs(3600));
-        assert_eq!(c.alive_interval, Duration::from_secs(300));
-        assert_eq!(c.inactivity_timeout, Duration::from_secs(3600));
         assert_eq!(c.kex_algorithms, KEX_ALGORITHMS.to_vec());
         assert_eq!(c.host_key_algorithms, HOST_KEY_ALGORITHMS.to_vec());
         assert_eq!(c.encryption_algorithms, ENCRYPTION_ALGORITHMS.to_vec());

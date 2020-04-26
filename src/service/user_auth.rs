@@ -10,8 +10,8 @@ use self::msg_success::*;
 use self::msg_userauth_request::*;
 use self::signature::*;
 
-use crate::agent::*;
 use crate::algorithm::auth::*;
+use crate::auth::*;
 use crate::codec::*;
 use crate::service::Service;
 use crate::transport::*;
@@ -56,7 +56,7 @@ impl UserAuth {
         user: &str,
         identity: Identity,
     ) -> Result<bool, UserAuthError> {
-        let session_id = &transport.session_id();
+        let session_id = transport.session_id()?;
         let data = BEncoder::encode(&SignatureData {
             session_id,
             user_name: user,

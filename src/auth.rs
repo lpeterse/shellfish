@@ -1,6 +1,6 @@
+mod agent;
 mod error;
 mod frame;
-mod local;
 mod msg_failure;
 mod msg_identities_answer;
 mod msg_identities_request;
@@ -9,8 +9,8 @@ mod msg_sign_response;
 mod msg_success;
 mod transmitter;
 
+pub use self::agent::*;
 pub use self::error::*;
-pub use self::local::*;
 
 use self::frame::*;
 use self::msg_failure::*;

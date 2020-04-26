@@ -7,6 +7,7 @@ pub struct MsgIgnore<'a> {
 }
 
 impl<'a> MsgIgnore<'a> {
+    #[allow(unused)]
     pub fn new() -> Self {
         Self { data: &[] }
     }

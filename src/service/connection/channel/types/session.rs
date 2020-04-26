@@ -1,17 +1,17 @@
 mod exit;
 mod process;
-mod request;
-mod signal;
+//mod request;
+//mod signal;
 
-pub(crate) use self::exit::*;
-pub(crate) use self::process::*;
-pub(crate) use self::request::*;
-pub(crate) use self::signal::*;
+//pub(crate) use self::exit::*;
+//pub(crate) use self::process::*;
+//pub(crate) use self::request::*;
+//pub(crate) use self::signal::*;
 
 use super::super::*;
 use crate::client::Client;
 
-use crate::codec::*;
+//use crate::codec::*;
 use crate::role::Role;
 
 /// A session is a remote execution of a program.  The program may be a
@@ -24,16 +24,8 @@ pub struct Session<R: Role> {
     channel: ChannelHandle,
 }
 
-impl<R: Role> Session<R> {
-    pub(crate) fn new(channel: ChannelHandle) -> Self {
-        Self {
-            role: Default::default(),
-            channel,
-        }
-    }
-}
-
 impl Session<Client> {
+    /*
     /// Execute a remote shell.
     pub async fn shell(self) -> Result<Process<Client>, ConnectionError> {
         let req = SessionRequest::ShellRequest(ShellRequest {});
@@ -56,8 +48,8 @@ impl Session<Client> {
         Ok(())
     }
 
-    async fn request(self, request: SessionRequest) -> Result<Self, ConnectionError> {
-        /*
+    async fn request(self, _request: SessionRequest) -> Result<Self, ConnectionError> {
+        
         let mut state = (self.state)
             .0
             .lock()
@@ -88,8 +80,8 @@ impl Session<Client> {
         .await?;
         Ok(self)
         */
-        todo!()
-    }
+    //    todo!()
+    //}
 }
 
 impl<R: Role> Channel for Session<R> {

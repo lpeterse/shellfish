@@ -19,7 +19,7 @@ impl<C: Channel> ChannelOpenFuture<C> {
 }
 
 impl<C: Channel> Future for ChannelOpenFuture<C> {
-    type Output = Result<Result<C, ChannelOpenFailureReason>, ConnectionError>;
+    type Output = Result<Result<C, ChannelOpenFailure>, ConnectionError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
         let self_: &mut Self = Pin::into_inner(self);

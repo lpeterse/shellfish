@@ -1,6 +1,7 @@
 use crate::codec::*;
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)] // FIXME
 pub enum Exit {
     Status(ExitStatus),
     Signal(ExitSignal),

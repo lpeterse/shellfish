@@ -8,6 +8,16 @@ pub(crate) struct MsgChannelExtendedData<'a> {
     pub data: &'a [u8],
 }
 
+impl<'a> MsgChannelExtendedData<'a> {
+    pub fn new(recipient_channel: u32, data_type_code: u32, data: &'a [u8]) -> Self {
+        Self {
+            recipient_channel,
+            data_type_code,
+            data,
+        }
+    }
+}
+
 impl<'a> Message for MsgChannelExtendedData<'a> {
     const NUMBER: u8 = 95;
 }
@@ -76,7 +86,7 @@ mod tests {
         let buf: [u8; 16] = [95, 0, 0, 0, 23, 0, 0, 0, 4, 0, 0, 0, 3, 1, 2, 3];
         let msg: MsgChannelExtendedData = BDecoder::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
-        assert_eq!(msg.data_type_code, 4);  
+        assert_eq!(msg.data_type_code, 4);
         assert_eq!(msg.data, [1, 2, 3]);
     }
 }

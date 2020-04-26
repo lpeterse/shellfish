@@ -48,7 +48,6 @@ use crate::host::*;
 use async_std::future::poll_fn;
 use async_std::net::TcpStream;
 use async_std::task::{ready, Context, Poll};
-use futures_timer::Delay;
 use std::convert::From;
 use std::option::Option;
 use std::pin::Pin;
@@ -110,7 +109,7 @@ pub trait TransportLayer: Send + Unpin + 'static {
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
     /// lifetime of the connection.
-    fn session_id(&self) -> &SessionId;
+    fn session_id(&self) -> Result<&SessionId, TransportError>;
 }
 
 pub struct TransportLayerExt {}
@@ -155,10 +154,8 @@ impl TransportLayerExt {
 
 /// Implements the transport layer as described in RFC 4253.
 ///
-/// This structure is polymorphic in role (either client or server) and the socket type (most
-/// likely `TcpStream` but other types are used for testing).
-/// The only difference between client and server is the key exchange mechanism and the
-/// implementation is chosen at compile time dependant on the role parameter.
+/// This structure is polymorphic in the socket type (most likely `TcpStream` but other types are
+/// used for testing).
 pub struct Transport<S: Socket = TcpStream> {
     trx: Transceiver<S>,
     kex: ClientKex,
@@ -174,7 +171,7 @@ impl<S: Socket> Transport<S> {
         hostname: String,
         socket: S,
     ) -> Result<Self, TransportError> {
-        let mut trx = Transceiver::new(config, socket);
+        let mut trx = Transceiver::new(socket);
         trx.send_id(&config.identification).await?;
         let id = trx.receive_id().await?;
         let kex = ClientKex::new(&config, &verifier, id, hostname);
@@ -349,12 +346,6 @@ impl<S: Socket> TransportLayer for Transport<S> {
         cx: &mut Context,
         msg: &M,
     ) -> Poll<Result<(), TransportError>> {
-        // The next call does nothing unless the keep-alive timeout triggers.
-        // When it triggers, it tries to send a message ignore which might pend.
-        ready!(self.trx.poll_keepalive(cx))?;
-        // The next call does nothing unless the remote inactivity timeout triggers.
-        // When it triggers, it returns an error.
-        ready!(self.trx.poll_inactivity(cx))?;
         // In case a running kex forbids sending no-kex packets we need to drive
         // kex to completion first. This requires dispatching transport messages.
         // It might happen that kex can be completed non-blocking and sending the
@@ -375,9 +366,6 @@ impl<S: Socket> TransportLayer for Transport<S> {
     }
 
     fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        // See `poll_send` concerning the next two calls.
-        ready!(self.trx.poll_keepalive(cx))?;
-        ready!(self.trx.poll_inactivity(cx))?;
         // Transport messages are handled internally by this function. In such a case the loop
         // will iterate more than once but always terminate with either Ready or Pending.
         // In case a running kex forbids receiving non-kex packets we need to drive kex to
@@ -398,7 +386,6 @@ impl<S: Socket> TransportLayer for Transport<S> {
     }
 
     fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        ready!(self.trx.poll_inactivity(cx))?;
         self.trx.poll_flush(cx)
     }
 
@@ -416,8 +403,8 @@ impl<S: Socket> TransportLayer for Transport<S> {
         let _ = self.trx.poll_flush(cx);
     }
 
-    fn session_id(&self) -> &SessionId {
-        &self.kex.session_id()
+    fn session_id(&self) -> Result<&SessionId, TransportError> {
+        self.kex.session_id()
     }
 }
 
@@ -425,77 +412,108 @@ impl<S: Socket> TransportLayer for Transport<S> {
 pub mod tests {
     use super::*;
 
-    use std::sync::Mutex;
+    use std::collections::VecDeque;
 
-    pub struct TestTransport(Arc<Mutex<TestTransportState>>);
-    pub struct TestTransportState {
-        pub send_count: usize,
-        pub receive_count: usize,
-        pub consume_count: usize,
-        pub flush_count: usize,
-
-        pub tx_buf: Vec<Vec<u8>>,
-        pub tx_sent: Vec<Vec<Vec<u8>>>,
-        pub tx_ready: bool,
+    pub struct TestTransport {
+        send_count: usize,
+        receive_count: usize,
+        consume_count: usize,
+        flush_count: usize,
+        rx_buf: VecDeque<Vec<u8>>,
+        tx_buf: Vec<Vec<u8>>,
+        tx_sent: Vec<Vec<Vec<u8>>>,
+        tx_ready: bool,
+        tx_disconnect: Option<DisconnectReason>,
+        error: Option<TransportError>,
     }
 
     impl TestTransport {
         pub fn new() -> Self {
-            Self(Arc::new(Mutex::new(TestTransportState {
+            Self {
                 send_count: 0,
                 receive_count: 0,
                 consume_count: 0,
                 flush_count: 0,
+                rx_buf: VecDeque::new(),
                 tx_buf: vec![],
                 tx_sent: vec![],
                 tx_ready: false,
-            })))
+                tx_disconnect: None,
+                error: None,
+            }
+        }
+
+        pub fn check_error(&self) -> Result<(), TransportError> {
+            if let Some(e) = self.error {
+                Err(e)
+            } else {
+                Ok(())
+            }
         }
     }
 
     impl TestTransport {
         pub fn send_count(&self) -> usize {
-            (self.0).lock().unwrap().send_count
+            self.send_count
         }
         pub fn receive_count(&self) -> usize {
-            (self.0).lock().unwrap().receive_count
+            self.receive_count
         }
         pub fn consume_count(&self) -> usize {
-            (self.0).lock().unwrap().consume_count
+            self.consume_count
         }
         pub fn flush_count(&self) -> usize {
-            (self.0).lock().unwrap().flush_count
+            self.flush_count
         }
-        pub fn set_tx_ready(&self, ready: bool) {
-            let mut x = (self.0).lock().unwrap();
-            x.tx_ready = ready;
+        pub fn set_tx_ready(&mut self, ready: bool) {
+            self.tx_ready = ready;
+        }
+        pub fn tx_buf(&self) -> Vec<Vec<u8>> {
+            self.tx_buf.clone()
         }
         pub fn tx_sent(&self) -> Vec<Vec<Vec<u8>>> {
-            let x = (self.0).lock().unwrap();
-            x.tx_sent.clone()
+            self.tx_sent.clone()
+        }
+        pub fn tx_disconnect(&self) -> Option<DisconnectReason> {
+            self.tx_disconnect
+        }
+        pub fn rx_push<E: Encode>(&mut self, msg: &E) {
+            self.rx_buf.push_back(BEncoder::encode(msg))
+        }
+        pub fn set_error(&mut self, e: TransportError) {
+            self.error = Some(e)
         }
     }
 
     impl TransportLayer for TestTransport {
         fn decode<Msg: Decode>(&mut self) -> Option<Msg> {
-            todo!("decode")
+            if let Some(data) = self.rx_buf.front() {
+                BDecoder::decode(data)
+            } else {
+                None
+            }
         }
         fn decode_ref<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
-            todo!("decode_ref")
+            if let Some(data) = self.rx_buf.front() {
+                BDecoder::decode(data)
+            } else {
+                None
+            }
         }
         fn consume(&mut self) {
-            let mut x = (self.0).lock().unwrap();
-            x.consume_count += 1;
+            if self.rx_buf.pop_front().is_none() {
+                panic!("consume called on empty rx_buf")
+            }
         }
         fn flushed(&self) -> bool {
             todo!("flushed")
         }
-        fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-            let mut x = (self.0).lock().unwrap();
-            x.flush_count += 1;
-            if !x.tx_buf.is_empty() {
-                let buf = std::mem::replace(&mut x.tx_buf, vec![]);
-                x.tx_sent.push(buf);
+        fn poll_flush(&mut self, _cx: &mut Context) -> Poll<Result<(), TransportError>> {
+            self.flush_count += 1;
+            self.check_error()?;
+            if !self.tx_buf.is_empty() {
+                let buf = std::mem::replace(&mut self.tx_buf, vec![]);
+                self.tx_sent.push(buf);
                 Poll::Ready(Ok(()))
             } else {
                 Poll::Ready(Ok(()))
@@ -503,30 +521,36 @@ pub mod tests {
         }
         fn poll_send<M: Encode>(
             &mut self,
-            cx: &mut Context,
+            _cx: &mut Context,
             msg: &M,
         ) -> Poll<Result<(), TransportError>> {
-            let mut x = (self.0).lock().unwrap();
-            x.send_count += 1;
-            if x.tx_ready {
-                x.tx_buf.push(BEncoder::encode(msg));
+            self.send_count += 1;
+            self.check_error()?;
+            if self.tx_ready {
+                self.tx_buf.push(BEncoder::encode(msg));
                 Poll::Ready(Ok(()))
             } else {
                 Poll::Pending
             }
         }
-        fn poll_receive(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-            let mut x = (self.0).lock().unwrap();
-            x.receive_count += 1;
-            Poll::Pending
+        fn poll_receive(&mut self, _cx: &mut Context) -> Poll<Result<(), TransportError>> {
+            self.receive_count += 1;
+            self.check_error()?;
+            if !self.rx_buf.is_empty() {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
         }
-        fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
-            todo!("send_disconnect")
+        fn send_disconnect(&mut self, _cx: &mut Context, reason: DisconnectReason) {
+            if self.tx_ready {
+                self.tx_disconnect = Some(reason);
+            }
         }
-        fn send_unimplemented(&mut self, cx: &mut Context) {
+        fn send_unimplemented(&mut self, _cx: &mut Context) {
             todo!("send_unimplemented")
         }
-        fn session_id(&self) -> &SessionId {
+        fn session_id(&self) -> Result<&SessionId, TransportError> {
             todo!("session_id")
         }
     }

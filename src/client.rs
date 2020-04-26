@@ -4,7 +4,7 @@ mod error;
 pub use self::config::*;
 pub use self::error::*;
 
-use crate::agent::*;
+use crate::auth::*;
 use crate::host::*;
 use crate::service::connection::*;
 use crate::service::user_auth::*;
@@ -118,7 +118,7 @@ impl Default for Client {
             username: std::env::var("LOGNAME")
                 .or_else(|_| std::env::var("USER"))
                 .ok(),
-            auth_agent: match LocalAgent::new_env() {
+            auth_agent: match Agent::new_env() {
                 Some(agent) => Arc::new(agent),
                 None => Arc::new(()),
             },

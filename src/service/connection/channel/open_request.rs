@@ -42,7 +42,7 @@ impl ChannelOpenRequest {
         Err(ConnectionError::ChannelTypeMismatch)
     }
 
-    pub fn reject(self, reason: ChannelOpenFailureReason) {
+    pub fn reject(self, reason: ChannelOpenFailure) {
         self.tx.send(Err(reason))
     }
 }
