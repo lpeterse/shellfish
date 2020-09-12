@@ -1,5 +1,5 @@
 use super::*;
-use crate::buffer::*;
+use crate::util::buffer::Buffer;
 
 use async_std::task::{ready, Context, Poll};
 use std::io::Result;
@@ -12,6 +12,7 @@ use std::pin::*;
 const INITIAL_BUFFER_SIZE: usize = 1100;
 
 /// Wraps socket-like data types with send and receive buffer capabilities.
+#[derive(Debug)]
 pub struct Buffered<S: Socket> {
     /// Underlying socket/stream.
     socket: S,

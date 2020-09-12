@@ -2,6 +2,7 @@ use super::*;
 use crate::util::assume;
 
 /// The `Transceiver` handles the low-level part of the wire-protocol including framing and cipher.
+#[derive(Debug)]
 pub struct Transceiver<S: Socket> {
     socket: Buffered<S>,
     receiver_state: ReceiverState,
@@ -75,8 +76,12 @@ impl<S: Socket> Transceiver<S> {
     ) -> Poll<Result<(), TransportError>> {
         let packet = self.encryption_ctx.packet(msg);
         let buffer: &mut [u8] = ready!(self.socket.poll_extend(cx, packet.size()))?;
-        packet.encode(&mut BEncoder::from(&mut buffer[..]));
-        self.encryption_ctx.encrypt(self.packets_sent, buffer);
+        packet
+            .encode(&mut SliceEncoder::new(buffer))
+            .ok_or(TransportError::EncoderError)?;
+        self.encryption_ctx
+            .encrypt(self.packets_sent, buffer)
+            .ok_or(TransportError::EncryptionError)?;
         self.packets_sent += 1;
         self.bytes_sent += packet.size() as u64;
         Poll::Ready(Ok(()))
@@ -129,7 +134,7 @@ impl<S: Socket> Transceiver<S> {
         let padding: usize = *packet.get(0)? as usize;
         assume(packet_len >= 1 + padding)?;
         let payload = &packet[1..][..packet_len - 1 - padding];
-        BDecoder::decode(payload)
+        SliceDecoder::decode(payload)
     }
 
     /// Consume a decoded message and remove it from the input buffer.
@@ -149,13 +154,13 @@ impl<S: Socket> Transceiver<S> {
         &mut self,
         id: &Identification<&'static str>,
     ) -> Result<(), TransportError> {
-        let len = Encode::size(id) + 2;
         poll_fn(|cx| {
+            let len = Encode::size(id) + 2;
             let buf = ready!(self.socket.poll_extend(cx, len))?;
-            let mut enc = BEncoder::from(buf);
-            Encode::encode(id, &mut enc);
-            enc.push_u8('\r' as u8);
-            enc.push_u8('\n' as u8);
+            let mut enc = SliceEncoder::new(buf);
+            enc.push_encode(id).ok_or(TransportError::EncoderError)?;
+            enc.push_u8(b'\r').ok_or(TransportError::EncoderError)?;
+            enc.push_u8(b'\n').ok_or(TransportError::EncoderError)?;
             Poll::Ready(Ok::<(), TransportError>(()))
         })
         .await?;
@@ -179,13 +184,14 @@ impl<S: Socket> Transceiver<S> {
                 None => Err(TransportError::DecoderError)?,
             }
         }
-        let mut d = BDecoder(&self.socket.as_ref()[..len]);
+        let mut d = SliceDecoder::new(&self.socket.as_ref()[..len]);
         let id = Decode::decode(&mut d).ok_or(TransportError::DecoderError)?;
         self.socket.consume(len + 2);
         Ok(id)
     }
 }
 
+#[derive(Debug)]
 struct ReceiverState {
     pub buffer_len: usize,
     pub packet_len: usize,

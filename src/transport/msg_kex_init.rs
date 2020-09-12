@@ -1,7 +1,7 @@
 use super::*;
-use crate::algorithm::*;
-use crate::codec::*;
-use crate::message::*;
+use crate::auth::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsgKexInit<T = String> {
@@ -79,21 +79,21 @@ impl<T: AsRef<[u8]>> Encode for MsgKexInit<T> {
             + NameList::size(&self.languages_client_to_server)
             + NameList::size(&self.languages_server_to_client)
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(<Self as Message>::NUMBER);
-        e.push_bytes(&self.cookie);
-        NameList::encode(&self.kex_algorithms, e);
-        NameList::encode(&self.server_host_key_algorithms, e);
-        NameList::encode(&self.encryption_algorithms_client_to_server, e);
-        NameList::encode(&self.encryption_algorithms_server_to_client, e);
-        NameList::encode(&self.mac_algorithms_client_to_server, e);
-        NameList::encode(&self.mac_algorithms_server_to_client, e);
-        NameList::encode(&self.compression_algorithms_client_to_server, e);
-        NameList::encode(&self.compression_algorithms_server_to_client, e);
-        NameList::encode(&self.languages_client_to_server, e);
-        NameList::encode(&self.languages_server_to_client, e);
-        e.push_u8(self.first_packet_follows as u8);
-        e.push_u32be(0);
+    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(<Self as Message>::NUMBER)?;
+        e.push_bytes(&self.cookie)?;
+        NameList::encode(&self.kex_algorithms, e)?;
+        NameList::encode(&self.server_host_key_algorithms, e)?;
+        NameList::encode(&self.encryption_algorithms_client_to_server, e)?;
+        NameList::encode(&self.encryption_algorithms_server_to_client, e)?;
+        NameList::encode(&self.mac_algorithms_client_to_server, e)?;
+        NameList::encode(&self.mac_algorithms_server_to_client, e)?;
+        NameList::encode(&self.compression_algorithms_client_to_server, e)?;
+        NameList::encode(&self.compression_algorithms_server_to_client, e)?;
+        NameList::encode(&self.languages_client_to_server, e)?;
+        NameList::encode(&self.languages_server_to_client, e)?;
+        e.push_u8(self.first_packet_follows as u8)?;
+        e.push_u32be(0)
     }
 }
 
@@ -198,7 +198,7 @@ mod tests {
             0, 5, 99, 111, 109, 112, 50, 0, 0, 0, 5, 108, 97, 110, 103, 49, 0, 0, 0, 11, 108, 97,
             110, 103, 50, 44, 108, 97, 110, 103, 51, 0, 0, 0, 0, 0,
         ];
-        let actual = BEncoder::encode(&msg);
+        let actual = SliceEncoder::encode(&msg);
         assert_eq!(&expected[..], &actual[..]);
     }
 
@@ -225,6 +225,6 @@ mod tests {
             0, 5, 99, 111, 109, 112, 50, 0, 0, 0, 5, 108, 97, 110, 103, 49, 0, 0, 0, 11, 108, 97,
             110, 103, 50, 44, 108, 97, 110, 103, 51, 0, 0, 0, 0, 0,
         ];
-        assert_eq!(msg, BDecoder::decode(&bin[..]).unwrap());
+        assert_eq!(msg, SliceDecoder::decode(&bin[..]).unwrap());
     }
 }

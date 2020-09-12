@@ -1,10 +1,16 @@
+pub mod buffer;
+pub mod codec;
 pub mod glob;
 pub mod oneshot;
+pub mod socket;
+pub mod socks5;
+pub mod tcp;
 
 use std::future::Future;
 
 /// Takes a `bool` and converts it `Option<()>` to be used as early return point with `?`.
 #[inline(always)]
+#[must_use]
 pub fn assume(x: bool) -> Option<()> {
     if x {
         Some(())

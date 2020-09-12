@@ -1,5 +1,5 @@
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Copy, Clone, Debug)]
 pub struct MsgUnimplemented {
@@ -14,9 +14,9 @@ impl Encode for MsgUnimplemented {
     fn size(&self) -> usize {
         1 + 4
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
-        c.push_u32be(self.packet_number);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)?;
+        c.push_u32be(self.packet_number)
     }
 }
 
@@ -46,13 +46,13 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let msg = MsgUnimplemented { packet_number: 23 };
-        assert_eq!(&[3, 0, 0, 0, 23][..], &BEncoder::encode(&msg)[..]);
+        assert_eq!(&[3, 0, 0, 0, 23][..], &SliceEncoder::encode(&msg)[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 5] = [3, 0, 0, 0, 23];
-        let msg: MsgUnimplemented = BDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgUnimplemented = SliceDecoder::decode(&buf[..]).unwrap();
         assert_eq!(23, msg.packet_number);
     }
 }

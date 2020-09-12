@@ -1,6 +1,6 @@
 use super::*;
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug)]
 pub struct MsgNewKeys {}
@@ -13,8 +13,8 @@ impl Encode for MsgNewKeys {
     fn size(&self) -> usize {
         1
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)
     }
 }
 
@@ -42,12 +42,12 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let msg = MsgNewKeys {};
-        assert_eq!(&[21][..], &BEncoder::encode(&msg)[..]);
+        assert_eq!(&[21][..], &SliceEncoder::encode(&msg)[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 1] = [21];
-        let _: MsgNewKeys = BDecoder::decode(&buf[..]).unwrap();
+        let _: MsgNewKeys = SliceDecoder::decode(&buf[..]).unwrap();
     }
 }

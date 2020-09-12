@@ -1,4 +1,4 @@
-use crate::codec::*;
+use crate::util::codec::*;
 
 use zeroize::*;
 
@@ -21,9 +21,9 @@ impl Encode for SessionId {
     fn size(&self) -> usize {
         std::mem::size_of::<u32>() + std::mem::size_of::<Self>()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u32be(std::mem::size_of::<Self>() as u32);
-        e.push_bytes(&self.as_ref());
+    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u32be(std::mem::size_of::<Self>() as u32)?;
+        e.push_bytes(&self.as_ref())
     }
 }
 
@@ -85,6 +85,6 @@ mod tests {
             0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23,
             24, 25, 26, 27, 28, 29, 30, 31,
         ]);
-        assert_eq!(&expected[..], &BEncoder::encode(&x)[..]);
+        assert_eq!(&expected[..], &SliceEncoder::encode(&x)[..]);
     }
 }

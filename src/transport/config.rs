@@ -1,5 +1,5 @@
 use super::*;
-use crate::algorithm::*;
+use crate::auth::*;
 
 use std::time::Duration;
 

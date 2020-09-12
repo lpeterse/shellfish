@@ -5,7 +5,9 @@ use crate::transport::msg_disconnect::DisconnectReason;
 #[derive(Debug, Copy, Clone, PartialEq)]
 pub enum TransportError {
     IoError(std::io::ErrorKind),
+    EncoderError,
     DecoderError,
+    EncryptionError,
     ProtocolError,
     BadPacketLength,
     InvalidState,

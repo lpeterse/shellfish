@@ -1,5 +1,5 @@
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug)]
 pub struct MsgDebug<'a> {
@@ -16,11 +16,11 @@ impl<'a> Encode for MsgDebug<'a> {
     fn size(&self) -> usize {
         1 + 1 + Encode::size(&self.message) + Encode::size(&self.language)
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER as u8);
-        c.push_u8(self.always_display as u8);
-        Encode::encode(&self.message, c);
-        Encode::encode(&self.language, c);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER as u8)?;
+        c.push_u8(self.always_display as u8)?;
+        Encode::encode(&self.message, c)?;
+        Encode::encode(&self.language, c)
     }
 }
 
@@ -62,7 +62,7 @@ mod tests {
         };
         assert_eq!(
             &[4, 1, 0, 0, 0, 3, 109, 115, 103, 0, 0, 0, 4, 108, 97, 110, 103][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
@@ -75,7 +75,7 @@ mod tests {
         };
         assert_eq!(
             &[4, 0, 0, 0, 0, 1, 109, 0, 0, 0, 1, 108][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
@@ -84,7 +84,7 @@ mod tests {
         let buf: [u8; 17] = [
             4, 23, 0, 0, 0, 3, 109, 115, 103, 0, 0, 0, 4, 108, 97, 110, 103,
         ];
-        let msg: MsgDebug = BDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgDebug = SliceDecoder::decode(&buf[..]).unwrap();
         assert_eq!(true, msg.always_display);
         assert_eq!("msg", msg.message);
         assert_eq!("lang", msg.language);
@@ -93,7 +93,7 @@ mod tests {
     #[test]
     fn test_decode_02() {
         let buf: [u8; 12] = [4, 0, 0, 0, 0, 1, 109, 0, 0, 0, 1, 108];
-        let msg: MsgDebug = BDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgDebug = SliceDecoder::decode(&buf[..]).unwrap();
         assert_eq!(false, msg.always_display);
         assert_eq!("m", msg.message);
         assert_eq!("l", msg.language);

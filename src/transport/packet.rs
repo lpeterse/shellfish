@@ -1,4 +1,4 @@
-use crate::codec::*;
+use crate::util::codec::*;
 
 pub struct Packet<'a, T> {
     buffer_len: usize,
@@ -45,13 +45,14 @@ impl<'a, T: Encode> Encode for Packet<'a, T> {
         self.buffer_len
     }
 
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u32be((1 + self.payload_len + self.padding_len) as u32);
-        e.push_u8(self.padding_len as u8);
-        Encode::encode(self.payload, e);
-        std::iter::repeat(())
-            .take(self.padding_len)
-            .for_each(|()| e.push_u8(0));
+    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u32be((1 + self.payload_len + self.padding_len) as u32)?;
+        e.push_u8(self.padding_len as u8)?;
+        Encode::encode(self.payload, e)?;
+        for _ in std::iter::repeat(()).take(self.padding_len) {
+            e.push_u8(0)?;
+        }
+        Some(())
         // MAC area stays uninitialised. It's the cipher's responsibility to initialize it.
     }
 }

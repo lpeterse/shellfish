@@ -1,5 +1,5 @@
 use super::*;
-use crate::message::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgKexEcdhInit<A: EcdhAlgorithm> {
@@ -23,9 +23,9 @@ where
     fn size(&self) -> usize {
         std::mem::size_of::<u8>() + Encode::size(&self.dh_public)
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(&self.dh_public, c);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)?;
+        Encode::encode(&self.dh_public, c)
     }
 }
 
@@ -71,12 +71,12 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(&[30][..], &BEncoder::encode(&msg)[..]);
+        assert_eq!(&[30][..], &SliceEncoder::encode(&msg)[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(&Some(msg), &BDecoder::decode(&[30][..]));
+        assert_eq!(&Some(msg), &SliceDecoder::decode(&[30][..]));
     }
 }

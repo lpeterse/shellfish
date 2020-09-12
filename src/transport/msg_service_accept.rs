@@ -1,5 +1,5 @@
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug)]
 pub struct MsgServiceAccept<'a>(&'a str);
@@ -12,9 +12,9 @@ impl<'a> Encode for MsgServiceAccept<'a> {
     fn size(&self) -> usize {
         1 + Encode::size(&self.0)
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(&self.0, c);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)?;
+        Encode::encode(&self.0, c)
     }
 }
 
@@ -43,14 +43,14 @@ mod tests {
         let msg = MsgServiceAccept(&"service");
         assert_eq!(
             &[6, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 12] = [6, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101];
-        let msg: MsgServiceAccept = BDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgServiceAccept = SliceDecoder::decode(&buf[..]).unwrap();
         assert_eq!("service", msg.0);
     }
 }

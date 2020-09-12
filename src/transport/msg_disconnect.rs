@@ -1,5 +1,5 @@
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgDisconnect<'a> {
@@ -28,11 +28,11 @@ impl<'a> Encode for MsgDisconnect<'a> {
             + Encode::size(&self.description)
             + Encode::size(&self.language)
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(&self.reason, c);
-        Encode::encode(&self.description, c);
-        Encode::encode(&self.language, c);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)?;
+        Encode::encode(&self.reason, c)?;
+        Encode::encode(&self.description, c)?;
+        Encode::encode(&self.language, c)
     }
 }
 
@@ -79,7 +79,7 @@ impl Encode for DisconnectReason {
     fn size(&self) -> usize {
         4
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
         c.push_u32be(self.0)
     }
 }
@@ -136,7 +136,7 @@ mod tests {
         let msg = MsgDisconnect::new(DisconnectReason::MAC_ERROR);
         assert_eq!(
             &[1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
@@ -144,7 +144,7 @@ mod tests {
     fn test_decode_01() {
         assert_eq!(
             &Some(MsgDisconnect::new(DisconnectReason::MAC_ERROR)),
-            &BDecoder::decode(&[1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0][..])
+            &SliceDecoder::decode(&[1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0][..])
         );
     }
 

@@ -1,5 +1,5 @@
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug)]
 pub struct MsgIgnore<'a> {
@@ -21,9 +21,9 @@ impl<'a> Encode for MsgIgnore<'a> {
     fn size(&self) -> usize {
         1 + Encode::size(self.data)
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(self.data, c);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)?;
+        Encode::encode(self.data, c)
     }
 }
 
@@ -55,7 +55,7 @@ mod tests {
         let msg = MsgIgnore::new();
         assert_eq!(
             &[2, 0, 0, 0, 0][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
@@ -64,14 +64,14 @@ mod tests {
         let msg = MsgIgnore { data: &b"data"[..] };
         assert_eq!(
             &[2, 0, 0, 0, 4, 100, 97, 116, 97][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 9] = [2, 0, 0, 0, 4, 100, 97, 116, 97];
-        let msg: MsgIgnore = BDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgIgnore = SliceDecoder::decode(&buf[..]).unwrap();
         assert_eq!(&b"data"[..], msg.data);
     }
 }

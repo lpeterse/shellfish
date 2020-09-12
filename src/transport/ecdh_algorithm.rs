@@ -1,4 +1,4 @@
-use crate::codec::*;
+use crate::util::codec::*;
 use rand::rngs::OsRng;
 
 pub trait EcdhAlgorithm {
@@ -47,9 +47,9 @@ impl Encode for x25519_dalek::PublicKey {
     fn size(&self) -> usize {
         std::mem::size_of::<u32>() + 32
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u32be(32);
-        e.push_bytes(self.as_bytes());
+    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u32be(32)?;
+        e.push_bytes(self.as_bytes())
     }
 }
 
@@ -75,8 +75,8 @@ mod tests {
     fn test_code_01() {
         let s = X25519::new();
         let p1: <X25519 as EcdhAlgorithm>::PublicKey = <X25519 as EcdhAlgorithm>::public(&s);
-        let v = BEncoder::encode(&p1);
-        let p2: <X25519 as EcdhAlgorithm>::PublicKey = BDecoder::decode(&v[..]).unwrap();
+        let v = SliceEncoder::encode(&p1);
+        let p2: <X25519 as EcdhAlgorithm>::PublicKey = SliceDecoder::decode(&v[..]).unwrap();
         assert_eq!(p1.as_bytes(), p2.as_bytes());
     }
 

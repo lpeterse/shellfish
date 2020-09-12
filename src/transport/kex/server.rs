@@ -1,10 +1,11 @@
 use super::kex::*;
 
+#[derive(Debug)]
 pub struct ServerKex {}
 
 #[allow(dead_code)] // FIXME
 impl ServerKex {
-    pub fn new() -> Self {
+    pub fn new(_config: &Arc<TransportConfig>) -> Self {
         Self {}
     }
 }

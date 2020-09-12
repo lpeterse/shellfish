@@ -1,8 +1,9 @@
 .PHONY: run test build kcov deps example clean
 
 run:
-	cargo build --release --target "x86_64-unknown-linux-musl" --example rssh-client
-	RUST_LOG=debug ./target/x86_64-unknown-linux-musl/release/examples/rssh-client
+	cargo build --release --target "x86_64-unknown-linux-musl" --example rssh-server
+	cargo build --release --target "x86_64-unknown-linux-musl" --example rssh-proxy
+	./target/x86_64-unknown-linux-musl/release/examples/rssh-proxy
 
 test:
 	cargo test
@@ -25,4 +26,4 @@ deps:
 	eog target/graph.png
 
 example:
-	RUST_LOG=debug cargo run --release --target "x86_64-unknown-linux-musl" --example client
+	RUST_LOG=debug cargo run --release --target "x86_64-unknown-linux-musl" --example rssh-proxy

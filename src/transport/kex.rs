@@ -16,7 +16,7 @@ use super::*;
 use async_std::task::Poll;
 
 /// A state machine for key exchange.
-pub trait Kex {
+pub trait Kex: std::fmt::Debug + Send {
     fn init(&mut self, tx: u64, rx: u64);
     fn is_active(&self) -> bool;
     fn is_sending_critical(&self) -> bool;
@@ -31,16 +31,28 @@ pub trait Kex {
     fn push_init_tx(&mut self) -> Result<(), TransportError>;
     fn push_init_rx(&mut self, tx: u64, rx: u64, msg: MsgKexInit) -> Result<(), TransportError>;
 
-    fn poll_ecdh_init(&mut self, cx: &mut Context) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>>;
+    fn poll_ecdh_init(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>>;
     fn push_ecdh_init_tx(&mut self) -> Result<(), TransportError>;
     fn push_ecdh_init_rx(&mut self, msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError>;
 
-    fn poll_ecdh_reply(&mut self, cx: &mut Context) -> Poll<Result<MsgKexEcdhReply<X25519>, TransportError>>;
+    fn poll_ecdh_reply(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<MsgKexEcdhReply<X25519>, TransportError>>;
     fn push_ecdh_reply_tx(&mut self) -> Result<(), TransportError>;
     fn push_ecdh_reply_rx(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError>;
 
-    fn poll_new_keys_tx(&mut self, cx: &mut Context) -> Poll<Result<EncryptionConfig, TransportError>>;
-    fn poll_new_keys_rx(&mut self, cx: &mut Context) -> Poll<Result<DecryptionConfig, TransportError>>;
+    fn poll_new_keys_tx(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<EncryptionConfig, TransportError>>;
+    fn poll_new_keys_rx(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<DecryptionConfig, TransportError>>;
     fn push_new_keys_tx(&mut self) -> Result<(), TransportError>;
     fn push_new_keys_rx(&mut self) -> Result<(), TransportError>;
 

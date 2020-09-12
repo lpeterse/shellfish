@@ -1,8 +1,8 @@
 use super::ecdh_algorithm::*;
 use super::*;
-use crate::algorithm::auth::*;
-use crate::codec::*;
-use crate::message::*;
+use crate::auth::*;
+use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgKexEcdhReply<A: EcdhAlgorithm> {
@@ -26,11 +26,11 @@ where
             + self.dh_public.size()
             + self.signature.size()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(&self.host_key, e);
-        Encode::encode(&self.dh_public, e);
-        Encode::encode(&self.signature, e);
+    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(<Self as Message>::NUMBER)?;
+        Encode::encode(&self.host_key, e)?;
+        Encode::encode(&self.dh_public, e)?;
+        Encode::encode(&self.signature, e)
     }
 }
 
@@ -53,6 +53,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::ssh_ed25519::*;
 
     #[derive(Debug, PartialEq, Eq)]
     struct TestAlgorithm {}
@@ -83,16 +84,16 @@ mod tests {
     fn test_encode_01() {
         let es = TestAlgorithm::new();
         let ep = TestAlgorithm::public(&es);
-        let host_key: Identity = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([23; 32])));
-        let host_signature: Signature =
-            Signature::Ed25519(SshEd25519Signature([47; 64]));
+        let host_key: Identity =
+            Identity::Ed25519PublicKey(Ed25519PublicKey([23; 32]));
+        let host_signature: Signature = Signature { algorithm: "ssh-ed25519".into(), signature: vec![47; 64] };
         let msg = MsgKexEcdhReply::<TestAlgorithm> {
             host_key,
             dh_public: ep,
             signature: host_signature,
         };
 
-        let actual = BEncoder::encode(&msg);
+        let actual = SliceEncoder::encode(&msg);
         let expected: [u8; 163] = [
             31, 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
             32, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
@@ -111,9 +112,9 @@ mod tests {
     fn test_decode_01() {
         let es = TestAlgorithm::new();
         let ep = TestAlgorithm::public(&es);
-        let host_key: Identity = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([23; 32])));
-        let host_signature: Signature =
-            Signature::Ed25519(SshEd25519Signature([47; 64]));
+        let host_key: Identity =
+            Identity::Ed25519PublicKey(Ed25519PublicKey([23; 32]));
+        let host_signature: Signature = Signature { algorithm: "ssh-ed25519".into(), signature: vec![47; 64] };
 
         let input: [u8; 163] = [
             31, 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
@@ -126,7 +127,7 @@ mod tests {
             47, 47, 47, 47, 47, 47, 47, 47,
         ];
 
-        let actual: MsgKexEcdhReply::<TestAlgorithm> = BDecoder::decode(&input[..]).unwrap();
+        let actual: MsgKexEcdhReply<TestAlgorithm> = SliceDecoder::decode(&input[..]).unwrap();
         let expected = MsgKexEcdhReply::<TestAlgorithm> {
             host_key,
             dh_public: ep,

@@ -1,13 +1,14 @@
 pub(crate) mod buffered;
-pub(crate) mod cipher;
 pub(crate) mod config;
 pub(crate) mod cookie;
+pub(crate) mod crypto;
 pub(crate) mod ecdh_algorithm;
 pub(crate) mod ecdh_hash;
 pub(crate) mod error;
 pub(crate) mod identification;
 pub(crate) mod kex;
 pub(crate) mod key_streams;
+pub(crate) mod message;
 pub(crate) mod msg_debug;
 pub(crate) mod msg_disconnect;
 pub(crate) mod msg_ecdh_init;
@@ -19,18 +20,19 @@ pub(crate) mod msg_service_accept;
 pub(crate) mod msg_service_request;
 pub(crate) mod msg_unimplemented;
 pub(crate) mod packet;
+pub(crate) mod service;
 pub(crate) mod session_id;
-pub(crate) mod socket;
 pub(crate) mod transceiver;
 
 pub use self::buffered::*;
 pub use self::config::*;
 pub use self::error::*;
 pub use self::identification::*;
+pub use self::message::*;
+pub use self::service::*;
 pub use self::session_id::*;
-pub use self::socket::*;
 
-use self::cipher::*;
+pub use self::crypto::*;
 pub use self::kex::*;
 use self::key_streams::*;
 use self::msg_debug::*;
@@ -39,11 +41,12 @@ use self::msg_ignore::*;
 use self::msg_service_accept::*;
 use self::msg_service_request::*;
 use self::msg_unimplemented::*;
-use self::packet::*;
 use self::transceiver::*;
 
-use crate::codec::*;
-use crate::host::*;
+use crate::auth::Agent;
+use crate::known_hosts::*;
+use crate::util::codec::*;
+use crate::util::socket::*;
 
 use async_std::future::poll_fn;
 use async_std::net::TcpStream;
@@ -150,15 +153,23 @@ impl TransportLayerExt {
         t.consume();
         Ok(t)
     }
+
+    pub async fn offer_service<T: TransportLayer>(
+        _t: T,
+        _service_name: &str,
+    ) -> Result<T, TransportError> {
+        todo!()
+    }
 }
 
 /// Implements the transport layer as described in RFC 4253.
 ///
 /// This structure is polymorphic in the socket type (most likely `TcpStream` but other types are
 /// used for testing).
+#[derive(Debug)]
 pub struct Transport<S: Socket = TcpStream> {
     trx: Transceiver<S>,
-    kex: ClientKex,
+    kex: Box<dyn Kex>,
 }
 
 impl<S: Socket> Transport<S> {
@@ -167,7 +178,7 @@ impl<S: Socket> Transport<S> {
     /// The initial key exchange has been completed successfully when function returns.
     pub async fn connect(
         config: &Arc<TransportConfig>,
-        verifier: &Arc<dyn HostKeyVerifier>,
+        verifier: &Arc<dyn KnownHosts>,
         hostname: String,
         socket: S,
     ) -> Result<Self, TransportError> {
@@ -175,6 +186,7 @@ impl<S: Socket> Transport<S> {
         trx.send_id(&config.identification).await?;
         let id = trx.receive_id().await?;
         let kex = ClientKex::new(&config, &verifier, id, hostname);
+        let kex = Box::new(kex);
         let mut transport = Self { trx, kex };
         transport.rekey().await?;
         Ok(transport)
@@ -183,11 +195,20 @@ impl<S: Socket> Transport<S> {
     /// Create a new transport acting as server.
     ///
     /// The initial key exchange has been completed successfully when function returns.
+    /// FIXME
     pub async fn accept(
-        _config: &Arc<TransportConfig>,
-        _socket: S,
+        config: Arc<TransportConfig>,
+        _auth_agent: Arc<dyn Agent>,
+        socket: S,
     ) -> Result<Self, TransportError> {
-        unimplemented!()
+        let mut trx = Transceiver::new(socket);
+        trx.send_id(&config.identification).await?;
+        let _id = trx.receive_id().await?;
+        let kex = ServerKex::new(&config);
+        let kex = Box::new(kex);
+        let mut transport = Self { trx, kex };
+        transport.rekey().await?;
+        Ok(transport)
     }
 
     /// Initiate a rekeying and wait for it to complete.
@@ -361,7 +382,7 @@ impl<S: Socket> TransportLayer for Transport<S> {
                     return Poll::Ready(Err(TransportError::MessageUnexpected));
                 }
             }
-            return self.trx.poll_send(cx, &msg);
+            return self.trx.poll_send(cx, msg);
         }
     }
 
@@ -478,7 +499,7 @@ pub mod tests {
             self.tx_disconnect
         }
         pub fn rx_push<E: Encode>(&mut self, msg: &E) {
-            self.rx_buf.push_back(BEncoder::encode(msg))
+            self.rx_buf.push_back(SliceEncoder::encode(msg))
         }
         pub fn set_error(&mut self, e: TransportError) {
             self.error = Some(e)
@@ -488,14 +509,14 @@ pub mod tests {
     impl TransportLayer for TestTransport {
         fn decode<Msg: Decode>(&mut self) -> Option<Msg> {
             if let Some(data) = self.rx_buf.front() {
-                BDecoder::decode(data)
+                SliceDecoder::decode(data)
             } else {
                 None
             }
         }
         fn decode_ref<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
             if let Some(data) = self.rx_buf.front() {
-                BDecoder::decode(data)
+                SliceDecoder::decode(data)
             } else {
                 None
             }
@@ -527,7 +548,7 @@ pub mod tests {
             self.send_count += 1;
             self.check_error()?;
             if self.tx_ready {
-                self.tx_buf.push(BEncoder::encode(msg));
+                self.tx_buf.push(SliceEncoder::encode(msg));
                 Poll::Ready(Ok(()))
             } else {
                 Poll::Pending

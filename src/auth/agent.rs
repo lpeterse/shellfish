@@ -1,75 +1,31 @@
+mod local;
+
+pub use self::local::*;
+
 use super::*;
+use crate::util::*;
 
-use async_std::os::unix::net::UnixStream;
-use std::convert::TryFrom;
-use std::path::{Path, PathBuf};
+pub type AgentError = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type AgentResult<T> = Result<T, AgentError>;
+pub type AgentFuture<T> = BoxFuture<AgentResult<T>>;
 
-/// A client for the local `ssh-agent`.
-#[derive(Debug, Clone)]
-pub struct Agent {
-    path: PathBuf,
-}
-
-impl Agent {
-    const SSH_AUTH_SOCK: &'static str = "SSH_AUTH_SOCK";
-
-    /// Create a new agent client by path designating the unix domain socket.
-    pub fn new(path: &Path) -> Self {
-        Self { path: path.into() }
-    }
-
-    /// Create a new agent client with the value of `SSH_AUTH_SOCK` as path.
-    pub fn new_env() -> Option<Self> {
-        let s = std::env::var_os(Self::SSH_AUTH_SOCK)?;
-        Self {
-            path: TryFrom::try_from(s).ok()?,
-        }
-        .into()
-    }
-
+/// This trait describes the methods of `ssh-agent`.
+pub trait Agent: std::fmt::Debug + Send + Sync + 'static {
     /// Request a list of identities from the agent.
-    pub async fn identities(&self) -> Result<Vec<(Identity, String)>, AuthAgentError> {
-        let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
-        t.send(&MsgIdentitiesRequest {}).await?;
-        t.receive::<MsgIdentitiesAnswer>()
-            .await
-            .map(|x| x.identities)
-    }
-
+    fn identities(&self) -> AgentFuture<Vec<(Identity, String)>>;
     /// Sign a digest with the corresponding private key known to be owned be the agent.
     ///
     /// Returns `Ok(None)` in case the agent refused to sign.
-    pub async fn sign(
-        &self,
-        identity: &Identity,
-        data: &[u8],
-    ) -> Result<Option<Signature>, AuthAgentError> {
-        let msg = MsgSignRequest {
-            identity,
-            data,
-            flags: 0,
-        };
-        let mut t: Transmitter = UnixStream::connect(&self.path).await?.into();
-        t.send(&msg).await?;
-        t.receive::<Result<MsgSignResponse, MsgFailure>>()
-            .await
-            .map(|x| x.ok().map(|y| y.signature))
-    }
+    fn signature(&self, identity: &Identity, data: &[u8], flags: u32) -> AgentFuture<Option<Signature>>;
 }
 
-impl AuthAgent for Agent {
-    fn identities(&self) -> BoxFuture<Result<Vec<(Identity, String)>, AuthAgentError>> {
-        let self_ = self.clone();
-        Box::pin(async move { Self::identities(&self_).await })
+/// The unit agent neither offers identities nor will it sign anything.
+impl Agent for () {
+    fn identities(&self) -> AgentFuture<Vec<(Identity, String)>> {
+        Box::pin(async { Ok(vec![]) })
     }
-    fn signature(
-        &self,
-        identity: &Identity,
-        data: &[u8],
-    ) -> BoxFuture<Result<Option<Signature>, AuthAgentError>> {
-        let self_ = self.clone();
-        let identity = identity.clone();
-        let data = Vec::from(data);
-        Box::pin(async move { Self::sign(&self_, &identity, &data).await })
+
+    fn signature(&self, _: &Identity, _: &[u8], _: u32) -> AgentFuture<Option<Signature>> {
+        Box::pin(async { Ok(None) })
     }
 }

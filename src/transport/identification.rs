@@ -1,4 +1,5 @@
-use crate::codec::*;
+use crate::util::assume;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Identification<T = String> {
@@ -34,37 +35,33 @@ impl<T: AsRef<[u8]>> Encode for Identification<T> {
                 1 + self.comment.as_ref().len()
             }
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_bytes(&Self::PREFIX);
-        e.push_bytes(&self.version.as_ref());
+    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_bytes(&Self::PREFIX)?;
+        e.push_bytes(&self.version.as_ref())?;
         if !self.comment.as_ref().is_empty() {
-            e.push_u8(' ' as u8);
-            e.push_bytes(&self.comment.as_ref());
+            e.push_u8(' ' as u8)?;
+            e.push_bytes(&self.comment.as_ref())?;
         }
+        Some(())
     }
 }
 
 impl Decode for Identification<String> {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_bytes(&Self::PREFIX)?;
-        if d.remaining() > Self::MAX_LEN {
-            return None;
+        let pred = |x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != (' ' as u8);
+        let version = d.take_while(pred)?;
+        let comment = if d.take_eoi().is_some() {
+            b""
+        } else {
+            d.expect_u8(' ' as u8)?;
+            d.take_while(|x| (x as char).is_ascii_graphic())?
         };
+        d.take_eoi()?;
+        assume(Self::PREFIX.len() + version.len() + comment.len() < Self::MAX_LEN)?;
         Self {
-            version: {
-                let pred =
-                    |x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != (' ' as u8);
-                let version = d.take_while(pred)?;
-                String::from_utf8(version.to_vec()).ok()?
-            },
-            comment: if d.is_eoi() {
-                String::default()
-            } else {
-                d.expect_u8(' ' as u8)?;
-                let comment = d.take_while(|x| (x as char).is_ascii_graphic())?;
-                d.take_eoi()?;
-                String::from_utf8(comment.to_vec()).ok()?
-            },
+            version: String::from_utf8(version.to_vec()).ok()?,
+            comment: String::from_utf8(comment.to_vec()).ok()?,
         }
         .into()
     }
@@ -76,36 +73,45 @@ mod tests {
 
     #[test]
     fn test_default_01() {
-        let id = BEncoder::encode(&Identification::default());
-        let id_ = concat!("SSH-2.0-", env!("CARGO_PKG_NAME"), "_", env!("CARGO_PKG_VERSION"));
+        let id = SliceEncoder::encode(&Identification::default());
+        let id_ = concat!(
+            "SSH-2.0-",
+            env!("CARGO_PKG_NAME"),
+            "_",
+            env!("CARGO_PKG_VERSION")
+        );
         assert_eq!(id, id_.as_bytes());
     }
 
     #[test]
     fn test_encode_01() {
         let id: Identification<String> = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &BEncoder::encode(&id)[..]);
+        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &SliceEncoder::encode(&id)[..]);
     }
 
     /// Test the branch where the input is longer than MAX_LEN.
     #[test]
     fn test_decode_01() {
-        let input = concat!("SSH-2.0-ssh_0.1.0 ultraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        let input =
+            concat!("SSH-2.0-ssh_0.1.0 ultraaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        assert_eq!(None, BDecoder::decode::<Identification<String>>(input.as_ref()));
+        assert_eq!(
+            None,
+            SliceDecoder::decode::<Identification<String>>(input.as_ref())
+        );
     }
 
     #[test]
     fn test_decode_02() {
         let id = Identification::new("ssh_0.1.0".into(), "".into());
-        assert_eq!(Some(id), BDecoder::decode(b"SSH-2.0-ssh_0.1.0"));
+        assert_eq!(Some(id), SliceDecoder::decode(b"SSH-2.0-ssh_0.1.0"));
     }
 
     #[test]
     fn test_decode_03() {
         let id = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(Some(id), BDecoder::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
+        assert_eq!(Some(id), SliceDecoder::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
     }
 }

@@ -1,5 +1,5 @@
-use crate::codec::*;
-use crate::message::*;
+use crate::util::codec::*;
+use crate::transport::Message;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgServiceRequest<'a>(pub &'a str);
@@ -10,11 +10,12 @@ impl<'a> Message for MsgServiceRequest<'a> {
 
 impl<'a> Encode for MsgServiceRequest<'a> {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.0)
+        std::mem::size_of::<u8>()
+        + self.0.size()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) {
-        c.push_u8(<Self as Message>::NUMBER);
-        Encode::encode(&self.0, c);
+    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+        c.push_u8(<Self as Message>::NUMBER)?;
+        c.push_encode(&self.0)
     }
 }
 
@@ -43,14 +44,14 @@ mod tests {
         let msg = MsgServiceRequest(&"service");
         assert_eq!(
             &[5, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101][..],
-            &BEncoder::encode(&msg)[..]
+            &SliceEncoder::encode(&msg)[..]
         );
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 12] = [5, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101];
-        let msg: MsgServiceRequest = BDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgServiceRequest = SliceDecoder::decode(&buf[..]).unwrap();
         assert_eq!("service", msg.0);
     }
 }

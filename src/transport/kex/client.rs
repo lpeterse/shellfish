@@ -1,15 +1,17 @@
 use super::super::config::*;
 use super::kex::*;
-use crate::algorithm::kex::*;
+
+use crate::util::assume;
 
 use async_std::future::Future;
 use futures_timer::Delay;
 
 /// The client side state machine for key exchange.
+#[derive(Debug)]
 pub struct ClientKex {
     config: Arc<TransportConfig>,
     /// Host key verifier
-    verifier: Arc<dyn HostKeyVerifier>,
+    known_hosts: Arc<dyn KnownHosts>,
     /// Mutable state (when kex in progress)
     state: Option<Box<State>>,
     /// Remote identification string
@@ -29,13 +31,13 @@ pub struct ClientKex {
 impl ClientKex {
     pub fn new(
         config: &Arc<TransportConfig>,
-        verifier: &Arc<dyn HostKeyVerifier>,
+        known_hosts: &Arc<dyn KnownHosts>,
         remote_id: Identification<String>,
         remote_name: String,
     ) -> Self {
         Self {
             config: config.clone(),
-            verifier: verifier.clone(),
+            known_hosts: known_hosts.clone(),
             state: None,
             remote_id,
             remote_name,
@@ -54,7 +56,7 @@ struct State {
     init_tx: bool,
     init_rx: Option<MsgKexInit>,
     ecdh_tx: bool,
-    ecdh_rx: Option<Result<(), VerificationFuture>>,
+    ecdh_rx: Option<Result<(), KnownHostsFuture>>,
     newkeys_tx: bool,
     newkeys_rx: bool,
 }
@@ -73,15 +75,18 @@ impl State {
             newkeys_rx: false,
         }
     }
-}
 
-impl State {
     fn poll_host_key_verified(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         if let Some(ref mut hkv) = self.ecdh_rx {
             if let Err(ref mut hkv) = hkv {
                 let e = TransportError::HostKeyUnverifiable;
-                ready!(Pin::new(hkv).poll(cx)).map_err(|_| e)?;
-                self.ecdh_rx = Some(Ok(()))
+                match ready!(Pin::new(hkv).poll(cx)) {
+                    Ok(Some(KnownHostsDecision::Accepted)) => {
+                        self.ecdh_rx = Some(Ok(()));
+                        return Poll::Ready(Ok(()));
+                    }
+                    _ => return Poll::Ready(Err(e)),
+                }
             }
             Poll::Ready(Ok(()))
         } else {
@@ -171,7 +176,6 @@ impl Kex for ClientKex {
         if let Some(ref mut state) = self.state {
             if state.init_tx && !state.ecdh_tx {
                 if let Some(ref remote) = state.init_rx {
-                    use crate::algorithm::KEX_ALGORITHMS;
                     let ka = intersection(&self.config.kex_algorithms, &KEX_ALGORITHMS[..]);
                     let ka = common(&ka, &remote.kex_algorithms);
                     if ka == Some(Curve25519Sha256::NAME)
@@ -237,13 +241,14 @@ impl Kex for ClientKex {
                     }
                     .sha256();
                     // Verify the host key signature
-                    msg.signature
-                        .verify(&msg.host_key.public_key(), h.as_ref())
-                        .ok_or(TransportError::InvalidSignature)?;
+                    let valid = msg
+                        .host_key
+                        .verify_signature(&msg.signature, h.as_ref());
+                    assume(valid).ok_or(TransportError::InvalidSignature)?;
                     // The session id is only computed during first kex and constant afterwards
                     let sid = self.session_id.get_or_insert_with(|| h.clone());
                     let algos = AlgorithmAgreement::agree(&local, &remote)?;
-                    let gks: GenericKeyStream = KeyStreamX25519::new(k, h, sid).into();
+                    let gks: GenericKeyStream = KeyStreamX25519::new(k.to_bytes(), h, sid.clone()).into();
                     let enc = CipherConfig {
                         ea: algos.ea_c2s,
                         ca: algos.ca_c2s,
@@ -256,7 +261,7 @@ impl Kex for ClientKex {
                         ma: algos.ma_s2c,
                         ke: gks.s2c(),
                     };
-                    let fut = self.verifier.verify(&self.remote_name, &msg.host_key);
+                    let fut = self.known_hosts.verify(&self.remote_name, &msg.host_key);
                     state.ecdh_rx = Some(Err(fut));
                     state.cipher = Some((enc, dec));
                     return Ok(());
@@ -331,6 +336,12 @@ impl Kex for ClientKex {
     }
 }
 
+impl std::fmt::Debug for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "State {{ ... }}")
+    }
+}
+
 /*
 #[cfg(test)]
 mod tests {
@@ -354,7 +365,7 @@ mod tests {
                 .collect::<Vec<&str>>()
         };
 
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("testing".into(), "".into());
         let remote_name: String = "hostname".into();
         let kex = ClientKex::new(&config, verifier, remote_id.clone(), remote_name.clone());
@@ -389,7 +400,7 @@ mod tests {
     #[test]
     fn test_client_kex_is_active() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
         assert!(!kex.is_active());
@@ -400,7 +411,7 @@ mod tests {
     #[test]
     fn test_client_kex_is_sending_critical() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -448,7 +459,7 @@ mod tests {
     #[test]
     fn test_client_kex_is_receiving_critical() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -497,7 +508,7 @@ mod tests {
     #[test]
     fn test_client_kex_init_01() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -518,7 +529,7 @@ mod tests {
     #[test]
     fn test_client_kex_init_02() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -543,7 +554,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_init_01() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -568,7 +579,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_init_02() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -598,7 +609,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_init_03() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -616,7 +627,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_init_04() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -642,7 +653,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_ecdh_init() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -673,7 +684,7 @@ mod tests {
         .unwrap();
 
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let local_id = Identification::default();
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(
@@ -687,7 +698,7 @@ mod tests {
         si.cookie = KexCookie([2; 16]);
 
         let host_key = keypair.public.to_bytes().clone();
-        let host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey(host_key)));
+        let host_key = Identity::PublicKey(PublicKey::Ed25519(Ed25519PublicKey(host_key)));
         let client_dh_secret = X25519::new();
         let client_dh_public = X25519::public(&client_dh_secret);
         let server_dh_secret = X25519::new();
@@ -740,14 +751,14 @@ mod tests {
         use crate::algorithm::auth::*;
 
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
-        let host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([8; 32])));
+        let host_key = Identity::PublicKey(PublicKey::Ed25519(Ed25519PublicKey([8; 32])));
         let client_dh_secret = X25519::new();
         let server_dh_secret = X25519::new();
         let server_dh_public = X25519::public(&server_dh_secret);
@@ -780,14 +791,14 @@ mod tests {
         use crate::algorithm::auth::*;
 
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
         let mut si: MsgKexInit = kex.local_init.clone().into();
         si.cookie = KexCookie([2; 16]);
 
-        let host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([8; 32])));
+        let host_key = Identity::PublicKey(PublicKey::Ed25519(Ed25519PublicKey([8; 32])));
         let server_dh_secret = X25519::new();
         let server_dh_public = X25519::public(&server_dh_secret);
 
@@ -807,7 +818,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_new_keys_01() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -836,7 +847,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_new_keys_02() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 
@@ -858,7 +869,7 @@ mod tests {
     #[test]
     fn test_client_kex_push_new_keys_03() {
         let config = ClientConfig::default();
-        let verifier: Arc<Box<dyn HostKeyVerifier>> = Arc::new(Box::new(AcceptingVerifier {}));
+        let verifier: Arc<Box<dyn KnownHosts>> = Arc::new(Box::new(AcceptingVerifier {}));
         let remote_id: Identification = Identification::new("foobar".into(), "".into());
         let mut kex = ClientKex::new(&config, verifier, remote_id, "hostname".into());
 

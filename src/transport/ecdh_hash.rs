@@ -2,9 +2,9 @@ use super::ecdh_algorithm::*;
 use super::msg_kex_init::MsgKexInit;
 use super::SessionId;
 
-use crate::algorithm::auth::*;
-use crate::codec::*;
+use crate::auth::*;
 use crate::transport::identification::*;
+use crate::util::codec::*;
 
 use sha2::{Digest, Sha256};
 
@@ -20,37 +20,38 @@ pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
 }
 
 impl<'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
-    pub fn encode<E: Encoder>(&self, e: &mut E) {
-        e.push_u32be(Encode::size(self.client_identification) as u32);
-        e.push_encode(self.client_identification);
-        e.push_u32be(Encode::size(self.server_identification) as u32);
-        e.push_encode(self.server_identification);
-        e.push_u32be(Encode::size(self.client_kex_init) as u32);
-        e.push_encode(self.client_kex_init);
-        e.push_u32be(Encode::size(self.server_kex_init) as u32);
-        e.push_encode(self.server_kex_init);
-        e.push_encode(self.server_host_key);
-        e.push_u32be(A::public_as_ref(self.dh_client_key).len() as u32);
-        e.push_bytes(&A::public_as_ref(self.dh_client_key));
-        e.push_u32be(A::public_as_ref(self.dh_server_key).len() as u32);
-        e.push_bytes(&A::public_as_ref(self.dh_server_key));
-        e.push_encode(&MPInt(self.dh_secret));
+    #[must_use]
+    pub fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u32be(Encode::size(self.client_identification) as u32)?;
+        e.push_encode(self.client_identification)?;
+        e.push_u32be(Encode::size(self.server_identification) as u32)?;
+        e.push_encode(self.server_identification)?;
+        e.push_u32be(Encode::size(self.client_kex_init) as u32)?;
+        e.push_encode(self.client_kex_init)?;
+        e.push_u32be(Encode::size(self.server_kex_init) as u32)?;
+        e.push_encode(self.server_kex_init)?;
+        e.push_encode(self.server_host_key)?;
+        e.push_u32be(A::public_as_ref(self.dh_client_key).len() as u32)?;
+        e.push_bytes(&A::public_as_ref(self.dh_client_key))?;
+        e.push_u32be(A::public_as_ref(self.dh_server_key).len() as u32)?;
+        e.push_bytes(&A::public_as_ref(self.dh_server_key))?;
+        e.push_encode(&MPInt(self.dh_secret))
     }
 
     pub fn sha256(&self) -> SessionId {
         let mut sha256 = Sha256::new();
-        self.encode(&mut sha256);
+        let _ = self.encode(&mut sha256);
         let mut digest = [0; 32];
-        digest.copy_from_slice(sha256.result_reset().as_slice());
+        digest.copy_from_slice(sha256.finalize_reset().as_slice());
         SessionId::new(digest)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::*;
     use super::*;
-    use crate::algorithm::encryption::*;
-    use crate::algorithm::kex::*;
+    use crate::auth::ssh_ed25519::*;
     use crate::transport::kex::*;
 
     #[test]
@@ -97,10 +98,10 @@ mod tests {
             languages_server_to_client: vec![],
             first_packet_follows: false,
         };
-        let server_host_key = Identity::PublicKey(PublicKey::Ed25519(SshEd25519PublicKey([
+        let server_host_key = Identity::Ed25519PublicKey(Ed25519PublicKey([
             106, 114, 105, 46, 246, 21, 248, 172, 243, 187, 200, 45, 247, 246, 225, 218, 206, 250,
             145, 15, 246, 140, 131, 40, 234, 255, 135, 177, 8, 161, 128, 79,
-        ])));
+        ]));
         let dh_client_key = x25519_dalek::PublicKey::from([
             163, 184, 73, 53, 101, 235, 117, 249, 31, 97, 178, 63, 135, 35, 65, 5, 189, 180, 255,
             250, 242, 232, 76, 164, 186, 212, 21, 0, 223, 144, 162, 77,
