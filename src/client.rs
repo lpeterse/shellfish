@@ -39,12 +39,13 @@ impl Client {
         let verifier = self.known_hosts.clone();
         let tc = &self.config.transport;
         let cc = &self.config.connection;
-        let t = Transport::connect(tc, &verifier, hostname, socket).await?;
+        let t = DefaultTransport::connect(tc, &verifier, hostname, socket).await?;
+        let t = Box::new(t);
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, cc, user, &self.auth_agent).await?,
             None => {
                 let n = <Connection as Service>::NAME;
-                let t = TransportLayerExt::request_service(t, n).await?;
+                let t = TransportExt::request_service(t, n).await?;
                 Connection::new(cc, t)
             }
         })

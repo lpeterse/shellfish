@@ -3,6 +3,7 @@ use super::*;
 
 use crate::transport::{DisconnectReason, TransportError};
 use crate::util::assume;
+use crate::transport::TransportExt;
 
 use async_std::task::{ready, Context, Poll, Waker};
 use std::collections::VecDeque;
@@ -20,9 +21,9 @@ use std::sync::Arc;
 /// For now (Feb 2020), we'll sacrifice that potential performance increase in favour of simplicity.
 /// We'll automatically benefit from any improvements in std in the future.
 #[derive(Debug)]
-pub struct ConnectionState<T: TransportLayer = Transport> {
+pub struct ConnectionState {
     config: Arc<ConnectionConfig>,
-    transport: T,
+    transport: Box<dyn Transport>,
     channels: ChannelList,
     local_requests: VecDeque<GlobalRequest>,
     local_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
@@ -35,12 +36,12 @@ pub struct ConnectionState<T: TransportLayer = Transport> {
     result: Option<Result<DisconnectReason, ConnectionError>>,
 }
 
-impl<T: TransportLayer> ConnectionState<T> {
+impl ConnectionState {
     /// Create a new state with config and transport.
     ///
     /// The config `Arc` will be cloned. All queues are initialised with zero
     /// capacity in expectation that they will never be used.
-    pub fn new(config: &Arc<ConnectionConfig>, transport: T) -> Self {
+    pub fn new(config: &Arc<ConnectionConfig>, transport: Box<dyn Transport>) -> Self {
         Self {
             config: config.clone(),
             transport,
@@ -269,7 +270,7 @@ impl<T: TransportLayer> ConnectionState<T> {
                 request.data.clone(),
                 request.reply.is_some(),
             );
-            ready!(self.transport.poll_send(cx, &msg))?;
+            ready!(TransportExt::poll_send(&mut self.transport, cx, &msg))?;
             if let Some(ref mut request) = self.local_requests.pop_front() {
                 if let Some(reply) = request.reply.take() {
                     self.local_replies.push_back(reply);
@@ -286,11 +287,10 @@ impl<T: TransportLayer> ConnectionState<T> {
     fn poll_global_replies(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
         while let Some(ref mut future) = self.remote_replies.front_mut() {
             if let Some(data) = ready!(future.peek(cx)) {
-                ready!(self
-                    .transport
-                    .poll_send(cx, &MsgRequestSuccess::new(&data?)))?;
+                ready!(TransportExt::poll_send(&mut self.transport, cx, &MsgRequestSuccess::new(&data?)))?;
             } else {
-                ready!(self.transport.poll_send(cx, &MsgRequestFailure))?;
+                let msg = MsgRequestFailure;
+                ready!(TransportExt::poll_send(&mut self.transport, cx, &msg))?;
             };
             let _ = self.remote_replies.pop_front();
         }
@@ -303,174 +303,171 @@ impl<T: TransportLayer> ConnectionState<T> {
     /// Secondly, it is attempted to receive from the transport and dispatch any incoming messages
     /// until `transport.poll_receive()` returns `Pending`.
     ///
-    /// NB: Any message that is received gets dispatched. The dispatch mechanism does not cause
-    /// the operation to return `Pending`. This is important to avoid deadlock situations!
-    fn poll_transport(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        ready!(self.transport.poll_flush(cx))?;
-        loop {
-            ready!(self.transport.poll_receive(cx))?;
-            self.dispatch_transport(cx)?;
-            self.transport.consume();
-        }
-    }
-
-    /// Try to decode, dispatch and consume the next inbound message.
-    ///
     /// Only connection layer messages are considered. The dispatch order depends on the estimated
     /// likelyhood of message occurence (`MSG_CHANNEL_DATA` is the fastest path).
     ///
     /// In case a message cannot be decoded, it is tried to send a `MSG_UNIMPLEMENTED` to the client
     /// and the operations returns with a corresponding error.
-    fn dispatch_transport(&mut self, cx: &mut Context) -> Result<(), ConnectionError> {
-        // MSG_CHANNEL_DATA
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgChannelData = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_DATA ({} bytes)",
-                msg.recipient_channel,
-                msg.data.len()
-            );
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_data(msg.data)?;
-            return Ok(());
+    ///
+    /// NB: Any message that is received gets dispatched. The dispatch mechanism does not cause
+    /// the operation to return `Pending`. This is important to avoid deadlock situations!
+    fn poll_transport(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        ready!(self.transport.poll_flush(cx))?;
+        loop {
+            let rx = ready!(self.transport.poll_peek(cx))?;
+            // MSG_CHANNEL_DATA
+            if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelData = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_DATA ({} bytes)",
+                    msg.recipient_channel,
+                    msg.data.len()
+                );
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_data(msg.data)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_EXTENDED_DATA
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelExtendedData = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_EXTENDED_DATA ({} bytes)",
+                    msg.recipient_channel,
+                    msg.data.len()
+                );
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_extended_data(msg.data_type_code, msg.data)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_WINDOW_ADJUST
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelWindowAdjust = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST",
+                    msg.recipient_channel
+                );
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_window_adjust(msg.bytes_to_add)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_EOF
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelEof = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_EOF",
+                    msg.recipient_channel
+                );
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_eof()?;
+                Ok(())
+            }
+            // MSG_CHANNEL_CLOSE
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelClose = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_CLOSE",
+                    msg.recipient_channel
+                );
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_close()?;
+                Ok(())
+            }
+            // MSG_CHANNEL_OPEN
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelOpen = msg;
+                log::debug!("Received MSG_CHANNEL_OPEN ({})", msg.name);
+                self.check_resource_exhaustion()?;
+                self.channels.open_inbound(msg);
+                self.flag_outer_task_for_wakeup();
+                Ok(())
+            }
+            // MSG_CHANNEL_OPEN_CONFIRMATION
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelOpenConfirmation = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION",
+                    msg.recipient_channel
+                );
+                let channel = ChannelHandleInner::new(
+                    msg.recipient_channel,
+                    self.config.channel_max_buffer_size,
+                    self.config.channel_max_packet_size,
+                    msg.sender_channel,
+                    msg.initial_window_size,
+                    msg.maximum_packet_size,
+                    false,
+                );
+                self.channels.accept(msg.recipient_channel, channel)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_OPEN_FAILURE
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelOpenFailure = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_OPEN_FAILURE",
+                    msg.recipient_channel
+                );
+                self.channels.reject(msg.recipient_channel, msg.reason)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_REQUEST
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelRequest<&[u8]> = msg;
+                let rid = msg.recipient_channel;
+                let req = msg.request.into();
+                log::debug!("Channel {}: Received MSG_CHANNEL_REQUEST: {:?}", rid, req);
+                self.check_resource_exhaustion()?;
+                let channel = self.channels.get_open(rid)?;
+                channel.push_request(req)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_SUCCESS
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelSuccess = msg;
+                log::debug!(
+                    "Channel {}: Received MSG_CHANNEL_SUCCESS",
+                    msg.recipient_channel
+                );
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_success()?;
+                Ok(())
+            }
+            // MSG_CHANNEL_FAILURE
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgChannelFailure = msg;
+                log::debug!("Received MSG_CHANNEL_FAILURE");
+                let channel = self.channels.get_open(msg.recipient_channel)?;
+                channel.push_failure()?;
+                Ok(())
+            }
+            // MSG_GLOBAL_REQUEST
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgGlobalRequest = msg;
+                log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
+                self.check_resource_exhaustion()?;
+                self.push_request(msg.name, msg.data, msg.want_reply)?;
+                Ok(())
+            }
+            // MSG_REQUEST_SUCCESS
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgRequestSuccess = msg;
+                log::debug!("Received MSG_REQUEST_SUCCESS");
+                let data = msg.data.into();
+                self.push_success(data)
+            }
+            // MSG_REQUEST_FAILURE
+            else if let Some(msg) = SliceDecoder::decode(rx) {
+                let _: MsgRequestFailure = msg;
+                log::debug!("Received MSG_REQUEST_FAILURE");
+                self.push_failure()
+            }
+            // Otherwise try to send MSG_UNIMPLEMENTED and return error.
+            else {
+                self.transport.send_unimplemented(cx);
+                Err(TransportError::MessageUnexpected.into())
+            }?;
+            self.transport.consume();
         }
-        // MSG_CHANNEL_EXTENDED_DATA
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgChannelExtendedData = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_EXTENDED_DATA ({} bytes)",
-                msg.recipient_channel,
-                msg.data.len()
-            );
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_extended_data(msg.data_type_code, msg.data)?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_WINDOW_ADJUST
-        if let Some(msg) = self.transport.decode() {
-            let _: MsgChannelWindowAdjust = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST",
-                msg.recipient_channel
-            );
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_window_adjust(msg.bytes_to_add)?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_EOF
-        if let Some(msg) = self.transport.decode() {
-            let _: MsgChannelEof = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_EOF",
-                msg.recipient_channel
-            );
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_eof()?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_CLOSE
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgChannelClose = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_CLOSE",
-                msg.recipient_channel
-            );
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_close()?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_OPEN
-        if let Some(msg) = self.transport.decode() {
-            let _: MsgChannelOpen = msg;
-            log::debug!("Received MSG_CHANNEL_OPEN ({})", msg.name);
-            self.check_resource_exhaustion()?;
-            self.channels.open_inbound(msg);
-            self.flag_outer_task_for_wakeup();
-            return Ok(());
-        }
-        // MSG_CHANNEL_OPEN_CONFIRMATION
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgChannelOpenConfirmation = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION",
-                msg.recipient_channel
-            );
-            let channel = ChannelHandleInner::new(
-                msg.recipient_channel,
-                self.config.channel_max_buffer_size,
-                self.config.channel_max_packet_size,
-                msg.sender_channel,
-                msg.initial_window_size,
-                msg.maximum_packet_size,
-                false,
-            );
-            self.channels.accept(msg.recipient_channel, channel)?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_OPEN_FAILURE
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgChannelOpenFailure = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_OPEN_FAILURE",
-                msg.recipient_channel
-            );
-            self.channels.reject(msg.recipient_channel, msg.reason)?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_REQUEST
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgChannelRequest<&[u8]> = msg;
-            let rid = msg.recipient_channel;
-            let req = msg.request.into();
-            log::debug!("Channel {}: Received MSG_CHANNEL_REQUEST: {:?}", rid, req);
-            self.check_resource_exhaustion()?;
-            let channel = self.channels.get_open(rid)?;
-            channel.push_request(req)?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_SUCCESS
-        if let Some(msg) = self.transport.decode() {
-            let _: MsgChannelSuccess = msg;
-            log::debug!(
-                "Channel {}: Received MSG_CHANNEL_SUCCESS",
-                msg.recipient_channel
-            );
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_success()?;
-            return Ok(());
-        }
-        // MSG_CHANNEL_FAILURE
-        if let Some(msg) = self.transport.decode() {
-            let _: MsgChannelFailure = msg;
-            log::debug!("Received MSG_CHANNEL_FAILURE");
-            let channel = self.channels.get_open(msg.recipient_channel)?;
-            channel.push_failure()?;
-            return Ok(());
-        }
-        // MSG_GLOBAL_REQUEST
-        if let Some(msg) = self.transport.decode() {
-            let _: MsgGlobalRequest = msg;
-            log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
-            self.check_resource_exhaustion()?;
-            self.push_request(msg.name, msg.data, msg.want_reply)?;
-            return Ok(());
-        }
-        // MSG_REQUEST_SUCCESS
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgRequestSuccess = msg;
-            log::debug!("Received MSG_REQUEST_SUCCESS");
-            let data = msg.data.into();
-            return self.push_success(data);
-        }
-        // MSG_REQUEST_FAILURE
-        if let Some(msg) = self.transport.decode_ref() {
-            let _: MsgRequestFailure = msg;
-            log::debug!("Received MSG_REQUEST_FAILURE");
-            return self.push_failure();
-        }
-        // Otherwise try to send MSG_UNIMPLEMENTED and return error.
-        self.transport.send_unimplemented(cx);
-        Err(TransportError::MessageUnexpected.into())
     }
 
     fn push_request(
@@ -525,6 +522,7 @@ impl<T: TransportLayer> ConnectionState<T> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
 
@@ -765,3 +763,4 @@ mod tests {
         assert_eq!(x.local_requests.len(), 1);
     }
 }
+*/

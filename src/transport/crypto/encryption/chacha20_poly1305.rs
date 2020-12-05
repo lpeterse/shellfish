@@ -1,8 +1,12 @@
 use super::*;
 use crate::transport::key_streams::*;
+use crate::transport::PACKET_LEN_BYTES;
+use crate::transport::PACKET_MAX_LEN;
+use crate::transport::PACKET_MIN_LEN;
+use crate::transport::PADDING_MIN_LEN;
 use crate::util::assume;
 
-use chacha20::stream_cipher::{NewStreamCipher, SyncStreamCipher};
+use chacha20::cipher::stream::{NewStreamCipher, SyncStreamCipher};
 use chacha20::ChaCha20Legacy;
 use generic_array::GenericArray;
 use poly1305::universal_hash::NewUniversalHash;
@@ -19,7 +23,6 @@ pub struct Chacha20Poly1305Context {
 }
 
 impl Chacha20Poly1305Context {
-    pub const AAD: bool = true;
     pub const BLOCK_LEN: usize = 8;
     pub const MAC_LEN: usize = 16;
 
@@ -42,17 +45,17 @@ impl Chacha20Poly1305Context {
         ks.encryption_32_32(&mut self.k2, &mut self.k1);
     }
 
-    #[must_use]
-    pub fn encrypt(&self, pc: u64, buf: &mut [u8]) -> Option<()> {
+    pub fn encrypt(&self, pc: u64, buf: &mut [u8]) -> Result<(), TransportError> {
+        const ERR: TransportError = TransportError::EncryptionError;
         // Determine indices of length, authenticated, data and mac area
-        let idx_len = ..Packet::<()>::PACKET_LEN_LEN;
+        let idx_len = ..PACKET_LEN_BYTES;
         let idx_auth = ..buf.len() - Self::MAC_LEN;
-        let idx_data = Packet::<()>::PACKET_LEN_LEN..buf.len() - Self::MAC_LEN;
+        let idx_data = PACKET_LEN_BYTES..buf.len() - Self::MAC_LEN;
         let idx_mac = buf.len() - Self::MAC_LEN..;
         // Encrypt packet length (first 4 bytes) with K1
         let nonce: [u8; 8] = pc.to_be_bytes();
         let mut chacha = ChaCha20Legacy::new((&self.k1).into(), (&nonce).into());
-        chacha.apply_keystream(&mut buf.get_mut(idx_len)?);
+        chacha.apply_keystream(&mut buf.get_mut(idx_len).ok_or(ERR)?);
         // Compute Poly1305 key and create instance from the first 32 bytes of K2
         let mut chacha = ChaCha20Legacy::new((&self.k2).into(), (&nonce).into());
         let mut poly_key: PolyKey = [0; 32].into();
@@ -61,18 +64,23 @@ impl Chacha20Poly1305Context {
         // Consume the rest of the 1st chacha block
         chacha.apply_keystream(&mut poly_key);
         // Encipher padding len byte + msg + padding
-        chacha.apply_keystream(buf.get_mut(idx_data)?);
+        chacha.apply_keystream(buf.get_mut(idx_data).ok_or(ERR)?);
         // Compute and set the Poly1305 auth tag
-        let mac = poly.compute_unpadded(buf.get(idx_auth)?).into_bytes();
-        buf.get_mut(idx_mac)?.copy_from_slice(mac.as_ref());
-        Some(())
+        let mac = poly
+            .compute_unpadded(buf.get(idx_auth).ok_or(ERR)?)
+            .into_bytes();
+        buf.get_mut(idx_mac)
+            .ok_or(ERR)?
+            .copy_from_slice(mac.as_ref());
+        Ok(())
     }
 
-    pub fn decrypt(&self, pc: u64, buf: &mut [u8]) -> Option<usize> {
-        assume(buf.len() > Packet::<()>::PACKET_LEN_LEN + Self::MAC_LEN)?;
+    pub fn decrypt(&self, pc: u64, buf: &mut [u8]) -> Result<(), TransportError> {
+        const ERR: TransportError = TransportError::EncryptionError;
+        assume(buf.len() > PACKET_LEN_BYTES + Self::MAC_LEN).ok_or(ERR)?;
         // Determine indices of authenticated, data and mac area
         let idx_auth = ..buf.len() - Self::MAC_LEN;
-        let idx_data = Packet::<()>::PACKET_LEN_LEN..buf.len() - Self::MAC_LEN;
+        let idx_data = PACKET_LEN_BYTES..buf.len() - Self::MAC_LEN;
         let idx_mac = buf.len() - Self::MAC_LEN..;
         // Compute Poly1305 key and create instance from the first 32 bytes of K2
         let nonce: [u8; 8] = pc.to_be_bytes();
@@ -83,13 +91,13 @@ impl Chacha20Poly1305Context {
         // Consume remainder of 1st chacha block
         chacha.apply_keystream(&mut poly_key);
         // Compute and validate Poly1305 auth tag
-        let mac_observed = Tag::from(GenericArray::from_slice(buf.get(idx_mac)?));
-        let mac_computed = poly.compute_unpadded(buf.get(idx_auth)?);
+        let mac_observed = Tag::from(GenericArray::from_slice(buf.get(idx_mac).ok_or(ERR)?));
+        let mac_computed = poly.compute_unpadded(buf.get(idx_auth).ok_or(ERR)?);
         // Check message integrity
-        assume(mac_computed == mac_observed)?;
+        assume(mac_computed == mac_observed).ok_or(TransportError::MessageIntegrity)?;
         // Decrypt and return data area len
-        chacha.apply_keystream(buf.get_mut(idx_data)?);
-        Some(buf.len() - Packet::<()>::PACKET_LEN_LEN - Self::MAC_LEN)
+        chacha.apply_keystream(buf.get_mut(idx_data).ok_or(ERR)?);
+        Ok(())
     }
 
     pub fn decrypt_len(&self, pc: u64, mut len: [u8; 4]) -> Option<usize> {
@@ -97,9 +105,22 @@ impl Chacha20Poly1305Context {
         let mut chacha = ChaCha20Legacy::new((&self.k1).into(), (&nonce).into());
         chacha.apply_keystream(&mut len);
         let len: usize = u32::from_be_bytes(len).try_into().ok()?;
-        let len = Packet::<()>::PACKET_LEN_LEN + len + Self::MAC_LEN;
-        assume(len <= Packet::<()>::MAX_PACKET_LEN)?;
         Some(len)
+        //let len = PACKET_LEN_BYTES + len + Self::MAC_LEN;
+        //assume(len <= PACKET_MAX_LEN)?;
+        //Some(len)
+    }
+
+    pub fn padding_len(payload_len: usize) -> usize {
+        let l = 1 + payload_len;
+        let mut p = Self::BLOCK_LEN - (l % Self::BLOCK_LEN);
+        if p < PADDING_MIN_LEN {
+            p += Self::BLOCK_LEN
+        };
+        while p + l < PACKET_MIN_LEN {
+            p += Self::BLOCK_LEN
+        }
+        p
     }
 }
 

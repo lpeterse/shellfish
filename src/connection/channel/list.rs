@@ -2,7 +2,8 @@ use super::super::ConnectionConfig;
 use super::super::{MsgChannelOpen, MsgChannelOpenConfirmation, MsgChannelOpenFailure};
 use super::*;
 
-use crate::transport::TransportLayer;
+use crate::transport::Transport;
+use crate::transport::TransportExt;
 
 use async_std::task::{ready, Context, Poll};
 
@@ -145,10 +146,10 @@ impl ChannelList {
         None
     }
 
-    pub fn poll<T: TransportLayer>(
+    pub fn poll(
         &mut self,
         cx: &mut Context,
-        transport: &mut T,
+        transport: &mut Box<dyn Transport>,
     ) -> Poll<Result<(), ConnectionError>> {
         // Iterate over all channel slots and poll each present channel.
         // Remove channel if the futures is ready (close has been sent _and_ received).
@@ -168,7 +169,7 @@ impl ChannelList {
                                     maximum_packet_size: self.config.channel_max_packet_size,
                                     specific: &[],
                                 };
-                                ready!(transport.poll_send(cx, &msg))?;
+                                ready!(TransportExt::poll_send(transport, cx, &msg))?;
                                 let y = std::mem::replace(slot, Slot::Free);
                                 if let Slot::OpeningInbound2(y) = y {
                                     *slot = Slot::Open(y.ch);
@@ -177,7 +178,7 @@ impl ChannelList {
                             }
                             Poll::Ready(Err(reason)) => {
                                 let msg = MsgChannelOpenFailure::new(x.rid, reason);
-                                ready!(transport.poll_send(cx, &msg))?;
+                                ready!(TransportExt::poll_send(transport, cx, &msg))?;
                                 *slot = Slot::Free;
                             }
                             Poll::Pending => (),
@@ -192,7 +193,7 @@ impl ChannelList {
                                 self.config.channel_max_packet_size as u32,
                                 x.data.clone(),
                             );
-                            ready!(transport.poll_send(cx, &msg))?;
+                            ready!(TransportExt::poll_send(transport, cx, &msg))?;
                             x.sent = true;
                         }
                     }

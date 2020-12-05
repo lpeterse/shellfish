@@ -2,26 +2,26 @@ use crate::util::codec::*;
 use crate::transport::Message;
 
 #[derive(Clone, Debug)]
-pub struct MsgServiceAccept<'a>(&'a str);
+pub struct MsgServiceAccept<T = String>(T);
 
-impl<'a> Message for MsgServiceAccept<'a> {
+impl Message for MsgServiceAccept {
     const NUMBER: u8 = 6;
 }
 
-impl<'a> Encode for MsgServiceAccept<'a> {
+impl Encode for MsgServiceAccept<&'static str> {
     fn size(&self) -> usize {
         1 + Encode::size(&self.0)
     }
     fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
-        c.push_u8(<Self as Message>::NUMBER)?;
+        c.push_u8(MsgServiceAccept::NUMBER)?;
         Encode::encode(&self.0, c)
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgServiceAccept<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgServiceAccept {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self(DecodeRef::decode(d)?).into()
+        Self(Decode::decode(d)?).into()
     }
 }
 
@@ -40,7 +40,7 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgServiceAccept(&"service");
+        let msg = MsgServiceAccept("service");
         assert_eq!(
             &[6, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101][..],
             &SliceEncoder::encode(&msg)[..]

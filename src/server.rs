@@ -47,8 +47,8 @@ impl Server {
         let tconfig = self.config.transport.clone();
         let cconfig = self.config.connection.clone();
         let future = Box::pin(async move {
-            let t = Transport::accept(tconfig, agent, socket).await?;
-            let r = UserAuth::offer(t, cconfig).await?;
+            let t = DefaultTransport::accept(tconfig, agent, socket).await?;
+            let r = UserAuth::offer(Box::new(t), cconfig).await?;
             Ok(r)
         });
         Ok((future, addr))

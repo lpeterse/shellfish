@@ -31,12 +31,13 @@ pub trait Encoder: Sized {
     /// Returns `None` if the encoder had insufficient capacity.
     #[must_use]
     fn push_bytes<T: AsRef<[u8]>>(&mut self, x: &T) -> Option<()>;
+
     /// Push something encodable to the encoder state.
     ///
     /// Returns `None` if the encoder had insufficient capacity.
     #[must_use]
     fn push_encode<T: Encode>(&mut self, x: &T) -> Option<()> {
-        Encode::encode(x, self)
+        x.encode(self)
     }
 }
 
@@ -86,6 +87,12 @@ impl<'a> SliceEncoder<'a> {
             panic!("Calculated size was insufficient for encoding")
         }
         vec
+    }
+
+    pub fn encode_into<E: Encode>(e: &E, buf: &'a mut [u8]) {
+        if Encode::encode(e, &mut Self::new(buf)).is_none() {
+            panic!("Supplied buffer was insufficient for encoding")
+        }
     }
 }
 

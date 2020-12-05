@@ -27,3 +27,6 @@ deps:
 
 example:
 	RUST_LOG=debug cargo run --release --target "x86_64-unknown-linux-musl" --example rssh-proxy
+
+example-dev:
+	RUST_LOG=debug cargo run --target "x86_64-unknown-linux-musl" --example rssh-proxy

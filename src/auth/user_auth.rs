@@ -28,10 +28,10 @@ impl UserAuth {
     pub const NAME: &'static str = "ssh-userauth";
 
     pub async fn offer<S: Service>(
-        t: S::Transport,
+        t: Box<dyn Transport>,
         c: Arc<<S as Service>::Config>,
     ) -> Result<UserAuthRequest<S>, UserAuthError> {
-        let t = TransportLayerExt::offer_service(t, Self::NAME).await?;
+        let t = TransportExt::offer_service(t, Self::NAME).await?;
         Ok(UserAuthRequest {
             t,
             c,
@@ -41,17 +41,17 @@ impl UserAuth {
 
     /// Request another service with user authentication.
     pub async fn request<S: Service>(
-        transport: S::Transport,
+        transport: Box<dyn Transport>,
         config: &Arc<<S as Service>::Config>,
         user: &str,
         agent: &Arc<dyn Agent>,
     ) -> Result<S, UserAuthError> {
-        let mut t = TransportLayerExt::request_service(transport, Self::NAME).await?;
+        let mut t = TransportExt::request_service(transport, Self::NAME).await?;
         let service = <S as Service>::NAME;
         let identities = agent.identities().await?;
         for (id, comment) in identities {
             log::debug!("Trying identity: {} ({})", comment, id.algorithm());
-            if Self::try_pubkey::<S::Transport>(&mut t, &agent, service, user, id).await? {
+            if Self::try_pubkey(&mut t, &agent, service, user, id).await? {
                 return Ok(<S as Service>::new(config, t));
             }
         }
@@ -59,8 +59,8 @@ impl UserAuth {
         Err(UserAuthError::NoMoreAuthMethods)
     }
 
-    async fn try_pubkey<T: TransportLayer>(
-        transport: &mut T,
+    async fn try_pubkey(
+        transport: &mut Box<dyn Transport>,
         agent: &Arc<dyn Agent>,
         service: &str,
         user: &str,
@@ -86,22 +86,14 @@ impl UserAuth {
                 signature,
             },
         };
-        TransportLayerExt::send(transport, &msg).await?;
-        TransportLayerExt::flush(transport).await?;
-        TransportLayerExt::receive(transport).await?;
-        if let Some(x) = transport.decode() {
-            let _: MsgSuccess = x;
-            transport.consume();
-            return Ok(true);
-        }
-        let _: MsgFailure = transport.decode_ref().ok_or(TransportError::DecoderError)?;
-        transport.consume();
-        return Ok(false);
+        TransportExt::send(transport, &msg).await?;
+        TransportExt::flush(transport).await?;
+        Ok(TransportExt::receive::<Result<MsgSuccess, MsgFailure>>(transport).await?.is_ok())
     }
 }
 
 pub struct UserAuthRequest<S: Service = Connection> {
-    t: S::Transport,
+    t: Box<dyn Transport>,
     c: Arc<<S as Service>::Config>,
     username: String,
 }

@@ -5,8 +5,6 @@ use self::chacha20_poly1305::*;
 use self::plain::*;
 use super::*;
 use super::super::*;
-use super::super::packet::*;
-use crate::util::codec::*;
 
 pub trait EncryptionAlgorithm {
     const NAME: &'static str;
@@ -61,15 +59,14 @@ impl CipherContext {
         Some(())
     }
 
-    #[must_use]
-    pub fn encrypt(&self, pc: u64, buf: &mut [u8]) -> Option<()> {
+    pub fn encrypt(&self, pc: u64, buf: &mut [u8]) -> Result<(), TransportError> {
         match self {
             Self::Plain(ctx) => ctx.encrypt(pc, buf),
             Self::Chacha20Poly1305(ctx) => ctx.encrypt(pc, buf),
         }
     }
 
-    pub fn decrypt(&self, pc: u64, buf: &mut [u8]) -> Option<usize> {
+    pub fn decrypt(&self, pc: u64, buf: &mut [u8]) -> Result<(), TransportError> {
         match self {
             Self::Plain(ctx) => ctx.decrypt(pc, buf),
             Self::Chacha20Poly1305(ctx) => ctx.decrypt(pc, buf),
@@ -83,20 +80,17 @@ impl CipherContext {
         }
     }
 
-    pub fn packet<'a, T: Encode>(&self, payload: &'a T) -> Packet<'a, T> {
+    pub fn mac_len(&self) -> usize {
         match self {
-            Self::Plain(_) => Packet::new(
-                PlainContext::AAD,
-                PlainContext::BLOCK_LEN,
-                PlainContext::MAC_LEN,
-                payload,
-            ),
-            Self::Chacha20Poly1305(_) => Packet::new(
-                Chacha20Poly1305Context::AAD,
-                Chacha20Poly1305Context::BLOCK_LEN,
-                Chacha20Poly1305Context::MAC_LEN,
-                payload,
-            ),
+            Self::Plain(_) => PlainContext::MAC_LEN,
+            Self::Chacha20Poly1305(_) => Chacha20Poly1305Context::MAC_LEN,
+        }
+    }
+
+    pub fn padding_len(&self, payload_len: usize) -> usize {
+        match self {
+            Self::Plain(_) => PlainContext::padding_len(payload_len),
+            Self::Chacha20Poly1305(_) => Chacha20Poly1305Context::padding_len(payload_len),
         }
     }
 }

@@ -2,31 +2,31 @@ use crate::util::codec::*;
 use crate::transport::Message;
 
 #[derive(Clone, Debug)]
-pub struct MsgFailure<'a> {
-    pub methods: Vec<&'a str>,
+pub struct MsgFailure<T = String> {
+    pub methods: Vec<T>,
     pub partial_success: bool,
 }
 
-impl<'a> Message for MsgFailure<'a> {
+impl Message for MsgFailure {
     const NUMBER: u8 = 51;
 }
 
-impl<'a> Encode for MsgFailure<'a> {
+impl Encode for MsgFailure<&'static str> {
     fn size(&self) -> usize {
         1 + NameList::size(&self.methods) + 1
     }
     fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(<Self as Message>::NUMBER as u8)?;
+        e.push_u8(MsgFailure::NUMBER as u8)?;
         NameList::encode(&self.methods, e)?;
         e.push_u8(self.partial_success as u8)
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgFailure<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl Decode for MsgFailure {
+    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u8().filter(|x| x == &<Self as Message>::NUMBER)?;
         Self {
-            methods: NameList::decode_str(d)?,
+            methods: NameList::decode_string(d)?,
             partial_success: d.take_u8().map(|x| x != 0)?,
         }
         .into()

@@ -12,15 +12,15 @@ use std::sync::{Arc, Mutex};
 /// supposed to be run as isolated task. The future only resolves on error which also designates
 /// the end of the connection's lifetime.
 #[derive(Debug)]
-pub(crate) struct ConnectionFuture<T: TransportLayer>(Arc<Mutex<ConnectionState<T>>>);
+pub(crate) struct ConnectionFuture(Arc<Mutex<ConnectionState>>);
 
-impl<T: TransportLayer> ConnectionFuture<T> {
-    pub fn new(state: &Arc<Mutex<ConnectionState<T>>>) -> Self {
+impl ConnectionFuture {
+    pub fn new(state: &Arc<Mutex<ConnectionState>>) -> Self {
         Self(state.clone())
     }
 }
 
-impl<T: TransportLayer> Future for ConnectionFuture<T> {
+impl Future for ConnectionFuture {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

@@ -19,7 +19,7 @@ use self::msg::*;
 pub use self::state::*;
 
 use crate::client::Client;
-use crate::transport::{Service, DisconnectReason, Transport, TransportLayer};
+use crate::transport::{DisconnectReason, Service, Transport};
 use crate::util::codec::*;
 use crate::util::oneshot;
 
@@ -36,14 +36,14 @@ use std::sync::{Arc, Mutex};
 /// itself alive and does nothing. Dropping the connection object will close the connection and
 /// free all resources. It will also terminate all dependant channels (shells and forwardings etc).
 #[derive(Debug)]
-pub struct Connection<T: TransportLayer = Transport>(Arc<Mutex<ConnectionState<T>>>);
+pub struct Connection(Arc<Mutex<ConnectionState>>);
 
-impl<T: TransportLayer> Connection<T> {
+impl Connection {
     /// Create a new connection.
     ///
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
-    fn new(config: &Arc<ConnectionConfig>, transport: T) -> Self {
+    fn new(config: &Arc<ConnectionConfig>, transport: Box<dyn Transport>) -> Self {
         let state = ConnectionState::new(config, transport);
         let state = Arc::new(Mutex::new(state));
         let future = ConnectionFuture::new(&state);
@@ -100,7 +100,7 @@ impl<T: TransportLayer> Connection<T> {
     /// by not waking up the other task as long as we still hold the lock.
     fn with_state<F, X>(&self, f: F) -> X
     where
-        F: FnOnce(&mut ConnectionState<T>) -> X,
+        F: FnOnce(&mut ConnectionState) -> X,
     {
         let (result, waker) = {
             let mut state = self.0.lock().unwrap();
@@ -111,30 +111,29 @@ impl<T: TransportLayer> Connection<T> {
     }
 }
 
-impl<T: TransportLayer> Clone for Connection<T> {
+impl Clone for Connection {
     fn clone(&self) -> Self {
         Self(self.0.clone())
     }
 }
 
-impl<T: TransportLayer> Drop for Connection<T> {
+impl Drop for Connection {
     fn drop(&mut self) {
         self.with_state(|x| x.flag_inner_task_for_wakeup())
     }
 }
 
-impl<T: TransportLayer> Service for Connection<T> {
+impl Service for Connection {
     type Config = ConnectionConfig;
-    type Transport = T;
 
     const NAME: &'static str = "ssh-connection";
 
-    fn new(config: &Arc<Self::Config>, transport: T) -> Self {
+    fn new(config: &Arc<Self::Config>, transport: Box<dyn Transport>) -> Self {
         Self::new(config, transport)
     }
 }
 
-impl<T: TransportLayer> Stream for Connection<T> {
+impl Stream for Connection {
     type Item = ConnectionRequest;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
@@ -151,7 +150,7 @@ impl<T: TransportLayer> Stream for Connection<T> {
     }
 }
 
-impl<T: TransportLayer> Future for Connection<T> {
+impl Future for Connection {
     type Output = Result<DisconnectReason, ConnectionError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {

@@ -7,7 +7,8 @@ use super::handle::*;
 use super::state::*;
 use super::*;
 
-use crate::transport::TransportLayer;
+use crate::transport::Transport;
+use crate::transport::TransportExt;
 use crate::util::assume;
 
 use async_std::task::{ready, Context};
@@ -100,10 +101,10 @@ impl ChannelHandleInner {
         todo!("push_failure")
     }
 
-    pub fn poll<T: TransportLayer>(
+    pub fn poll(
         &mut self,
         cx: &mut Context,
-        t: &mut T,
+        t: &mut Box<dyn Transport>,
     ) -> Poll<Result<(), ConnectionError>> {
         self.with_state(|x| {
             ready!(x.poll_inner_task_woken(cx));
@@ -114,7 +115,7 @@ impl ChannelHandleInner {
                     if len > 0 {
                         let data = &x.std.tx.as_ref()[..len as usize];
                         let msg = MsgChannelData::new(x.rid, data);
-                        ready!(t.poll_send(cx, &msg))?;
+                        ready!(TransportExt::poll_send(t, cx, &msg))?;
                         log::debug!("Channel {}: Sent MSG_CHANNEL_DATA ({})", x.lid, len);
                         x.rws -= len;
                         x.std.tx.consume(len as usize);
@@ -131,7 +132,7 @@ impl ChannelHandleInner {
                         if len > 0 {
                             let data = &ext.tx.as_ref()[..len as usize];
                             let msg = MsgChannelExtendedData::new(x.rid, code, data);
-                            ready!(t.poll_send(cx, &msg))?;
+                            ready!(TransportExt::poll_send(t, cx, &msg))?;
                             log::debug!(
                                 "Channel {}: Sent MSG_CHANNEL_EXTENDED_DATA ({})",
                                 x.lid,
@@ -146,19 +147,20 @@ impl ChannelHandleInner {
                     }
                 }
                 if let Some(n) = x.local_window_adjust() {
-                    ready!(t.poll_send(cx, &MsgChannelWindowAdjust::new(x.rid, n)))?;
+                    let msg = MsgChannelWindowAdjust::new(x.rid, n);
+                    ready!(TransportExt::poll_send(t, cx, &msg))?;
                     log::debug!("Channel {}: Sent MSG_CHANNEL_WINDOW_ADJUST ({})", x.lid, n);
                     x.lws += n;
                 }
                 if x.leof && !x.leof_sent {
                     let msg = MsgChannelEof::new(x.rid);
-                    ready!(t.poll_send(cx, &msg))?;
+                    ready!(TransportExt::poll_send(t, cx, &msg))?;
                     log::debug!("Channel {}: Sent MSG_CHANNEL_EOF", x.lid);
                     x.leof_sent = true;
                 }
                 if x.lclose {
                     let msg = MsgChannelClose::new(x.rid);
-                    ready!(t.poll_send(cx, &msg))?;
+                    ready!(TransportExt::poll_send(t, cx, &msg))?;
                     log::debug!("Channel {}: Sent MSG_CHANNEL_CLOSE", x.lid);
                     x.lclose_sent = true;
                 }
@@ -194,6 +196,8 @@ impl ChannelHandleInner {
         result
     }
 }
+
+/*
 
 #[cfg(test)]
 mod tests {
@@ -634,3 +638,5 @@ mod tests {
         })
     }
 }
+
+*/
