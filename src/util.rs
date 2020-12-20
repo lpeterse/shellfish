@@ -5,6 +5,7 @@ pub mod oneshot;
 pub mod socket;
 pub mod socks5;
 pub mod tcp;
+pub mod cidr;
 
 use std::future::Future;
 

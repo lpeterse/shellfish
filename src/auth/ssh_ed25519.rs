@@ -1,6 +1,6 @@
-use super::*;
 use crate::util::codec::*;
-use std::any::Any;
+use std::convert::TryInto;
+use super::signature::*;
 
 #[derive(Debug)]
 pub struct SshEd25519 {}
@@ -10,43 +10,21 @@ impl SshEd25519 {
 }
 
 #[derive(PartialEq, Clone, Debug)]
-pub struct Ed25519PublicKey(pub [u8; 32]);
+pub struct SshEd25519PublicKey<'a>(pub &'a [u8; 32]);
 
-impl PublicKey for Ed25519PublicKey {
-    fn algorithm(&self) -> &str {
-        SshEd25519::NAME
+impl <'a> SshEd25519PublicKey<'a> {
+    pub fn pk(&self) -> &[u8;32] {
+        self.0
     }
 
-    fn verify_signature(&self, signature: &Signature, data: &[u8]) -> bool {
-        use ed25519_dalek::{PublicKey, Signature};
-        if signature.algorithm == SshEd25519::NAME {
-            if signature.signature.len() == 64 {
-                let mut sig: [u8; 64] = [0u8; 64];
-                sig.copy_from_slice(&signature.signature[..64]);
-                let sig = Signature::new(sig);
-                if let Ok(key) = PublicKey::from_bytes(&self.0[..]) {
-                    return key.verify_strict(data, &sig).is_ok();
-                }
-            }
-        }
-        false
-    }
-
-    fn equals(&self, public_key: &Box<dyn PublicKey>) -> bool {
-        match public_key.as_any().downcast_ref::<Self>() {
-            Some(other) => self == other,
-            None => false,
-        }
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
+    pub fn is_valid_signature(&self, signature: &Signature, data: &[u8]) -> bool {
+        true
     }
 }
 
-impl Encode for Ed25519PublicKey {
+impl<'a> Encode for SshEd25519PublicKey<'a> {
     fn size(&self) -> usize {
-        (4 + 11 + 4 + 32) as usize
+        4 + 11 + 4 + 32
     }
     fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(11)?;
@@ -56,28 +34,15 @@ impl Encode for Ed25519PublicKey {
     }
 }
 
-impl Decode for Ed25519PublicKey {
-    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let mut k = [0; 32];
+impl<'a> DecodeRef<'a> for SshEd25519PublicKey<'a> {
+    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         c.expect_u32be(11)?;
         c.expect_bytes(&SshEd25519::NAME)?;
         c.expect_u32be(32)?;
-        c.take_into(&mut k)?;
-        Some(Ed25519PublicKey(k))
+        let bytes = c.take_bytes(32)?;
+        Some(SshEd25519PublicKey(bytes.try_into().ok()?))
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_ssh_ed25519_debug_01() {
-        assert_eq!(format!("{:?}", SshEd25519 {}), "SshEd25519");
-    }
-
-    #[test]
-    fn test_ssh_ed25519_publickey_debug_01() {
-        assert_eq!(format!("{:?}", Ed25519PublicKey([3;32])), "Ed25519PublicKey([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3])");
-    }
-}
+mod tests {}

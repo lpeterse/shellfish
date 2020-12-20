@@ -15,7 +15,6 @@ mod dummy {
     use super::*;
 
     use async_std::future::Future;
-    use async_std::io::*;
     use async_std::stream::Stream;
     use async_std::sync::{channel, Receiver, Sender};
     use async_std::task::ready;

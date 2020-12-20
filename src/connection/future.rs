@@ -1,5 +1,4 @@
 use super::state::*;
-use super::*;
 
 use async_std::future::Future;
 use async_std::task::{Context, Poll, Waker};

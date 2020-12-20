@@ -1,6 +1,9 @@
-use super::ssh_ed25519::*;
 use super::*;
+use crate::util::assume;
+use crate::util::cidr::Cidr;
 use crate::util::codec::*;
+use std::net::IpAddr;
+use std::time::SystemTime;
 
 /*
 ED25519 certificate
@@ -21,41 +24,129 @@ ED25519 certificate
     string    signature
 */
 
-pub struct SshEd25519Cert {}
+#[derive(Clone, Debug, PartialEq)]
+pub struct SshEd25519Cert {
+    nonce: [u8; 32],
+    pk: [u8; 32],
+    serial: u64,
+    type_: u32,
+    key_id: String,
+    valid_principals: Vec<String>,
+    valid_after: u64,
+    valid_before: u64,
+    critical_options: Vec<(String, String)>,
+    extensions: Vec<(String, String)>,
+    reserved: Vec<u8>,
+    authority: Identity,
+    signature: Signature,
+}
 
 impl SshEd25519Cert {
+    const TYPE_USER: u32 = 1;
+    const TYPE_HOST: u32 = 2;
+
+    const OPT_FORCE_COMMAND: &'static str = "force-command";
+    const OPT_SOURCE_ADDRESS: &'static str = "source-address";
+
     pub const NAME: &'static str = "ssh-ed25519-cert-v01@openssh.com";
-}
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct Ed25519Certificate {
-    pub nonce: [u8; 32],
-    pub pk: Ed25519PublicKey,
-    pub serial: u64,
-    pub type_: u32,
-    pub key_id: String,
-    pub valid_principals: Vec<String>,
-    pub valid_after: u64,
-    pub valid_before: u64,
-    pub critical_options: Vec<(String, String)>,
-    pub extensions: Vec<(String, String)>,
-    pub reserved: Vec<u8>,
-    pub signature_key: Ed25519PublicKey,
-    pub signature: Signature,
-}
+    pub fn pk(&self) -> &[u8; 32] {
+        &self.pk
+    }
 
-impl Ed25519Certificate {
-    pub fn public_key(&self) -> Box<dyn PublicKey> {
-        Box::new(self.pk.clone())
+    pub fn is_valid_principal(&self, principal: &str) -> bool {
+        self.valid_principals.is_empty()
+            || self
+                .valid_principals
+                .iter()
+                .find(|x| *x == principal)
+                .is_some()
+    }
+
+    pub fn is_valid_period(&self) -> bool {
+        let current_time = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        self.valid_after <= current_time && current_time < self.valid_before
+    }
+
+    pub fn is_valid_options(&self) -> bool {
+        // Short-cut if not options are present
+        if self.critical_options.is_empty() {
+            return true;
+        }
+        // Determine whether each option occors at most once
+        let mut opts: Vec<&str> = self.critical_options.iter().map(|x| x.0.as_str()).collect();
+        let n0 = opts.len();
+        opts.sort();
+        opts.dedup();
+        let n1 = opts.len();
+        if n0 != n1 {
+            return false;
+        }
+        // Check whether all options are known to this implementation
+        if self.type_ == Self::TYPE_USER {
+            let f = |x: &&str| *x == Self::OPT_FORCE_COMMAND || *x == Self::OPT_SOURCE_ADDRESS;
+            opts.iter().all(f)
+        } else {
+            false
+        }
+    }
+
+    pub fn is_valid_source(&self, src: &IpAddr) -> bool {
+        let f = |(x, _): &&(String, String)| x == Self::OPT_SOURCE_ADDRESS;
+        if let Some((_, cidrs)) = self.critical_options.iter().find(f) {
+            for cidr in cidrs.split(',') {
+                if Cidr(cidr).contains(src) {
+                    return true;
+                }
+            }
+            false
+        } else {
+            true
+        }
+    }
+
+    pub fn is_valid_ca_signature(&self) -> bool {
+        let key = &self.authority;
+        let data = SliceEncoder::encode(self);
+        assume(!key.is_certificate())
+            .and_then(|_| data.get(..data.len() - Encode::size(&self.signature)))
+            .and_then(|data| self.signature.verify(key, data).ok())
+            .is_some()
     }
 }
 
-impl Encode for Ed25519Certificate {
+impl Cert for SshEd25519Cert {
+    fn authority(&self) -> &Identity {
+        &self.authority
+    }
+    fn validate_as_host(&self, hostname: &str) -> Result<(), CertError> {
+        assume(self.type_ == Self::TYPE_HOST).ok_or(CertError::InvalidType)?;
+        assume(self.is_valid_principal(hostname)).ok_or(CertError::InvalidPrincipal)?;
+        assume(self.is_valid_period()).ok_or(CertError::InvalidPeriod)?;
+        assume(self.is_valid_options()).ok_or(CertError::InvalidOptions)?;
+        assume(self.is_valid_ca_signature()).ok_or(CertError::InvalidSignature)?;
+        Ok(())
+    }
+    fn validate_as_client(&self, username: &str, source: &IpAddr) -> Result<(), CertError> {
+        assume(self.type_ == Self::TYPE_USER).ok_or(CertError::InvalidType)?;
+        assume(self.is_valid_principal(username)).ok_or(CertError::InvalidPrincipal)?;
+        assume(self.is_valid_period()).ok_or(CertError::InvalidPeriod)?;
+        assume(self.is_valid_options()).ok_or(CertError::InvalidOptions)?;
+        assume(self.is_valid_source(source)).ok_or(CertError::InvalidSource)?;
+        assume(self.is_valid_ca_signature()).ok_or(CertError::InvalidSignature)?;
+        Ok(())
+    }
+}
+
+impl Encode for SshEd25519Cert {
     fn size(&self) -> usize {
         let mut n: usize = 0;
         n += Encode::size(&SshEd25519Cert::NAME);
         n += Encode::size(&self.nonce[..]);
-        n += Encode::size(&self.pk.0[..]);
+        n += Encode::size(&self.pk[..]);
         n += 8 + 4;
         n += Encode::size(&self.key_id);
         n += Encode::size(&ListRef(&self.valid_principals));
@@ -63,15 +154,14 @@ impl Encode for Ed25519Certificate {
         n += Encode::size(&ListRef(&self.critical_options));
         n += Encode::size(&ListRef(&self.extensions));
         n += Encode::size(&self.reserved[..]);
-        n += 4;
-        n += Encode::size(&self.signature_key);
+        n += Encode::size(&self.authority);
         n += Encode::size(&self.signature);
         n
     }
     fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
         Encode::encode(&SshEd25519Cert::NAME, e)?;
         Encode::encode(&self.nonce[..], e)?;
-        Encode::encode(&self.pk.0[..], e)?;
+        Encode::encode(&self.pk[..], e)?;
         Encode::encode(&self.serial, e)?;
         Encode::encode(&self.type_, e)?;
         Encode::encode(&self.key_id, e)?;
@@ -81,13 +171,12 @@ impl Encode for Ed25519Certificate {
         Encode::encode(&ListRef(&self.critical_options), e)?;
         Encode::encode(&ListRef(&self.extensions), e)?;
         Encode::encode(&self.reserved[..], e)?;
-        Encode::encode(&(self.signature_key.size() as u32), e)?;
-        Encode::encode(&self.signature_key, e)?;
+        Encode::encode(&self.authority, e)?;
         Encode::encode(&self.signature, e)
     }
 }
 
-impl Decode for Ed25519Certificate {
+impl Decode for SshEd25519Cert {
     fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
         let _: &str = DecodeRef::decode(c).filter(|x| *x == SshEd25519Cert::NAME)?;
         Self {
@@ -101,30 +190,21 @@ impl Decode for Ed25519Certificate {
                 c.expect_u32be(32)?;
                 let mut x: [u8; 32] = [0; 32];
                 c.take_into(&mut x[..])?;
-                Ed25519PublicKey(x)
+                x
             },
             serial: c.take_u64be()?,
             type_: c.take_u32be()?,
             key_id: Decode::decode(c)?,
-            valid_principals: {
-                let x: List<String> = Decode::decode(c)?;
-                x.0
-            },
+            valid_principals: <List<String> as Decode>::decode(c)?.0,
             valid_after: c.take_u64be()?,
             valid_before: c.take_u64be()?,
-            critical_options: {
-                let x: List<(String, String)> = Decode::decode(c)?;
-                x.0
-            },
-            extensions: {
-                let x: List<(String, String)> = Decode::decode(c)?;
-                x.0
-            },
+            critical_options: <List<(String, String)> as Decode>::decode(c)?.0,
+            extensions: <List<(String, String)> as Decode>::decode(c)?.0,
             reserved: {
                 let len = c.take_u32be()?;
                 Vec::from(c.take_bytes(len as usize)?)
             },
-            signature_key: c.isolate_u32be(|x| DecodeRef::decode(x))?,
+            authority: Decode::decode(c)?,
             signature: Decode::decode(c)?,
         }
         .into()
@@ -135,141 +215,46 @@ impl Decode for Ed25519Certificate {
 mod tests {
     use super::*;
 
-    fn example_ed25519_key() -> Ed25519PublicKey {
-        Ed25519PublicKey([3; 32])
-    }
-
-    fn example_ed25519_cert() -> Ed25519Certificate {
-        Ed25519Certificate {
-            nonce: [1; 32],
-            pk: example_ed25519_key(),
-            serial: 1234,
-            type_: 1,
-            key_id: "KEY_ID".into(),
-            valid_principals: vec!["VALID_PRINCIPALS".into(), "MORE".into()],
-            valid_after: u64::min_value(),
-            valid_before: u64::max_value(),
-            critical_options: vec![("OPTION1".into(), "".into()), ("OPTION2".into(), "".into())],
-            extensions: vec![("EXT1".into(), "".into()), ("EXT2".into(), "".into())],
-            reserved: vec![],
-            signature_key: example_ed25519_key(),
-            signature: Signature {
-                algorithm: "ssh-ed25519".into(),
-                signature: vec![5; 64],
-            },
-        }
+    #[test]
+    fn test_decode() {
+        let raw = include_bytes!("../../resources/ed25519-user-cert.pub.raw");
+        let _: SshEd25519Cert = SliceDecoder::decode(raw).unwrap();
     }
 
     #[test]
-    fn test_debug_01() {
-        assert_eq!(format!("{:?}", example_ed25519_cert()), "Ed25519Certificate { nonce: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1], pk: Ed25519PublicKey([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]), serial: 1234, type_: 1, key_id: \"KEY_ID\", valid_principals: [\"VALID_PRINCIPALS\", \"MORE\"], valid_after: 0, valid_before: 18446744073709551615, critical_options: [(\"OPTION1\", \"\"), (\"OPTION2\", \"\")], extensions: [(\"EXT1\", \"\"), (\"EXT2\", \"\")], reserved: [], signature_key: Ed25519PublicKey([3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]), signature: Signature { algorithm: \"ssh-ed25519\", signature: [5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5] } }");
+    fn test_decode_encode_decode_eq() {
+        let r1 = include_bytes!("../../resources/ed25519-user-cert.pub.raw");
+        let c1: SshEd25519Cert = SliceDecoder::decode(r1).unwrap();
+        let r2 = SliceEncoder::encode(&c1);
+        let c2: SshEd25519Cert = SliceDecoder::decode(&r2).unwrap();
+
+        assert_eq!(c1.nonce, c2.nonce);
+        assert_eq!(c1.pk, c2.pk);
+        assert_eq!(c1.serial, c2.serial);
+        assert_eq!(c1.type_, c2.type_);
+        assert_eq!(c1.key_id, c2.key_id);
+        assert_eq!(c1.valid_principals, c2.valid_principals);
+        assert_eq!(c1.valid_after, c2.valid_after);
+        assert_eq!(c1.valid_before, c2.valid_before);
+        assert_eq!(c1.critical_options, c2.critical_options);
+        assert_eq!(c1.extensions, c2.extensions);
+        assert_eq!(c1.reserved, c2.reserved);
+        assert_eq!(c1.authority, c2.authority);
+        assert_eq!(c1.signature, c2.signature);
     }
 
     #[test]
-    fn test_decode_01() {
-        let input: [u8; 450] = [
-            0, 0, 0, 32, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 45, 99, 101, 114, 116,
-            45, 118, 48, 49, 64, 111, 112, 101, 110, 115, 115, 104, 46, 99, 111, 109, 0, 0, 0, 32,
-            161, 204, 42, 130, 20, 70, 115, 37, 164, 38, 13, 36, 146, 18, 52, 225, 85, 154, 120,
-            152, 57, 20, 246, 86, 238, 215, 53, 249, 110, 99, 100, 213, 0, 0, 0, 32, 111, 31, 72,
-            196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178, 182, 197, 240, 88, 108,
-            167, 36, 126, 242, 16, 190, 192, 165, 40, 63, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0,
-            0, 9, 108, 112, 101, 116, 101, 114, 115, 101, 110, 0, 0, 0, 13, 0, 0, 0, 9, 108, 112,
-            101, 116, 101, 114, 115, 101, 110, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255, 255, 255, 255,
-            255, 255, 255, 0, 0, 0, 0, 0, 0, 0, 130, 0, 0, 0, 21, 112, 101, 114, 109, 105, 116, 45,
-            88, 49, 49, 45, 102, 111, 114, 119, 97, 114, 100, 105, 110, 103, 0, 0, 0, 0, 0, 0, 0,
-            23, 112, 101, 114, 109, 105, 116, 45, 97, 103, 101, 110, 116, 45, 102, 111, 114, 119,
-            97, 114, 100, 105, 110, 103, 0, 0, 0, 0, 0, 0, 0, 22, 112, 101, 114, 109, 105, 116, 45,
-            112, 111, 114, 116, 45, 102, 111, 114, 119, 97, 114, 100, 105, 110, 103, 0, 0, 0, 0, 0,
-            0, 0, 10, 112, 101, 114, 109, 105, 116, 45, 112, 116, 121, 0, 0, 0, 0, 0, 0, 0, 14,
-            112, 101, 114, 109, 105, 116, 45, 117, 115, 101, 114, 45, 114, 99, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
-            32, 6, 161, 229, 86, 153, 227, 155, 10, 249, 178, 133, 207, 121, 108, 220, 52, 193,
-            161, 162, 243, 150, 202, 192, 242, 222, 166, 188, 190, 158, 169, 52, 114, 0, 0, 0, 83,
-            0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0, 64, 16, 137, 11,
-            71, 101, 117, 195, 117, 243, 253, 86, 164, 12, 163, 30, 233, 24, 28, 19, 205, 67, 68,
-            68, 112, 37, 38, 62, 38, 124, 179, 214, 16, 173, 54, 204, 200, 13, 157, 135, 209, 220,
-            36, 118, 102, 127, 96, 137, 214, 53, 18, 154, 25, 246, 147, 22, 216, 123, 174, 142,
-            141, 199, 36, 188, 1,
-        ];
-        let cert: Ed25519Certificate = SliceDecoder::decode(input.as_ref()).unwrap();
-        assert_eq!(
-            cert.nonce,
-            [
-                161, 204, 42, 130, 20, 70, 115, 37, 164, 38, 13, 36, 146, 18, 52, 225, 85, 154,
-                120, 152, 57, 20, 246, 86, 238, 215, 53, 249, 110, 99, 100, 213
-            ]
-        );
-        assert_eq!(
-            cert.pk,
-            Ed25519PublicKey([
-                111, 31, 72, 196, 30, 64, 80, 99, 68, 115, 76, 34, 71, 49, 174, 174, 178, 182, 197,
-                240, 88, 108, 167, 36, 126, 242, 16, 190, 192, 165, 40, 63
-            ])
-        );
-        assert_eq!(cert.serial, 0);
-        assert_eq!(cert.type_, 1);
-        assert_eq!(cert.key_id, "lpetersen");
-        assert_eq!(cert.valid_principals, vec!["lpetersen"]);
-        assert_eq!(cert.valid_after, 0);
-        assert_eq!(cert.valid_before, 18446744073709551615);
-        assert_eq!(cert.critical_options, vec![]);
-        assert_eq!(
-            cert.extensions,
-            vec![
-                ("permit-X11-forwarding".into(), "".into()),
-                ("permit-agent-forwarding".into(), "".into()),
-                ("permit-port-forwarding".into(), "".into()),
-                ("permit-pty".into(), "".into()),
-                ("permit-user-rc".into(), "".into())
-            ]
-        );
-        assert_eq!(cert.reserved, vec![]);
-        assert_eq!(
-            cert.signature_key,
-            Ed25519PublicKey([
-                6, 161, 229, 86, 153, 227, 155, 10, 249, 178, 133, 207, 121, 108, 220, 52, 193,
-                161, 162, 243, 150, 202, 192, 242, 222, 166, 188, 190, 158, 169, 52, 114
-            ])
-        );
-        assert_eq!(
-            cert.signature,
-            Signature {
-                algorithm: "ssh-ed25519".into(),
-                signature: vec![
-                    16, 137, 11, 71, 101, 117, 195, 117, 243, 253, 86, 164, 12, 163, 30, 233, 24,
-                    28, 19, 205, 67, 68, 68, 112, 37, 38, 62, 38, 124, 179, 214, 16, 173, 54, 204,
-                    200, 13, 157, 135, 209, 220, 36, 118, 102, 127, 96, 137, 214, 53, 18, 154, 25,
-                    246, 147, 22, 216, 123, 174, 142, 141, 199, 36, 188, 1
-                ]
-            }
-        )
+    fn test_signature_valid() {
+        let raw = include_bytes!("../../resources/ed25519-user-cert.pub.raw");
+        let crt: SshEd25519Cert = SliceDecoder::decode(raw).unwrap();
+        assert_eq!(crt.is_valid_ca_signature(), true);
     }
 
     #[test]
-    fn test_encode_01() {
-        let cert = example_ed25519_cert();
-
-        let actual = SliceEncoder::encode(&cert);
-        let expected: [u8; 386] = [
-            0, 0, 0, 32, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 45, 99,
-            101, 114, 116, 45, 118, 48, 49, 64, 111, 112, 101, 110, 115, 115, 104, 46, 99, 111,
-            109, 0, 0, 0, 32, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1,
-            1, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 32, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-            3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0, 0, 4, 210, 0, 0, 0, 1,
-            0, 0, 0, 6, 75, 69, 89, 95, 73, 68, 0, 0, 0, 28, 0, 0, 0, 16, 86, 65, 76, 73, 68, 95,
-            80, 82, 73, 78, 67, 73, 80, 65, 76, 83, 0, 0, 0, 4, 77, 79, 82, 69, 0, 0, 0, 0, 0, 0,
-            0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 30, 0, 0, 0, 7, 79, 80, 84, 73,
-            79, 78, 49, 0, 0, 0, 0, 0, 0, 0, 7, 79, 80, 84, 73, 79, 78, 50, 0, 0, 0, 0, 0, 0, 0,
-            24, 0, 0, 0, 4, 69, 88, 84, 49, 0, 0, 0, 0, 0, 0, 0, 4, 69, 88, 84, 50, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0,
-            0, 0, 32, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
-            3, 3, 3, 3, 3, 3, 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53,
-            49, 57, 0, 0, 0, 64, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-            5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5, 5,
-        ];
-
-        assert_eq!(&actual[..], &expected[..]);
+    fn test_signature_invalid() {
+        let raw = include_bytes!("../../resources/ed25519-user-cert.pub.raw");
+        let mut crt: SshEd25519Cert = SliceDecoder::decode(raw).unwrap();
+        crt.nonce[0] += 1;
+        assert_eq!(crt.is_valid_ca_signature(), false);
     }
 }

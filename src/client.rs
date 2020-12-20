@@ -17,7 +17,7 @@ pub struct Client {
     config: ClientConfig,
     username: Option<String>,
     auth_agent: Arc<dyn Agent>,
-    known_hosts: Arc<dyn KnownHosts>,
+    known_hosts: Arc<dyn KnownHostsLike>,
 }
 
 impl Client {
@@ -36,10 +36,10 @@ impl Client {
         socket: TcpStream,
         hostname: String,
     ) -> Result<Connection, ClientError> {
-        let verifier = self.known_hosts.clone();
+        let kh = self.known_hosts.clone();
         let tc = &self.config.transport;
         let cc = &self.config.connection;
-        let t = DefaultTransport::connect(tc, &verifier, hostname, socket).await?;
+        let t = DefaultTransport::connect(tc, &kh, hostname, socket).await?;
         let t = Box::new(t);
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, cc, user, &self.auth_agent).await?,
@@ -63,7 +63,7 @@ impl Client {
         &mut self.auth_agent
     }
 
-    pub fn known_hosts(&mut self) -> &mut Arc<dyn KnownHosts> {
+    pub fn known_hosts(&mut self) -> &mut Arc<dyn KnownHostsLike> {
         &mut self.known_hosts
     }
 }
@@ -79,7 +79,7 @@ impl Default for Client {
                 Some(agent) => Arc::new(agent),
                 None => Arc::new(()),
             },
-            known_hosts: Arc::new(KnownHostsFiles::default()),
+            known_hosts: Arc::new(KnownHosts::default()),
         }
     }
 }

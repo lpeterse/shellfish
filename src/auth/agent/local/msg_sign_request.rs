@@ -28,6 +28,7 @@ impl<'a> Encode for MsgSignRequest<'a> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::super::ssh_ed25519::*;
@@ -52,3 +53,4 @@ mod tests {
         );
     }
 }
+*/

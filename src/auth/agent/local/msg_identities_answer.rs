@@ -31,6 +31,7 @@ impl Decode for MsgIdentitiesAnswer {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -107,3 +108,4 @@ mod tests {
     }
     */
 }
+*/

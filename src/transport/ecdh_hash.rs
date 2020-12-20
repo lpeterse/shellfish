@@ -47,6 +47,7 @@ impl<'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::super::*;
@@ -134,3 +135,4 @@ mod tests {
         assert_eq!(kex_hash.sha256().as_ref(), sha256_digest);
     }
 }
+*/

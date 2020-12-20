@@ -15,6 +15,7 @@ pub struct RsaPublicKey {
     pub public_n: Vec<u8>,
 }
 
+/*
 impl PublicKey for RsaPublicKey {
     fn algorithm(&self) -> &str {
         SshRsa::NAME
@@ -31,7 +32,7 @@ impl PublicKey for RsaPublicKey {
     fn as_any(&self) -> &dyn Any {
         self
     }
-}
+}*/
 
 impl Encode for RsaPublicKey {
     fn size(&self) -> usize {

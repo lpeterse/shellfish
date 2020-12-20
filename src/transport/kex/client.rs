@@ -1,7 +1,7 @@
 use super::super::config::*;
 use super::kex::*;
 
-use crate::util::assume;
+use crate::util::BoxFuture;
 
 use async_std::future::Future;
 use futures_timer::Delay;
@@ -11,7 +11,7 @@ use futures_timer::Delay;
 pub struct ClientKex {
     config: Arc<TransportConfig>,
     /// Host key verifier
-    known_hosts: Arc<dyn KnownHosts>,
+    known_hosts: Arc<dyn KnownHostsLike>,
     /// Mutable state (when kex in progress)
     state: Option<Box<State>>,
     /// Remote identification string
@@ -31,7 +31,7 @@ pub struct ClientKex {
 impl ClientKex {
     pub fn new(
         config: &Arc<TransportConfig>,
-        known_hosts: &Arc<dyn KnownHosts>,
+        known_hosts: &Arc<dyn KnownHostsLike>,
         remote_id: Identification<String>,
         remote_name: String,
     ) -> Self {
@@ -56,7 +56,7 @@ struct State {
     init_tx: bool,
     init_rx: Option<MsgKexInit>,
     ecdh_tx: bool,
-    ecdh_rx: Option<Result<(), KnownHostsFuture>>,
+    ecdh_rx: Option<Result<(), BoxFuture<Result<(), KnownHostsError>>>>,
     newkeys_tx: bool,
     newkeys_rx: bool,
 }
@@ -79,13 +79,15 @@ impl State {
     fn poll_host_key_verified(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         if let Some(ref mut hkv) = self.ecdh_rx {
             if let Err(ref mut hkv) = hkv {
-                let e = TransportError::HostKeyUnverifiable;
                 match ready!(Pin::new(hkv).poll(cx)) {
-                    Ok(Some(KnownHostsDecision::Accepted)) => {
+                    Ok(()) => {
                         self.ecdh_rx = Some(Ok(()));
                         return Poll::Ready(Ok(()));
                     }
-                    _ => return Poll::Ready(Err(e)),
+                    Err(e) => {
+                        log::debug!("Host key unverifiable: {}", e);
+                        return Poll::Ready(Err(TransportError::HostKeyUnverifiable));
+                    }
                 }
             }
             Poll::Ready(Ok(()))
@@ -241,14 +243,14 @@ impl Kex for ClientKex {
                     }
                     .sha256();
                     // Verify the host key signature
-                    let valid = msg
-                        .host_key
-                        .verify_signature(&msg.signature, h.as_ref());
-                    assume(valid).ok_or(TransportError::InvalidSignature)?;
+                    msg.signature
+                        .verify(&msg.host_key, h.as_ref())
+                        .map_err(|_| TransportError::InvalidSignature)?;
                     // The session id is only computed during first kex and constant afterwards
                     let sid = self.session_id.get_or_insert_with(|| h.clone());
                     let algos = AlgorithmAgreement::agree(&local, &remote)?;
-                    let gks: GenericKeyStream = KeyStreamX25519::new(k.to_bytes(), h, sid.clone()).into();
+                    let gks: GenericKeyStream =
+                        KeyStreamX25519::new(k.to_bytes(), h, sid.clone()).into();
                     let enc = CipherConfig {
                         ea: algos.ea_c2s,
                         ca: algos.ca_c2s,

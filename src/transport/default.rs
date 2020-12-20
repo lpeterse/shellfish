@@ -16,14 +16,14 @@ impl<S: Socket> DefaultTransport<S> {
     /// The initial key exchange has been completed successfully when function returns.
     pub async fn connect(
         config: &Arc<TransportConfig>,
-        verifier: &Arc<dyn KnownHosts>,
+        known_hosts: &Arc<dyn KnownHostsLike>,
         hostname: String,
         socket: S,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(socket);
         trx.tx_id(&config.identification).await?;
         let id = trx.rx_id().await?;
-        let kex = ClientKex::new(&config, &verifier, id, hostname);
+        let kex = ClientKex::new(&config, &known_hosts, id, hostname);
         let kex = Box::new(kex);
         let mut transport = Self { trx, kex };
         transport.rekey().await?;

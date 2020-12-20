@@ -43,6 +43,7 @@ impl<'a> Encode for SignatureData<'a> {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::super::ssh_ed25519::*;
@@ -76,3 +77,4 @@ mod tests {
         assert_eq!(&actual[..], &expected[..]);
     }
 }
+*/
