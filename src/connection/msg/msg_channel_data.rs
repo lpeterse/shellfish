@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug)]
 pub(crate) struct MsgChannelData<'a> {
@@ -24,11 +24,10 @@ impl<'a> Encode for MsgChannelData<'a> {
     fn size(&self) -> usize {
         1 + 4 + 4 + self.data.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)?;
-        e.push_u32be(self.data.len() as u32)?;
-        e.push_bytes(&self.data)
+        e.push_bytes_framed(&self.data)
     }
 }
 

@@ -15,9 +15,9 @@ impl Encode for MsgSignResponse {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>() + Encode::size(&self.signature)
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
-        Encode::encode(&self.signature, e)
+        e.push(&self.signature)
     }
 }
 
@@ -31,7 +31,6 @@ impl Decode for MsgSignResponse {
     }
 }
 
-/*
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -39,7 +38,7 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let msg = MsgSignResponse {
-            signature: Signature { algorithm: "ssh-ed25519".into(), signature: vec![3; 64] },
+            signature: Signature::new("ssh-ed25519".into(), vec![3; 64]),
         };
         assert_eq!(
             vec![
@@ -55,7 +54,7 @@ mod tests {
     #[test]
     fn test_decode_01() {
         let msg = MsgSignResponse {
-            signature: Signature { algorithm: "ssh-ed25519".into(), signature: vec![3; 64] },
+            signature: Signature::new("ssh-ed25519".into(), vec![3; 64]),
         };
         assert_eq!(
             Some(msg),
@@ -70,4 +69,3 @@ mod tests {
         );
     }
 }
-*/

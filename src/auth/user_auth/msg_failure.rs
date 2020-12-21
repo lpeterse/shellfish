@@ -15,7 +15,7 @@ impl Encode for MsgFailure<&'static str> {
     fn size(&self) -> usize {
         1 + NameList::size(&self.methods) + 1
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(MsgFailure::NUMBER as u8)?;
         NameList::encode(&self.methods, e)?;
         e.push_u8(self.partial_success as u8)

@@ -1,7 +1,7 @@
 use super::Encode;
 use sha2::Digest;
 
-use crate::util::assume;
+use crate::util::check;
 
 /// An `Encoder` is anything that is able to process a sequence of basic encoding operations
 /// and assembles them into a result. It is most likely a bytestream assembler, but might also
@@ -30,15 +30,7 @@ pub trait Encoder: Sized {
     ///
     /// Returns `None` if the encoder had insufficient capacity.
     #[must_use]
-    fn push_bytes<T: AsRef<[u8]>>(&mut self, x: &T) -> Option<()>;
-
-    /// Push something encodable to the encoder state.
-    ///
-    /// Returns `None` if the encoder had insufficient capacity.
-    #[must_use]
-    fn push_encode<T: Encode>(&mut self, x: &T) -> Option<()> {
-        x.encode(self)
-    }
+    fn push_bytes(&mut self, x: &[u8]) -> Option<()>;
 }
 
 impl<D: Digest> Encoder for D {
@@ -54,7 +46,7 @@ impl<D: Digest> Encoder for D {
         self.update(x.to_be_bytes());
         Some(())
     }
-    fn push_bytes<T: AsRef<[u8]>>(&mut self, x: &T) -> Option<()> {
+    fn push_bytes(&mut self, x: &[u8]) -> Option<()> {
         self.update(x);
         Some(())
     }
@@ -99,7 +91,7 @@ impl<'a> SliceEncoder<'a> {
 impl<'a> Encoder for SliceEncoder<'a> {
     #[inline(always)]
     fn push_u8(self: &mut Self, x: u8) -> Option<()> {
-        assume(self.buf.len() > self.pos)?;
+        check(self.buf.len() > self.pos)?;
         self.buf[self.pos] = x;
         self.pos += 1;
         Some(())
@@ -107,7 +99,7 @@ impl<'a> Encoder for SliceEncoder<'a> {
 
     #[inline(always)]
     fn push_u32be(self: &mut Self, x: u32) -> Option<()> {
-        assume(self.buf.len() >= self.pos + std::mem::size_of::<u32>())?;
+        check(self.buf.len() >= self.pos + std::mem::size_of::<u32>())?;
         self.buf[self.pos + 0] = ((x >> 24) & 0xff) as u8;
         self.buf[self.pos + 1] = ((x >> 16) & 0xff) as u8;
         self.buf[self.pos + 2] = ((x >> 8) & 0xff) as u8;
@@ -118,7 +110,7 @@ impl<'a> Encoder for SliceEncoder<'a> {
 
     #[inline(always)]
     fn push_u64be(self: &mut Self, x: u64) -> Option<()> {
-        assume(self.buf.len() >= self.pos + std::mem::size_of::<u64>())?;
+        check(self.buf.len() >= self.pos + std::mem::size_of::<u64>())?;
         self.buf[self.pos + 0] = ((x >> 56) & 0xff) as u8;
         self.buf[self.pos + 1] = ((x >> 48) & 0xff) as u8;
         self.buf[self.pos + 2] = ((x >> 40) & 0xff) as u8;
@@ -132,9 +124,9 @@ impl<'a> Encoder for SliceEncoder<'a> {
     }
 
     #[inline(always)]
-    fn push_bytes<T: AsRef<[u8]>>(self: &mut Self, x: &T) -> Option<()> {
+    fn push_bytes(self: &mut Self, x: &[u8]) -> Option<()> {
         let x: &[u8] = x.as_ref();
-        assume(self.buf.len() >= self.pos + x.len())?;
+        check(self.buf.len() >= self.pos + x.len())?;
         self.buf[self.pos..][..x.len()].copy_from_slice(x);
         self.pos += x.len();
         Some(())
@@ -219,7 +211,7 @@ mod tests {
     #[test]
     fn test_digest_push_bytes() {
         let mut digest = sha2::Sha256::new();
-        assert_eq!(digest.push_bytes(&"1234"), Some(()));
+        assert_eq!(digest.push_bytes(b"1234"), Some(()));
         assert_eq!([3, 172, 103, 66, 22, 243, 225, 92], digest.finalize()[..8]);
     }
 }

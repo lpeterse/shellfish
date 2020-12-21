@@ -1,5 +1,5 @@
 use super::*;
-use crate::util::assume;
+use crate::util::check;
 use crate::util::cidr::Cidr;
 use crate::util::codec::*;
 use std::net::IpAddr;
@@ -37,7 +37,7 @@ pub struct SshEd25519Cert {
     critical_options: Vec<(String, String)>,
     extensions: Vec<(String, String)>,
     reserved: Vec<u8>,
-    authority: Identity,
+    authority: PublicKey,
     signature: Signature,
 }
 
@@ -111,8 +111,7 @@ impl SshEd25519Cert {
     pub fn is_valid_ca_signature(&self) -> bool {
         let key = &self.authority;
         let data = SliceEncoder::encode(self);
-        assume(!key.is_certificate())
-            .and_then(|_| data.get(..data.len() - Encode::size(&self.signature)))
+        data.get(..data.len() - Encode::size(&self.signature))
             .and_then(|data| self.signature.verify(key, data).ok())
             .is_some()
     }
@@ -123,56 +122,56 @@ impl Cert for SshEd25519Cert {
         &self.authority
     }
     fn validate_as_host(&self, hostname: &str) -> Result<(), CertError> {
-        assume(self.type_ == Self::TYPE_HOST).ok_or(CertError::InvalidType)?;
-        assume(self.is_valid_principal(hostname)).ok_or(CertError::InvalidPrincipal)?;
-        assume(self.is_valid_period()).ok_or(CertError::InvalidPeriod)?;
-        assume(self.is_valid_options()).ok_or(CertError::InvalidOptions)?;
-        assume(self.is_valid_ca_signature()).ok_or(CertError::InvalidSignature)?;
+        check(self.type_ == Self::TYPE_HOST).ok_or(CertError::InvalidType)?;
+        check(self.is_valid_principal(hostname)).ok_or(CertError::InvalidPrincipal)?;
+        check(self.is_valid_period()).ok_or(CertError::InvalidPeriod)?;
+        check(self.is_valid_options()).ok_or(CertError::InvalidOptions)?;
+        check(self.is_valid_ca_signature()).ok_or(CertError::InvalidSignature)?;
         Ok(())
     }
     fn validate_as_client(&self, username: &str, source: &IpAddr) -> Result<(), CertError> {
-        assume(self.type_ == Self::TYPE_USER).ok_or(CertError::InvalidType)?;
-        assume(self.is_valid_principal(username)).ok_or(CertError::InvalidPrincipal)?;
-        assume(self.is_valid_period()).ok_or(CertError::InvalidPeriod)?;
-        assume(self.is_valid_options()).ok_or(CertError::InvalidOptions)?;
-        assume(self.is_valid_source(source)).ok_or(CertError::InvalidSource)?;
-        assume(self.is_valid_ca_signature()).ok_or(CertError::InvalidSignature)?;
+        check(self.type_ == Self::TYPE_USER).ok_or(CertError::InvalidType)?;
+        check(self.is_valid_principal(username)).ok_or(CertError::InvalidPrincipal)?;
+        check(self.is_valid_period()).ok_or(CertError::InvalidPeriod)?;
+        check(self.is_valid_options()).ok_or(CertError::InvalidOptions)?;
+        check(self.is_valid_source(source)).ok_or(CertError::InvalidSource)?;
+        check(self.is_valid_ca_signature()).ok_or(CertError::InvalidSignature)?;
         Ok(())
     }
 }
 
 impl Encode for SshEd25519Cert {
     fn size(&self) -> usize {
-        let mut n: usize = 0;
-        n += Encode::size(&SshEd25519Cert::NAME);
-        n += Encode::size(&self.nonce[..]);
-        n += Encode::size(&self.pk[..]);
+        let mut n = 0;
+        n += 4 + SshEd25519Cert::NAME.len();
+        n += 4 + self.nonce.len();
+        n += 4 + self.pk.len();
         n += 8 + 4;
-        n += Encode::size(&self.key_id);
-        n += Encode::size(&ListRef(&self.valid_principals));
+        n += 4 + self.key_id.len();
+        n += ListRef(&self.valid_principals).size();
         n += 8 + 8;
-        n += Encode::size(&ListRef(&self.critical_options));
-        n += Encode::size(&ListRef(&self.extensions));
-        n += Encode::size(&self.reserved[..]);
-        n += Encode::size(&self.authority);
-        n += Encode::size(&self.signature);
+        n += ListRef(&self.critical_options).size();
+        n += ListRef(&self.extensions).size();
+        n += 4 + self.reserved.len();
+        n += self.authority.size();
+        n += self.signature.size();
         n
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        Encode::encode(&SshEd25519Cert::NAME, e)?;
-        Encode::encode(&self.nonce[..], e)?;
-        Encode::encode(&self.pk[..], e)?;
-        Encode::encode(&self.serial, e)?;
-        Encode::encode(&self.type_, e)?;
-        Encode::encode(&self.key_id, e)?;
-        Encode::encode(&ListRef(&self.valid_principals), e)?;
-        Encode::encode(&self.valid_after, e)?;
-        Encode::encode(&self.valid_before, e)?;
-        Encode::encode(&ListRef(&self.critical_options), e)?;
-        Encode::encode(&ListRef(&self.extensions), e)?;
-        Encode::encode(&self.reserved[..], e)?;
-        Encode::encode(&self.authority, e)?;
-        Encode::encode(&self.signature, e)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_str_framed(SshEd25519Cert::NAME)?;
+        e.push_bytes_framed(&self.nonce)?;
+        e.push_bytes_framed(&self.pk)?;
+        e.push_u64be(self.serial)?;
+        e.push_u32be(self.type_)?;
+        e.push_str_framed(&self.key_id)?;
+        e.push(&ListRef(&self.valid_principals))?;
+        e.push_u64be(self.valid_after)?;
+        e.push_u64be(self.valid_before)?;
+        e.push(&ListRef(&self.critical_options))?;
+        e.push(&ListRef(&self.extensions))?;
+        e.push_bytes_framed(&self.reserved)?;
+        e.push(&self.authority)?;
+        e.push(&self.signature)
     }
 }
 
@@ -183,13 +182,13 @@ impl Decode for SshEd25519Cert {
             nonce: {
                 c.expect_u32be(32)?;
                 let mut x: [u8; 32] = [0; 32];
-                c.take_into(&mut x[..])?;
+                c.take_bytes_into(&mut x[..])?;
                 x
             },
             pk: {
                 c.expect_u32be(32)?;
                 let mut x: [u8; 32] = [0; 32];
-                c.take_into(&mut x[..])?;
+                c.take_bytes_into(&mut x[..])?;
                 x
             },
             serial: c.take_u64be()?,

@@ -21,16 +21,13 @@ where
     A::PublicKey: Encode,
 {
     fn size(&self) -> usize {
-        std::mem::size_of::<u8>()
-            + self.host_key.size()
-            + self.dh_public.size()
-            + self.signature.size()
+        1 + self.host_key.size() + self.dh_public.size() + self.signature.size()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
-        Encode::encode(&self.host_key, e)?;
-        Encode::encode(&self.dh_public, e)?;
-        Encode::encode(&self.signature, e)
+        e.push(&self.host_key)?;
+        e.push(&self.dh_public)?;
+        e.push(&self.signature)
     }
 }
 

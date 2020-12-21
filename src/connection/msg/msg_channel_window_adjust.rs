@@ -24,7 +24,7 @@ impl Encode for MsgChannelWindowAdjust {
     fn size(&self) -> usize {
         1 + 4 + 4
     }
-    fn encode<E: Encoder>(&self, e: &mut E)-> Option<()>  {
+    fn encode<E: SshEncoder>(&self, e: &mut E)-> Option<()>  {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
         e.push_u32be(self.recipient_channel)?;
         e.push_u32be(self.bytes_to_add)

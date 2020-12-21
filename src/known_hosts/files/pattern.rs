@@ -1,4 +1,4 @@
-use crate::util::assume;
+use crate::util::check;
 use crate::util::glob::Glob;
 use hmac::crypto_mac::NewMac;
 use hmac::{Hmac, Mac};
@@ -24,8 +24,8 @@ impl<'a> KnownHostsPattern<'a> {
             let key = known.next()?;
             let mac = known.next()?;
             // 16 bytes information shall make 28 chars in base64
-            assume(key.len() == 28).map(drop)?;
-            assume(mac.len() == 28).map(drop)?;
+            check(key.len() == 28).map(drop)?;
+            check(mac.len() == 28).map(drop)?;
             // 28 base64 chars cannot contain more than 28 byte information,
             // but might contain more than 16 bytes
             let mut k: [u8; 28] = [0; 28];

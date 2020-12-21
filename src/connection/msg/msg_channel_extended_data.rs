@@ -26,12 +26,11 @@ impl<'a> Encode for MsgChannelExtendedData<'a> {
     fn size(&self) -> usize {
         1 + 4 + 4 + 4 + self.data.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)?;
         e.push_u32be(self.data_type_code)?;
-        e.push_u32be(self.data.len() as u32)?;
-        e.push_bytes(&self.data)
+        e.push_bytes_framed(&self.data)
     }
 }
 

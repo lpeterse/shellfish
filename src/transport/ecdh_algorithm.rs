@@ -47,7 +47,7 @@ impl Encode for x25519_dalek::PublicKey {
     fn size(&self) -> usize {
         std::mem::size_of::<u32>() + 32
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(32)?;
         e.push_bytes(self.as_bytes())
     }
@@ -57,7 +57,7 @@ impl Decode for x25519_dalek::PublicKey {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u32be(32)?;
         let mut buf: [u8; 32] = [0; 32];
-        d.take_into(&mut buf)?;
+        d.take_bytes_into(&mut buf)?;
         x25519_dalek::PublicKey::from(buf).into()
     }
 }

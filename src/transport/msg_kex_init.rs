@@ -1,7 +1,7 @@
 use super::*;
 use crate::auth::*;
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsgKexInit<T = String> {
@@ -79,9 +79,9 @@ impl<T: AsRef<[u8]>> Encode for MsgKexInit<T> {
             + NameList::size(&self.languages_client_to_server)
             + NameList::size(&self.languages_server_to_client)
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
-        e.push_bytes(&self.cookie)?;
+        e.push_bytes(self.cookie.as_ref())?;
         NameList::encode(&self.kex_algorithms, e)?;
         NameList::encode(&self.server_host_key_algorithms, e)?;
         NameList::encode(&self.encryption_algorithms_client_to_server, e)?;
@@ -103,7 +103,7 @@ impl Decode for MsgKexInit {
         let r = Self {
             cookie: KexCookie({
                 let mut x = [0; 16];
-                d.take_into(&mut x)?;
+                d.take_bytes_into(&mut x)?;
                 x
             }),
             kex_algorithms: NameList::decode_string(d)?,

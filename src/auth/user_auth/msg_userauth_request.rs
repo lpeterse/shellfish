@@ -1,6 +1,6 @@
 use super::method::*;
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgUserAuthRequest<'a, M: AuthMethod> {
@@ -15,17 +15,14 @@ impl<'a, M: AuthMethod> Message for MsgUserAuthRequest<'a, M> {
 
 impl<'a, M: AuthMethod + Encode> Encode for MsgUserAuthRequest<'a, M> {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.user_name)
-            + Encode::size(&self.service_name)
-            + Encode::size(&M::NAME)
-            + Encode::size(&self.method)
+        13 + self.user_name.len() + self.service_name.len() + M::NAME.len() + self.method.size()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
-        Encode::encode(&self.user_name, e)?;
-        Encode::encode(&self.service_name, e)?;
-        Encode::encode(&M::NAME, e)?;
-        Encode::encode(&self.method, e)
+        e.push_str_framed(&self.user_name)?;
+        e.push_str_framed(&self.service_name)?;
+        e.push_str_framed(M::NAME)?;
+        e.push(&self.method)
     }
 }
 

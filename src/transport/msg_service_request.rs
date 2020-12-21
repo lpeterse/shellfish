@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgServiceRequest<'a>(pub &'a str);
@@ -10,12 +10,11 @@ impl<'a> Message for MsgServiceRequest<'a> {
 
 impl<'a> Encode for MsgServiceRequest<'a> {
     fn size(&self) -> usize {
-        std::mem::size_of::<u8>()
-        + self.0.size()
+        1 + 4 + self.0.len()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, c: &mut E) -> Option<()> {
         c.push_u8(<Self as Message>::NUMBER)?;
-        c.push_encode(&self.0)
+        c.push_str_framed(&self.0)
     }
 }
 
@@ -33,10 +32,7 @@ mod tests {
     #[test]
     fn test_debug_01() {
         let msg = MsgServiceRequest(&"service");
-        assert_eq!(
-            "MsgServiceRequest(\"service\")",
-            format!("{:?}", msg)
-        );
+        assert_eq!("MsgServiceRequest(\"service\")", format!("{:?}", msg));
     }
 
     #[test]

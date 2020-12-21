@@ -13,35 +13,46 @@ impl<'a> AuthMethod for PublicKeyMethod {
 
 impl Encode for PublicKeyMethod {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.identity.algorithm())
-            + Encode::size(&self.identity)
-            + match self.signature {
-                None => 0,
-                Some(ref x) => Encode::size(x),
-            }
+        5 + self.identity.algorithm().len()
+            + self.identity.size()
+            + self.signature.as_ref().map(|x| x.size()).unwrap_or(0)
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(self.signature.is_some() as u8)?;
-        Encode::encode(&self.identity.algorithm(), e)?;
-        Encode::encode(&self.identity, e)?;
+        e.push_str_framed(self.identity.algorithm())?;
+        e.push(&self.identity)?;
         match self.signature {
             None => Some(()),
-            Some(ref x) => Encode::encode(x, e),
+            Some(ref x) => e.push(x),
         }
     }
 }
 
 impl Decode for PublicKeyMethod {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        let b = d.take_u8()? != 0;
-        let _: &str = DecodeRef::decode(d)?; // FIXME
-        let identity = d.isolate_u32be(|x| DecodeRef::decode(x))?;
-        let signature = if b { Some(DecodeRef::decode(d)?) } else { None };
-        PublicKeyMethod {
-            identity,
-            signature,
-        }
-        .into()
+        // FIXME
+        // let b = d.take_u8()? != 0;
+        // let _: &str = DecodeRef::decode(d)?; // FIXME
+        // let identity = d.isolate_u32be(|x| DecodeRef::decode(x))?;
+        // let signature = if b { Some(DecodeRef::decode(d)?) } else { None };
+        // PublicKeyMethod {
+        //     identity,
+        //     signature,
+        // }
+        // .into()
+
+        // let b = d.take_bool()?;
+        // Decode::decode(d).filter(|x| x == self.identity.algorithm()).map(drop)?;
+        // let id = Decode::decode(d)?;
+
+        // let len = d.take_u32be()?;
+        // let innr = d.take_bytes(len as usize)?;
+        // let innr = &mut SliceDecoder::new(innr);
+        // let algo = Decode::decode(innr)?;
+        // let data = DecodeRef::decode(innr).map(|x: &[u8]| Vec::from(x))?;
+        // innr.expect_eoi()?;
+        // Some(Self { algo, data })
+        panic!()
     }
 }
 

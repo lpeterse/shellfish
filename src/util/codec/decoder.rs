@@ -4,35 +4,22 @@ use crate::util::*;
 use std::convert::TryInto;
 
 pub trait Decoder<'a>: Clone {
-    fn take_eoi(&self) -> Option<()>;
     fn take_u8(&mut self) -> Option<u8>;
     fn take_u32be(&mut self) -> Option<u32>;
     fn take_u64be(&mut self) -> Option<u64>;
     fn take_bool(&mut self) -> Option<bool>;
-    fn take_bytes(&mut self, len: usize) -> Option<&'a [u8]>;
-    fn take_all(&mut self) -> Option<&'a [u8]>;
-    fn take_into(&mut self, buf: &mut [u8]) -> Option<()>;
     fn take_str(&mut self, len: usize) -> Option<&'a str>;
-    fn take_string(&mut self, len: usize) -> Option<String>;
-    fn take_while<F: FnMut(u8) -> bool + Sized>(&mut self, pred: F) -> Option<&'a [u8]>;
+    fn take_bytes(&mut self, len: usize) -> Option<&'a [u8]>;
+    fn take_bytes_all(&mut self) -> Option<&'a [u8]>;
+    fn take_bytes_into(&mut self, buf: &mut [u8]) -> Option<()>;
+    fn take_bytes_while<F: FnMut(u8) -> bool + Sized>(&mut self, pred: F) -> Option<&'a [u8]>;
 
+    fn expect_eoi(&self) -> Option<()>;
     fn expect_u8(&mut self, x: u8) -> Option<()>;
     fn expect_u32be(&mut self, x: u32) -> Option<()>;
     fn expect_true(&mut self) -> Option<()>;
     fn expect_false(&mut self) -> Option<()>;
     fn expect_bytes<T: AsRef<[u8]>>(&mut self, bytes: &T) -> Option<()>;
-
-    fn isolate_u32be<T, F>(&mut self, f: F) -> Option<T>
-    where
-        F: FnOnce(&mut SliceDecoder<'a>) -> Option<T>,
-    {
-        let len = self.take_u32be()?;
-        let bytes = self.take_bytes(len as usize)?;
-        let mut inner = SliceDecoder(bytes);
-        let result = f(&mut inner)?;
-        inner.take_eoi()?;
-        Some(result)
-    }
 }
 
 /// The `SliceDecoder` is just a shrinking slice of input.
@@ -54,14 +41,22 @@ impl<'a> SliceDecoder<'a> {
     pub fn decode<T: DecodeRef<'a>>(x: &'a [u8]) -> Option<T> {
         let mut d = SliceDecoder(x);
         let r = T::decode(&mut d)?;
-        d.take_eoi()?;
+        d.expect_eoi()?;
         Some(r)
+    }
+
+    /// Try to decode the given input as `T` (as a prefix of the input).
+    ///
+    /// Decoding will not fail even if not all of the input has been consumed.
+    pub fn decode_prefix<T: DecodeRef<'a>>(x: &'a [u8]) -> Option<T> {
+        let mut d = SliceDecoder(x);
+        T::decode(&mut d)
     }
 }
 
 impl<'a> Decoder<'a> for SliceDecoder<'a> {
-    fn take_eoi(&self) -> Option<()> {
-        assume(self.0.is_empty())
+    fn expect_eoi(&self) -> Option<()> {
+        check(self.0.is_empty())
     }
 
     fn take_u8(self: &mut Self) -> Option<u8> {
@@ -71,7 +66,7 @@ impl<'a> Decoder<'a> for SliceDecoder<'a> {
     }
 
     fn take_u32be(self: &mut Self) -> Option<u32> {
-        assume(self.0.len() >= 4)?;
+        check(self.0.len() >= 4)?;
         let (head, tail) = self.0.split_at(4);
         let n = u32::from_be_bytes(head.try_into().ok()?);
         self.0 = tail;
@@ -79,7 +74,7 @@ impl<'a> Decoder<'a> for SliceDecoder<'a> {
     }
 
     fn take_u64be(&mut self) -> Option<u64> {
-        assume(self.0.len() >= 8)?;
+        check(self.0.len() >= 8)?;
         let (head, tail) = self.0.split_at(8);
         let n = u64::from_be_bytes(head.try_into().ok()?);
         self.0 = tail;
@@ -91,41 +86,33 @@ impl<'a> Decoder<'a> for SliceDecoder<'a> {
     }
 
     fn take_str(&mut self, len: usize) -> Option<&'a str> {
-        assume(self.0.len() >= len)?;
+        check(self.0.len() >= len)?;
         let (head, tail) = self.0.split_at(len);
         let s = std::str::from_utf8(head).ok()?;
         self.0 = tail;
         Some(s)
     }
 
-    fn take_string(self: &mut Self, len: usize) -> Option<String> {
-        assume(self.0.len() >= len)?;
-        let (head, tail) = self.0.split_at(len);
-        let s = String::from_utf8(Vec::from(head)).ok()?;
-        self.0 = tail;
-        Some(s)
-    }
-
     fn take_bytes(self: &mut Self, len: usize) -> Option<&'a [u8]> {
-        assume(self.0.len() >= len)?;
+        check(self.0.len() >= len)?;
         let (s, tail) = self.0.split_at(len);
         self.0 = tail;
         Some(s)
     }
 
-    fn take_into(self: &mut Self, dst: &mut [u8]) -> Option<()> {
+    fn take_bytes_into(self: &mut Self, dst: &mut [u8]) -> Option<()> {
         let s = self.take_bytes(dst.len())?;
         dst.copy_from_slice(s);
         Some(())
     }
 
-    fn take_all(self: &mut Self) -> Option<&'a [u8]> {
+    fn take_bytes_all(self: &mut Self) -> Option<&'a [u8]> {
         let s = self.0;
         self.0 = b"";
         Some(s)
     }
 
-    fn take_while<F>(self: &mut Self, mut pred: F) -> Option<&'a [u8]>
+    fn take_bytes_while<F>(self: &mut Self, mut pred: F) -> Option<&'a [u8]>
     where
         F: FnMut(u8) -> bool + Sized,
     {
@@ -168,19 +155,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_take_eoi_01() {
+    fn test_expect_eoi_01() {
         let a = [];
         let c = SliceDecoder::new(&a);
 
-        assert_eq!(c.take_eoi(), Some(()));
+        assert_eq!(c.expect_eoi(), Some(()));
     }
 
     #[test]
-    fn test_take_eoi_02() {
+    fn test_expect_eoi_02() {
         let a = [1];
         let c = SliceDecoder::new(&a);
 
-        assert_eq!(c.take_eoi(), None);
+        assert_eq!(c.expect_eoi(), None);
     }
 
     #[test]
@@ -229,7 +216,7 @@ mod tests {
         let mut c = SliceDecoder::new(&a);
 
         assert_eq!(c.take_str(3), Some("ABC"));
-        assert_eq!(c.take_all(), Some(b"DE".as_ref()));
+        assert_eq!(c.take_bytes_all(), Some(b"DE".as_ref()));
     }
 
     #[test]
@@ -238,7 +225,7 @@ mod tests {
         let mut c = SliceDecoder::new(&a);
 
         assert_eq!(c.take_str(5), Some("ABCDE"));
-        assert_eq!(c.take_all(), Some(b"".as_ref()));
+        assert_eq!(c.take_bytes_all(), Some(b"".as_ref()));
     }
 
     #[test]
@@ -250,38 +237,12 @@ mod tests {
     }
 
     #[test]
-    fn test_take_string_01() {
-        let a = "ABCDE".as_bytes();
-        let mut c = SliceDecoder::new(&a);
-
-        assert_eq!(c.take_string(3), Some(String::from("ABC")));
-        assert_eq!(c.take_all(), Some(b"DE".as_ref()));
-    }
-
-    #[test]
-    fn test_take_string_02() {
-        let a = "ABCDE".as_bytes();
-        let mut c = SliceDecoder::new(&a);
-
-        assert_eq!(c.take_string(5), Some(String::from("ABCDE")));
-        assert_eq!(c.take_all(), Some(b"".as_ref()));
-    }
-
-    #[test]
-    fn test_take_string_03() {
-        let a = "ABCDE".as_bytes();
-        let mut c = SliceDecoder::new(&a);
-
-        assert_eq!(c.take_string(6), None);
-    }
-
-    #[test]
     fn test_take_bytes_01() {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = SliceDecoder::new(&a);
 
         assert_eq!(c.take_bytes(3), Some(&[1, 2, 3 as u8][..]));
-        assert_eq!(c.take_all(), Some([4, 5].as_ref()));
+        assert_eq!(c.take_bytes_all(), Some([4, 5].as_ref()));
     }
 
     #[test]
@@ -290,7 +251,7 @@ mod tests {
         let mut c = SliceDecoder::new(&a);
 
         assert_eq!(c.take_bytes(5), Some(&[1, 2, 3, 4, 5 as u8][..]));
-        assert_eq!(c.take_all(), Some([].as_ref()));
+        assert_eq!(c.take_bytes_all(), Some([].as_ref()));
     }
 
     #[test]
@@ -306,7 +267,7 @@ mod tests {
         let a = [1, 2, 3, 4, 5 as u8];
         let mut c = SliceDecoder::new(&a);
 
-        assert_eq!(c.take_all(), Some(&[1, 2, 3, 4, 5 as u8][..]));
+        assert_eq!(c.take_bytes_all(), Some(&[1, 2, 3, 4, 5 as u8][..]));
         assert_eq!(c.0, &[]);
     }
 
@@ -316,9 +277,9 @@ mod tests {
         let mut b = [0; 5];
         let mut c = SliceDecoder::new(&a);
 
-        assert_eq!(Some(()), c.take_into(&mut b));
+        assert_eq!(Some(()), c.take_bytes_into(&mut b));
         assert_eq!(&[1, 2, 3, 4, 5 as u8][..], b);
-        assert_eq!(c.take_all(), Some([6u8].as_ref()));
+        assert_eq!(c.take_bytes_all(), Some([6u8].as_ref()));
     }
 
     #[test]
@@ -327,7 +288,7 @@ mod tests {
         let mut b = [0; 7];
         let mut c = SliceDecoder::new(&a);
 
-        assert_eq!(None, c.take_into(&mut b));
+        assert_eq!(None, c.take_bytes_into(&mut b));
     }
 
     #[test]

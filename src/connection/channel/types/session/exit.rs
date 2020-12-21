@@ -19,28 +19,28 @@ pub struct ExitSignal {
 
 impl Encode for ExitStatus {
     fn size(&self) -> usize {
-        std::mem::size_of::<u32>()
+        4
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(self.0)
     }
 }
 
 impl Decode for ExitStatus {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        Self(d.take_u32be()?).into()
+        d.take_u32be().map(Self)
     }
 }
 
 impl Encode for ExitSignal {
     fn size(&self) -> usize {
-        Encode::size(&self.signal) + 1 + Encode::size(&self.message) + Encode::size(&"")
+        13 + self.signal.len() + self.message.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E)-> Option<()>  {
-        Encode::encode(&self.signal, e)?;
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_str_framed(&self.signal)?;
         e.push_u8(self.core_dumped as u8)?;
-        Encode::encode(&self.message, e)?;
-        Encode::encode(&"", e)
+        e.push_str_framed(&self.message)?;
+        e.push_str_framed("")
     }
 }
 

@@ -193,7 +193,7 @@ impl<S: Socket> DefaultTransport<S> {
     ) -> Poll<Result<(), TransportError>> {
         let buf = ready!(self.trx.tx_alloc(cx, msg.size()))?;
         let mut e = SliceEncoder::new(buf);
-        e.push_encode(msg).ok_or(TransportError::EncoderError)?;
+        e.push(msg).ok_or(TransportError::EncoderError)?;
         self.commit();
         Poll::Ready(Ok(()))
     }

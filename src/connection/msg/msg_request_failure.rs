@@ -12,7 +12,7 @@ impl Encode for MsgRequestFailure {
     fn size(&self) -> usize {
         1
     }
-    fn encode<E: Encoder>(&self, e: &mut E)-> Option<()>  {
+    fn encode<E: SshEncoder>(&self, e: &mut E)-> Option<()>  {
         e.push_u8(<Self as Message>::NUMBER)
     }
 }

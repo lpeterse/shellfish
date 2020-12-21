@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgDebug<'a> {
@@ -14,13 +14,13 @@ impl<'a> Message for MsgDebug<'a> {
 
 impl<'a> Encode for MsgDebug<'a> {
     fn size(&self) -> usize {
-        1 + 1 + Encode::size(&self.message) + Encode::size(&self.language)
+        1 + 1 + 4 + self.message.len() + 4 + self.language.len()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
-        c.push_u8(<Self as Message>::NUMBER as u8)?;
-        c.push_u8(self.always_display as u8)?;
-        Encode::encode(&self.message, c)?;
-        Encode::encode(&self.language, c)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(<Self as Message>::NUMBER as u8)?;
+        e.push_u8(self.always_display as u8)?;
+        e.push_str_framed(&self.message)?;
+        e.push_str_framed(&self.language)
     }
 }
 

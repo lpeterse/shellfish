@@ -19,11 +19,11 @@ impl<'a> Message for MsgIgnore<'a> {
 
 impl<'a> Encode for MsgIgnore<'a> {
     fn size(&self) -> usize {
-        1 + Encode::size(self.data)
+        1 + 4 + self.data.len()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
-        c.push_u8(<Self as Message>::NUMBER)?;
-        Encode::encode(self.data, c)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(<Self as Message>::NUMBER)?;
+        e.push_bytes_framed(&self.data)
     }
 }
 

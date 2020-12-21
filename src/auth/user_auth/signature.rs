@@ -22,24 +22,26 @@ pub struct SignatureData<'a> {
 
 impl<'a> Encode for SignatureData<'a> {
     fn size(&self) -> usize {
-        Encode::size(self.session_id)
-            + 1
-            + Encode::size(&self.user_name)
-            + Encode::size(&self.service_name)
-            + Encode::size(&<PublicKeyMethod as AuthMethod>::NAME)
-            + 1
-            + Encode::size(&self.identity.algorithm())
-            + Encode::size(self.identity)
+        let mut n = 0;
+        n += self.session_id.size();
+        n += 1;
+        n += 4 + self.user_name.len();
+        n += 4 + self.service_name.len();
+        n += 4 + <PublicKeyMethod as AuthMethod>::NAME.len();
+        n += 1;
+        n += 4 + self.identity.algorithm().len();
+        n += self.identity.size();
+        n
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        Encode::encode(self.session_id, e)?;
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push(self.session_id)?;
         e.push_u8(<MsgUserAuthRequest<PublicKeyMethod> as Message>::NUMBER)?;
-        Encode::encode(&self.user_name, e)?;
-        Encode::encode(&self.service_name, e)?;
-        Encode::encode(&<PublicKeyMethod as AuthMethod>::NAME, e)?;
+        e.push_str_framed(&self.user_name)?;
+        e.push_str_framed(&self.service_name)?;
+        e.push_str_framed(<PublicKeyMethod as AuthMethod>::NAME)?;
         e.push_u8(true as u8)?;
-        Encode::encode(&self.identity.algorithm(), e)?;
-        Encode::encode(self.identity, e)
+        e.push_str_framed(&self.identity.algorithm())?;
+        e.push(self.identity)
     }
 }
 

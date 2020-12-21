@@ -12,7 +12,7 @@ impl Encode for MsgFailure {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)
     }
 }

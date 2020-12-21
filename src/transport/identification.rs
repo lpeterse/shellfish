@@ -1,4 +1,4 @@
-use crate::util::assume;
+use crate::util::check;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -44,7 +44,7 @@ impl<T: AsRef<[u8]>> Encode for Identification<T> {
                 1 + self.comment.as_ref().len()
             }
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_bytes(&Self::PREFIX)?;
         e.push_bytes(&self.version.as_ref())?;
         if !self.comment.as_ref().is_empty() {
@@ -59,15 +59,15 @@ impl Decode for Identification<String> {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_bytes(&Self::PREFIX)?;
         let pred = |x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != (' ' as u8);
-        let version = d.take_while(pred)?;
+        let version = d.take_bytes_while(pred)?;
         let d_ = d.clone();
         let comment = if d.expect_u8(b' ').is_some() {
-            d.take_while(|x| (x as char).is_ascii_graphic())?
+            d.take_bytes_while(|x| (x as char).is_ascii_graphic())?
         } else {
             *d = d_;
             b""
         };
-        assume(Self::PREFIX.len() + version.len() + comment.len() < Self::MAX_LEN)?;
+        check(Self::PREFIX.len() + version.len() + comment.len() < Self::MAX_LEN)?;
         Self {
             version: String::from_utf8(version.to_vec()).ok()?,
             comment: String::from_utf8(comment.to_vec()).ok()?,
@@ -83,8 +83,8 @@ impl <T: Encode> Encode for CrLf<&T> {
     fn size(&self) -> usize {
         self.0.size() + 2
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        e.push_encode(self.0)?;
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push(self.0)?;
         e.push_u8(b'\r')?;
         e.push_u8(b'\n')?;
         Some(())

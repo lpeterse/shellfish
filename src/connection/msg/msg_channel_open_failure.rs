@@ -60,14 +60,14 @@ impl<'a> Message for MsgChannelOpenFailure {
 
 impl Encode for MsgChannelOpenFailure {
     fn size(&self) -> usize {
-        1 + 4 + 4 + Encode::size(&self.description) + Encode::size(&self.language)
+        1 + 4 + 4 + 4 + self.description.len() + 4 + self.language.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
         e.push_u32be(self.recipient_channel)?;
         e.push_u32be(self.reason.0)?;
-        Encode::encode(&self.description, e)?;
-        Encode::encode(&self.language, e)
+        e.push_str_framed(&self.description)?;
+        e.push_str_framed(&self.language)
     }
 }
 

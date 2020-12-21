@@ -9,7 +9,7 @@ use super::*;
 
 use crate::transport::Transport;
 use crate::transport::TransportExt;
-use crate::util::assume;
+use crate::util::check;
 
 use async_std::task::{ready, Context};
 use std::sync::{Arc, Mutex};
@@ -32,9 +32,9 @@ impl ChannelHandleInner {
     pub fn push_data(&mut self, data: &[u8]) -> Result<(), ConnectionError> {
         self.with_state(|x| {
             let len = data.len() as u32;
-            assume(!x.reof && !x.rclose).ok_or(ConnectionError::ChannelDataUnexpected)?;
-            assume(len <= x.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
-            assume(len <= x.lmps).ok_or(ConnectionError::ChannelMaxPacketSizeExceeded)?;
+            check(!x.reof && !x.rclose).ok_or(ConnectionError::ChannelDataUnexpected)?;
+            check(len <= x.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
+            check(len <= x.lmps).ok_or(ConnectionError::ChannelMaxPacketSizeExceeded)?;
             x.lws -= len;
             x.std.rx.write_all(data);
             x.outer_task_wake = true;
@@ -46,8 +46,8 @@ impl ChannelHandleInner {
         self.with_state(|x| match x.ext {
             Some(ref mut ext) if code == SSH_EXTENDED_DATA_STDERR && !x.reof && !x.rclose => {
                 let len = data.len() as u32;
-                assume(len <= x.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
-                assume(len <= x.lmps).ok_or(ConnectionError::ChannelMaxPacketSizeExceeded)?;
+                check(len <= x.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
+                check(len <= x.lmps).ok_or(ConnectionError::ChannelMaxPacketSizeExceeded)?;
                 x.lws -= len;
                 ext.rx.write_all(data);
                 x.outer_task_wake = true;
@@ -59,7 +59,7 @@ impl ChannelHandleInner {
 
     pub fn push_eof(&mut self) -> Result<(), ConnectionError> {
         self.with_state(|x| {
-            assume(!x.reof && !x.rclose).ok_or(ConnectionError::ChannelEofUnexpected)?;
+            check(!x.reof && !x.rclose).ok_or(ConnectionError::ChannelEofUnexpected)?;
             x.reof = true;
             x.outer_task_wake = true;
             Ok(())
@@ -68,7 +68,7 @@ impl ChannelHandleInner {
 
     pub fn push_close(&mut self) -> Result<(), ConnectionError> {
         self.with_state(|x| {
-            assume(!x.rclose).ok_or(ConnectionError::ChannelCloseUnexpected)?;
+            check(!x.rclose).ok_or(ConnectionError::ChannelCloseUnexpected)?;
             x.rclose = true;
             x.outer_task_wake = true;
             // Inner task must be woken for eventual cleanup!
@@ -79,7 +79,7 @@ impl ChannelHandleInner {
 
     pub fn push_window_adjust(&mut self, n: u32) -> Result<(), ConnectionError> {
         self.with_state(|x| {
-            assume(!x.rclose).ok_or(ConnectionError::ChannelWindowAdjustUnexpected)?;
+            check(!x.rclose).ok_or(ConnectionError::ChannelWindowAdjustUnexpected)?;
             if (n as u64 + x.rws as u64) > (u32::MAX as u64) {
                 return Err(ConnectionError::ChannelWindowAdjustOverflow);
             }

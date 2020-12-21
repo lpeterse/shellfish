@@ -17,7 +17,7 @@ impl<'a> Encode for MsgChannelOpenConfirmation<'a> {
     fn size(&self) -> usize {
         1 + 4 + 4 + 4 + 4 + self.specific.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
         e.push_u32be(self.recipient_channel)?;
         e.push_u32be(self.sender_channel)?;
@@ -35,7 +35,7 @@ impl<'a> DecodeRef<'a> for MsgChannelOpenConfirmation<'a> {
             sender_channel: d.take_u32be()?,
             initial_window_size: d.take_u32be()?,
             maximum_packet_size: d.take_u32be()?,
-            specific: d.take_all()?,
+            specific: d.take_bytes_all()?,
         }
         .into()
     }

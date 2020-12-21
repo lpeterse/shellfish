@@ -351,7 +351,7 @@ mod tests {
         fn size(&self) -> usize {
             1
         }
-        fn encode<E: Encoder>(&self, e: &mut E) {
+        fn encode<E: SshEncoder>(&self, e: &mut E) {
             e.push_u8(1);
         }
     }
@@ -362,7 +362,7 @@ mod tests {
         fn size(&self) -> usize {
             8
         }
-        fn encode<E: Encoder>(&self, e: &mut E) {
+        fn encode<E: SshEncoder>(&self, e: &mut E) {
             e.push_u8(1);
             e.push_u8(2);
             e.push_u8(3);
@@ -380,7 +380,7 @@ mod tests {
         fn size(&self) -> usize {
             16
         }
-        fn encode<E: Encoder>(&self, e: &mut E) {
+        fn encode<E: SshEncoder>(&self, e: &mut E) {
             e.push_u8(1);
             e.push_u8(2);
             e.push_u8(3);

@@ -2,7 +2,7 @@ use super::channel::*;
 use super::*;
 
 use crate::transport::{DisconnectReason, TransportError};
-use crate::util::assume;
+use crate::util::check;
 use crate::transport::TransportExt;
 
 use async_std::task::{ready, Context, Poll, Waker};
@@ -518,7 +518,7 @@ impl ConnectionState {
 
     fn check_resource_exhaustion(&self) -> Result<(), ConnectionError> {
         let exhausted = self.queued() >= self.config.queued_max_count as usize;
-        assume(!exhausted).ok_or(ConnectionError::ResourceExhaustion)
+        check(!exhausted).ok_or(ConnectionError::ResourceExhaustion)
     }
 }
 

@@ -19,11 +19,10 @@ impl AsRef<[u8]> for SessionId {
 
 impl Encode for SessionId {
     fn size(&self) -> usize {
-        std::mem::size_of::<u32>() + std::mem::size_of::<Self>()
+        36
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u32be(std::mem::size_of::<Self>() as u32)?;
-        e.push_bytes(&self.as_ref())
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_bytes_framed(self.0.as_ref())
     }
 }
 

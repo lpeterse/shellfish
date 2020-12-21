@@ -2,21 +2,13 @@ use crate::util::codec::*;
 
 pub struct Frame<'a, T>(pub &'a T);
 
-/*
-impl<'a, T> Frame<'a, T> {
-    pub fn new(payload: &'a T) -> Self {
-        Self { payload }
-    }
-}
-*/
-
 impl<'a, T: Encode> Encode for Frame<'a, T> {
     fn size(&self) -> usize {
         4 + self.0.size()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u32be(self.0.size() as u32)?;
-        self.0.encode(e)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_usize(self.0.size())?;
+        e.push(self.0)
     }
 }
 

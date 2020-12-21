@@ -12,7 +12,7 @@ impl Encode for MsgSuccess {
     fn size(&self) -> usize {
         1
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, c: &mut E) -> Option<()> {
         c.push_u8(<Self as Message>::NUMBER as u8)
     }
 }

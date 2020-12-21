@@ -55,7 +55,7 @@ impl Encode for SessionRequest {
             Self::SubsystemRequest(x) => x.size(),
         }
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
+    fn encode<E: SshEncoder>(&self, e: &mut E) {
         match self {
             Self::EnvRequest(x) => x.encode(e),
             Self::PtyRequest(x) => x.encode(e),
@@ -82,7 +82,7 @@ impl Encode for EnvRequest {
     fn size(&self) -> usize {
         Encode::size(&self.name) + Encode::size(&self.value)
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
+    fn encode<E: SshEncoder>(&self, e: &mut E) {
         Encode::encode(&self.name, e);
         Encode::encode(&self.value, e);
     }
@@ -101,7 +101,7 @@ impl Encode for PtyRequest {
     fn size(&self) -> usize {
         0
     }
-    fn encode<E: Encoder>(&self, _e: &mut E) {
+    fn encode<E: SshEncoder>(&self, _e: &mut E) {
         // FIXME
     }
 }
@@ -121,7 +121,7 @@ impl Encode for ExecRequest {
     fn size(&self) -> usize {
         Encode::size(&self.command)
     }
-    fn encode<E: Encoder>(&self, e: &mut E) {
+    fn encode<E: SshEncoder>(&self, e: &mut E) {
         Encode::encode(&self.command, e)
     }
 }
@@ -139,7 +139,7 @@ impl Encode for ShellRequest {
     fn size(&self) -> usize {
         0
     }
-    fn encode<E: Encoder>(&self, _e: &mut E) {
+    fn encode<E: SshEncoder>(&self, _e: &mut E) {
         // Nothing to do
     }
 }
@@ -159,7 +159,7 @@ impl Encode for SubsystemRequest {
     fn size(&self) -> usize {
         0
     }
-    fn encode<E: Encoder>(&self, _e: &mut E) {
+    fn encode<E: SshEncoder>(&self, _e: &mut E) {
         // FIXME
     }
 }

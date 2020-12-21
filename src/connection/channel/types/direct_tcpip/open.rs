@@ -17,12 +17,17 @@ pub struct DirectTcpIpOpen {
 
 impl Encode for DirectTcpIpOpen {
     fn size(&self) -> usize {
-        self.dst_host.size() + 4 + self.src_addr.to_string().size() + 4
+        let mut n = 0;
+        n += 4 + self.dst_host.len();
+        n += 4;
+        n += 4 + self.src_addr.to_string().len();
+        n += 4;
+        n
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        e.push_encode(&self.dst_host)?;
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_str_framed(&self.dst_host)?;
         e.push_u32be(self.dst_port as u32)?;
-        e.push_encode(&self.src_addr.to_string())?;
+        e.push_str_framed(&self.src_addr.to_string())?;
         e.push_u32be(self.src_port as u32)
     }
 }

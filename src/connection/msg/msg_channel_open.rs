@@ -30,9 +30,9 @@ impl Encode for MsgChannelOpen<&'static str> {
     fn size(&self) -> usize {
         17 + self.name.len() + self.data.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
-        e.push_encode(&self.name)?;
+        e.push_str_framed(&self.name)?;
         e.push_u32be(self.sender_channel)?;
         e.push_u32be(self.initial_window_size)?;
         e.push_u32be(self.maximum_packet_size)?;
@@ -48,7 +48,7 @@ impl Decode for MsgChannelOpen {
             sender_channel: d.take_u32be()?,
             initial_window_size: d.take_u32be()?,
             maximum_packet_size: d.take_u32be()?,
-            data: d.take_all()?.into(),
+            data: d.take_bytes_all()?.into(),
         }
         .into()
     }

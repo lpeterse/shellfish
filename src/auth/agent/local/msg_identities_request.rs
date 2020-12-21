@@ -1,8 +1,8 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug, PartialEq)]
-pub struct MsgIdentitiesRequest {}
+pub struct MsgIdentitiesRequest;
 
 impl Message for MsgIdentitiesRequest {
     const NUMBER: u8 = 11;
@@ -12,7 +12,7 @@ impl Encode for MsgIdentitiesRequest {
     fn size(&self) -> usize {
         std::mem::size_of::<u8>()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)
     }
 }
@@ -20,7 +20,7 @@ impl Encode for MsgIdentitiesRequest {
 impl Decode for MsgIdentitiesRequest {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {}.into()
+        Some(Self)
     }
 }
 
@@ -30,14 +30,14 @@ mod tests {
 
     #[test]
     fn test_size_01() {
-        assert_eq!(1, Encode::size(& MsgIdentitiesRequest {}));
+        assert_eq!(1, Encode::size(&MsgIdentitiesRequest {}));
     }
 
     #[test]
     fn test_encode_01() {
         let mut buf = [0];
         let mut enc = SliceEncoder::new(buf.as_mut());
-        assert_eq!(Encode::encode(& MsgIdentitiesRequest {}, &mut enc), Some(()));
+        assert_eq!(Encode::encode(&MsgIdentitiesRequest {}, &mut enc), Some(()));
         assert_eq!([11], buf);
     }
 

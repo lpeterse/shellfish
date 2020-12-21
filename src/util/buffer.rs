@@ -8,7 +8,7 @@ use std::ops::Range;
 ///
 /// After consuming the whole buffer (window empty), the window is automatically reset to the
 /// leftmost position. When the window is non-empty, `pushback` can be used to copy all data to
-/// the left. The first scenario is very cheap and assumed to be very likely.
+/// the left. The first scenario is very cheap and checkd to be very likely.
 ///
 /// The window may only be extended from the right window position to the buffer end position.
 /// In case more space is required, you should try the following in this order:

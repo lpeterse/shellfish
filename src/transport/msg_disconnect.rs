@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgDisconnect<'a> {
@@ -24,15 +24,17 @@ impl<'a> Message for MsgDisconnect<'a> {
 
 impl<'a> Encode for MsgDisconnect<'a> {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.reason)
-            + Encode::size(&self.description)
-            + Encode::size(&self.language)
+        let mut n = 1;
+        n += self.reason.size();
+        n += 4 + self.description.len();
+        n += 4 + self.language.len();
+        n
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
-        c.push_u8(<Self as Message>::NUMBER)?;
-        Encode::encode(&self.reason, c)?;
-        Encode::encode(&self.description, c)?;
-        Encode::encode(&self.language, c)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(<Self as Message>::NUMBER)?;
+        e.push(&self.reason)?;
+        e.push_str_framed(&self.description)?;
+        e.push_str_framed(&self.language)
     }
 }
 
@@ -79,7 +81,7 @@ impl Encode for DisconnectReason {
     fn size(&self) -> usize {
         4
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, c: &mut E) -> Option<()> {
         c.push_u32be(self.0)
     }
 }
@@ -93,7 +95,9 @@ impl<'a> DecodeRef<'a> for DisconnectReason {
 impl std::fmt::Debug for DisconnectReason {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            &Self::HOST_NOT_ALLOWED_TO_CONNECT => write!(f, "DisconnectReason::HOST_NOT_ALLOWED_TO_CONNECT"),
+            &Self::HOST_NOT_ALLOWED_TO_CONNECT => {
+                write!(f, "DisconnectReason::HOST_NOT_ALLOWED_TO_CONNECT")
+            }
             &Self::PROTOCOL_ERROR => write!(f, "DisconnectReason::PROTOCOL_ERROR"),
             &Self::KEY_EXCHANGE_FAILED => write!(f, "DisconnectReason::KEY_EXCHANGE_FAILED"),
             &Self::RESERVED => write!(f, "DisconnectReason::RESERVED"),
@@ -103,7 +107,9 @@ impl std::fmt::Debug for DisconnectReason {
             &Self::PROTOCOL_VERSION_NOT_SUPPORTED => {
                 write!(f, "DisconnectReason::PROTOCOL_VERSION_NOT_SUPPORTED")
             }
-            &Self::HOST_KEY_NOT_VERIFIABLE => write!(f, "DisconnectReason::HOST_KEY_NOT_VERIFIABLE"),
+            &Self::HOST_KEY_NOT_VERIFIABLE => {
+                write!(f, "DisconnectReason::HOST_KEY_NOT_VERIFIABLE")
+            }
             &Self::CONNECTION_LOST => write!(f, "DisconnectReason::CONNECTION_LOST"),
             &Self::BY_APPLICATION => write!(f, "DisconnectReason::BY_APPLICATION"),
             &Self::TOO_MANY_CONNECTIONS => write!(f, "DisconnectReason::TOO_MANY_CONNECTIONS"),
@@ -162,8 +168,14 @@ mod tests {
             "DisconnectReason::KEY_EXCHANGE_FAILED",
             format!("{:?}", DisconnectReason::KEY_EXCHANGE_FAILED)
         );
-        assert_eq!("DisconnectReason::RESERVED", format!("{:?}", DisconnectReason::RESERVED));
-        assert_eq!("DisconnectReason::MAC_ERROR", format!("{:?}", DisconnectReason::MAC_ERROR));
+        assert_eq!(
+            "DisconnectReason::RESERVED",
+            format!("{:?}", DisconnectReason::RESERVED)
+        );
+        assert_eq!(
+            "DisconnectReason::MAC_ERROR",
+            format!("{:?}", DisconnectReason::MAC_ERROR)
+        );
         assert_eq!(
             "DisconnectReason::COMPRESSION_ERROR",
             format!("{:?}", DisconnectReason::COMPRESSION_ERROR)
@@ -204,6 +216,9 @@ mod tests {
             "DisconnectReason::ILLEGAL_USER_NAME",
             format!("{:?}", DisconnectReason::ILLEGAL_USER_NAME)
         );
-        assert_eq!("DisconnectReason(16)", format!("{:?}", DisconnectReason(16)));
+        assert_eq!(
+            "DisconnectReason(16)",
+            format!("{:?}", DisconnectReason(16))
+        );
     }
 }

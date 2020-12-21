@@ -17,6 +17,18 @@ pub enum SignatureError {
 }
 
 impl Signature {
+    pub fn new(algo: String, data: Vec<u8>) -> Self {
+        Self { algo, data }
+    }
+
+    pub fn algo(&self) -> &str {
+        &self.algo
+    }
+
+    pub fn data(&self) -> &[u8] {
+        &self.data
+    }
+
     pub fn verify(&self, id: &Identity, data: &[u8]) -> Result<(), SignatureError> {
         let e = SignatureError::InvalidSignature;
         match self.algo.as_str() {
@@ -38,31 +50,28 @@ impl Signature {
     }
 }
 
+// FIXME: Double framing?
 impl Encode for Signature {
     fn size(&self) -> usize {
         12 + self.algo.len() + self.data.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         let alen = self.algo.len() as u32;
         let slen = self.data.len() as u32;
         e.push_u32be(8 + alen + slen)?;
-        e.push_u32be(alen)?;
-        e.push_bytes(&self.algo.as_bytes())?;
-        e.push_u32be(slen)?;
-        e.push_bytes(&self.data.as_slice())
+        e.push_str_framed(&self.algo)?;
+        e.push_bytes_framed(&self.data)
     }
 }
 
 impl Decode for Signature {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.isolate_u32be(|x| {
-            Some(Self {
-                algo: Decode::decode(x)?,
-                data: {
-                    let bytes = x.take_u32be()?;
-                    x.take_bytes(bytes as usize)?.into()
-                },
-            })
-        })
+        let len = d.take_u32be()?;
+        let innr = d.take_bytes(len as usize)?;
+        let innr = &mut SliceDecoder::new(innr);
+        let algo = Decode::decode(innr)?;
+        let data = DecodeRef::decode(innr).map(|x: &[u8]| Vec::from(x))?;
+        innr.expect_eoi()?;
+        Some(Self { algo, data })
     }
 }

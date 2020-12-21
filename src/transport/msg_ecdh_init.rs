@@ -21,11 +21,11 @@ where
     A::PublicKey: Encode,
 {
     fn size(&self) -> usize {
-        std::mem::size_of::<u8>() + Encode::size(&self.dh_public)
+        1 + self.dh_public.size()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
-        c.push_u8(<Self as Message>::NUMBER)?;
-        Encode::encode(&self.dh_public, c)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(<Self as Message>::NUMBER)?;
+        e.push(&self.dh_public)
     }
 }
 

@@ -1,7 +1,7 @@
 use super::stream::Stream;
 use super::*;
 
-use crate::util::assume;
+use crate::util::check;
 use crate::util::buffer::Buffer;
 
 use async_std::task::Context;
@@ -56,7 +56,7 @@ impl ChannelState {
             rclose: false,
 
             std: Stream::default(),
-            ext: assume(ext).map(|_| Box::new(Stream::default())),
+            ext: check(ext).map(|_| Box::new(Stream::default())),
 
             inner_task_wake: false,
             inner_task_waker: None,

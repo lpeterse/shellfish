@@ -58,13 +58,13 @@ impl Agent for LocalAgent {
         })
     }
 
-    fn signature(&self, identity: &Identity, data: &[u8], flags: u32) -> AgentFuture<Option<Signature>> {
+    fn signature(&self, id: &Identity, data: &[u8], flags: u32) -> AgentFuture<Option<Signature>> {
         let self_ = self.clone();
-        let identity = identity.clone();
+        let id = id.clone();
         let data = Vec::from(data);
         Box::pin(async move {
             let msg = MsgSignRequest {
-                identity: &identity,
+                id: &id,
                 data: &data,
                 flags,
             };

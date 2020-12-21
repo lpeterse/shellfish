@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgServiceAccept<T = String>(T);
@@ -10,18 +10,18 @@ impl Message for MsgServiceAccept {
 
 impl Encode for MsgServiceAccept<&'static str> {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.0)
+        1 + 4 + self.0.len()
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
-        c.push_u8(MsgServiceAccept::NUMBER)?;
-        Encode::encode(&self.0, c)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_u8(MsgServiceAccept::NUMBER)?;
+        e.push_str_framed(&self.0)
     }
 }
 
 impl Decode for MsgServiceAccept {
     fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self(Decode::decode(d)?).into()
+        Decode::decode(d).map(Self)
     }
 }
 
@@ -32,10 +32,7 @@ mod tests {
     #[test]
     fn test_debug_01() {
         let msg = MsgServiceAccept(&"service");
-        assert_eq!(
-            "MsgServiceAccept(\"service\")",
-            format!("{:?}", msg)
-        );
+        assert_eq!("MsgServiceAccept(\"service\")", format!("{:?}", msg));
     }
 
     #[test]

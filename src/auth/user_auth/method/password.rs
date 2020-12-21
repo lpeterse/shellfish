@@ -9,10 +9,10 @@ impl<'a> AuthMethod for PasswordMethod {
 
 impl Encode for PasswordMethod {
     fn size(&self) -> usize {
-        Encode::size(&self.0)
+        4 + self.0.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
-        Encode::encode(&self.0, e)
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
+        e.push_str_framed(&self.0)
     }
 }
 

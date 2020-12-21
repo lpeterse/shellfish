@@ -1,5 +1,5 @@
 mod agent;
-mod certificate;
+mod cert;
 mod identity;
 mod signature;
 mod user_auth;
@@ -9,7 +9,7 @@ pub mod ssh_ed25519_cert;
 pub mod ssh_rsa;
 
 pub use self::agent::*;
-pub use self::certificate::*;
+pub use self::cert::*;
 pub use self::identity::*;
 pub use self::signature::*;
 pub use self::user_auth::*;

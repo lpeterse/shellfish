@@ -14,7 +14,7 @@ impl Encode for MsgUnimplemented {
     fn size(&self) -> usize {
         1 + 4
     }
-    fn encode<E: Encoder>(&self, c: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, c: &mut E) -> Option<()> {
         c.push_u8(<Self as Message>::NUMBER)?;
         c.push_u32be(self.packet_number)
     }

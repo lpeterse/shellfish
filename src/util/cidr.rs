@@ -1,4 +1,4 @@
-use crate::util::assume;
+use crate::util::check;
 use std::net::IpAddr;
 
 /// Classless Inter-Domain Routing (CIDR) subnet calculation.
@@ -17,19 +17,19 @@ impl<'a> Cidr<'a> {
             let mut x = cidr.split('/');
             let net = x.next().map(|s| s.parse::<IpAddr>().ok()).flatten()?;
             let sfx = x.next().map(|s| s.parse::<u8>().ok()).flatten()?;
-            assume(x.next().is_none())?;
+            check(x.next().is_none())?;
             match (net, addr) {
                 (IpAddr::V4(net), IpAddr::V4(adr)) if sfx <= 32 => {
                     let msk = u32::MAX.checked_shl(32 - u32::from(sfx)).unwrap_or(0);
                     let net = u32::from_be_bytes(net.octets());
                     let adr = u32::from_be_bytes(adr.octets());
-                    assume(adr & msk == net & msk)
+                    check(adr & msk == net & msk)
                 }
                 (IpAddr::V6(net), IpAddr::V6(adr)) if sfx <= 128 => {
                     let msk = u128::MAX.checked_shl(128 - u32::from(sfx)).unwrap_or(0);
                     let net = u128::from_be_bytes(net.octets());
                     let adr = u128::from_be_bytes(adr.octets());
-                    assume(adr & msk == net & msk)
+                    check(adr & msk == net & msk)
                 }
                 _ => None,
             }

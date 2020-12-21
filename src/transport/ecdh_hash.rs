@@ -21,21 +21,21 @@ pub struct KexEcdhHash<'a, A: EcdhAlgorithm> {
 
 impl<'a, A: EcdhAlgorithm> KexEcdhHash<'a, A> {
     #[must_use]
-    pub fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    pub fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(Encode::size(self.client_identification) as u32)?;
-        e.push_encode(self.client_identification)?;
+        e.push(self.client_identification)?;
         e.push_u32be(Encode::size(self.server_identification) as u32)?;
-        e.push_encode(self.server_identification)?;
+        e.push(self.server_identification)?;
         e.push_u32be(Encode::size(self.client_kex_init) as u32)?;
-        e.push_encode(self.client_kex_init)?;
+        e.push(self.client_kex_init)?;
         e.push_u32be(Encode::size(self.server_kex_init) as u32)?;
-        e.push_encode(self.server_kex_init)?;
-        e.push_encode(self.server_host_key)?;
+        e.push(self.server_kex_init)?;
+        e.push(self.server_host_key)?;
         e.push_u32be(A::public_as_ref(self.dh_client_key).len() as u32)?;
         e.push_bytes(&A::public_as_ref(self.dh_client_key))?;
         e.push_u32be(A::public_as_ref(self.dh_server_key).len() as u32)?;
         e.push_bytes(&A::public_as_ref(self.dh_server_key))?;
-        e.push_encode(&MPInt(self.dh_secret))
+        e.push(&MPInt(self.dh_secret))
     }
 
     pub fn sha256(&self) -> SessionId {

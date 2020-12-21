@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug)]
 pub(crate) struct MsgGlobalRequest {
@@ -24,11 +24,11 @@ impl Message for MsgGlobalRequest {
 
 impl Encode for MsgGlobalRequest {
     fn size(&self) -> usize {
-        1 + Encode::size(&self.name) + 1 + self.data.len()
+        1 + 4 + self.name.len() + 1 + self.data.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
-        Encode::encode(&self.name, e)?;
+        e.push_str_framed(&self.name)?;
         e.push_u8(self.want_reply as u8)?;
         e.push_bytes(&self.data)
     }
@@ -40,7 +40,7 @@ impl Decode for MsgGlobalRequest {
         Self {
             name: DecodeRef::decode(d)?,
             want_reply: d.take_u8()? != 0,
-            data: d.take_all()?.into(),
+            data: d.take_bytes_all()?.into(),
         }
         .into()
     }

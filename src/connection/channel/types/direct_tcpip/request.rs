@@ -13,7 +13,7 @@ impl Encode for DirectTcpIpRequest {
         unreachable!()
     }
 
-    fn encode<E: Encoder>(&self, _e: &mut E) {
+    fn encode<E: SshEncoder>(&self, _e: &mut E) {
         unreachable!()
     }
 }

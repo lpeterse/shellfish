@@ -20,7 +20,7 @@ impl Encode for MsgChannelEof {
     fn size(&self) -> usize {
         1 + 4
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)
     }

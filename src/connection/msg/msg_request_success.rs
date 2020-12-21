@@ -20,7 +20,7 @@ impl<'a> Encode for MsgRequestSuccess<'a> {
     fn size(&self) -> usize {
         1 + self.data.len()
     }
-    fn encode<E: Encoder>(&self, e: &mut E) -> Option<()> {
+    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_bytes(&self.data)
     }
@@ -30,7 +30,7 @@ impl<'a> DecodeRef<'a> for MsgRequestSuccess<'a> {
     fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            data: d.take_all()?,
+            data: d.take_bytes_all()?,
         }
         .into()
     }
