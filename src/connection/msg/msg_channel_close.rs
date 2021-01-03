@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
 pub(crate) struct MsgChannelClose {
@@ -16,23 +16,19 @@ impl Message for MsgChannelClose {
     const NUMBER: u8 = 97;
 }
 
-impl Encode for MsgChannelClose {
-    fn size(&self) -> usize {
-        1 + 4
-    }
+impl SshEncode for MsgChannelClose {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(<Self as Message>::NUMBER as u8)?;
+        e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)
     }
 }
 
-impl Decode for MsgChannelClose {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgChannelClose {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
+        Some(Self {
             recipient_channel: d.take_u32be()?,
-        }
-        .into()
+        })
     }
 }
 
@@ -56,13 +52,13 @@ mod tests {
         let msg = MsgChannelClose {
             recipient_channel: 23,
         };
-        assert_eq!(&[97, 0, 0, 0, 23][..], &SliceEncoder::encode(&msg)[..]);
+        assert_eq!(&[97, 0, 0, 0, 23][..], &SshCodec::encode(&msg).unwrap()[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 5] = [97, 0, 0, 0, 23];
-        let msg: MsgChannelClose = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgChannelClose = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
     }
 }

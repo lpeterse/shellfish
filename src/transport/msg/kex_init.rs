@@ -1,7 +1,11 @@
-use super::*;
-use crate::auth::*;
-use crate::transport::Message;
+use super::super::config::TransportConfig;
+use super::super::cookie::KexCookie;
+use super::super::crypto::*;
+use super::super::kex::intersection;
+use super::Message;
+use crate::identity::*;
 use crate::util::codec::*;
+use std::sync::Arc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct MsgKexInit<T = String> {
@@ -63,42 +67,27 @@ impl<T> Message for MsgKexInit<T> {
     const NUMBER: u8 = 20;
 }
 
-impl<T: AsRef<[u8]>> Encode for MsgKexInit<T> {
-    fn size(&self) -> usize {
-        1 + 16
-            + 1
-            + 4
-            + NameList::size(&self.kex_algorithms)
-            + NameList::size(&self.server_host_key_algorithms)
-            + NameList::size(&self.encryption_algorithms_client_to_server)
-            + NameList::size(&self.encryption_algorithms_server_to_client)
-            + NameList::size(&self.mac_algorithms_client_to_server)
-            + NameList::size(&self.mac_algorithms_server_to_client)
-            + NameList::size(&self.compression_algorithms_client_to_server)
-            + NameList::size(&self.compression_algorithms_server_to_client)
-            + NameList::size(&self.languages_client_to_server)
-            + NameList::size(&self.languages_server_to_client)
-    }
+impl<T: AsRef<str>> SshEncode for MsgKexInit<T> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_bytes(self.cookie.as_ref())?;
-        NameList::encode(&self.kex_algorithms, e)?;
-        NameList::encode(&self.server_host_key_algorithms, e)?;
-        NameList::encode(&self.encryption_algorithms_client_to_server, e)?;
-        NameList::encode(&self.encryption_algorithms_server_to_client, e)?;
-        NameList::encode(&self.mac_algorithms_client_to_server, e)?;
-        NameList::encode(&self.mac_algorithms_server_to_client, e)?;
-        NameList::encode(&self.compression_algorithms_client_to_server, e)?;
-        NameList::encode(&self.compression_algorithms_server_to_client, e)?;
-        NameList::encode(&self.languages_client_to_server, e)?;
-        NameList::encode(&self.languages_server_to_client, e)?;
+        e.push_name_list(&self.kex_algorithms)?;
+        e.push_name_list(&self.server_host_key_algorithms)?;
+        e.push_name_list(&self.encryption_algorithms_client_to_server)?;
+        e.push_name_list(&self.encryption_algorithms_server_to_client)?;
+        e.push_name_list(&self.mac_algorithms_client_to_server)?;
+        e.push_name_list(&self.mac_algorithms_server_to_client)?;
+        e.push_name_list(&self.compression_algorithms_client_to_server)?;
+        e.push_name_list(&self.compression_algorithms_server_to_client)?;
+        e.push_name_list(&self.languages_client_to_server)?;
+        e.push_name_list(&self.languages_server_to_client)?;
         e.push_u8(self.first_packet_follows as u8)?;
         e.push_u32be(0)
     }
 }
 
-impl Decode for MsgKexInit {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgKexInit {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         let r = Self {
             cookie: KexCookie({
@@ -106,16 +95,16 @@ impl Decode for MsgKexInit {
                 d.take_bytes_into(&mut x)?;
                 x
             }),
-            kex_algorithms: NameList::decode_string(d)?,
-            server_host_key_algorithms: NameList::decode_string(d)?,
-            encryption_algorithms_client_to_server: NameList::decode_string(d)?,
-            encryption_algorithms_server_to_client: NameList::decode_string(d)?,
-            mac_algorithms_client_to_server: NameList::decode_string(d)?,
-            mac_algorithms_server_to_client: NameList::decode_string(d)?,
-            compression_algorithms_client_to_server: NameList::decode_string(d)?,
-            compression_algorithms_server_to_client: NameList::decode_string(d)?,
-            languages_client_to_server: NameList::decode_string(d)?,
-            languages_server_to_client: NameList::decode_string(d)?,
+            kex_algorithms: d.take_name_list()?.map(Into::into).collect(),
+            server_host_key_algorithms: d.take_name_list()?.map(Into::into).collect(),
+            encryption_algorithms_client_to_server: d.take_name_list()?.map(Into::into).collect(),
+            encryption_algorithms_server_to_client: d.take_name_list()?.map(Into::into).collect(),
+            mac_algorithms_client_to_server: d.take_name_list()?.map(Into::into).collect(),
+            mac_algorithms_server_to_client: d.take_name_list()?.map(Into::into).collect(),
+            compression_algorithms_client_to_server: d.take_name_list()?.map(Into::into).collect(),
+            compression_algorithms_server_to_client: d.take_name_list()?.map(Into::into).collect(),
+            languages_client_to_server: d.take_name_list()?.map(Into::into).collect(),
+            languages_server_to_client: d.take_name_list()?.map(Into::into).collect(),
             first_packet_follows: d.take_u8().map(|x| x != 0)?,
         };
         d.take_u32be()?;
@@ -198,7 +187,7 @@ mod tests {
             0, 5, 99, 111, 109, 112, 50, 0, 0, 0, 5, 108, 97, 110, 103, 49, 0, 0, 0, 11, 108, 97,
             110, 103, 50, 44, 108, 97, 110, 103, 51, 0, 0, 0, 0, 0,
         ];
-        let actual = SliceEncoder::encode(&msg);
+        let actual = SshCodec::encode(&msg).unwrap();
         assert_eq!(&expected[..], &actual[..]);
     }
 
@@ -225,6 +214,6 @@ mod tests {
             0, 5, 99, 111, 109, 112, 50, 0, 0, 0, 5, 108, 97, 110, 103, 49, 0, 0, 0, 11, 108, 97,
             110, 103, 50, 44, 108, 97, 110, 103, 51, 0, 0, 0, 0, 0,
         ];
-        assert_eq!(msg, SliceDecoder::decode(&bin[..]).unwrap());
+        assert_eq!(msg, SshCodec::decode(&bin[..]).unwrap());
     }
 }

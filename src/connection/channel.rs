@@ -19,15 +19,15 @@ pub(crate) use self::list::ChannelList;
 
 use super::ChannelOpenFailure;
 use super::ConnectionError;
-use crate::util::codec::{Decode, Encode};
+use crate::util::codec::{SshDecode, SshEncode};
 use crate::util::oneshot;
 
 use async_std::task::Poll;
 use std::sync::Arc;
 
 pub trait Channel: Unpin + Sized {
-    type Open: std::fmt::Debug + Clone + Encode + Decode + Unpin;
-    //    type Request: ChannelRequest + Encode;
+    type Open: std::fmt::Debug + Clone + SshEncode + SshDecode + Unpin;
+    //    type Request: ChannelRequest + SshEncode;
 
     const NAME: &'static str;
 

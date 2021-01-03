@@ -1,6 +1,7 @@
 use super::ssh_ed25519::*;
 use super::*;
 use std::convert::TryFrom;
+use crate::util::codec::*;
 
 /// A public key signature.
 #[derive(Clone, Debug, PartialEq)]
@@ -51,10 +52,7 @@ impl Signature {
 }
 
 // FIXME: Double framing?
-impl Encode for Signature {
-    fn size(&self) -> usize {
-        12 + self.algo.len() + self.data.len()
-    }
+impl SshEncode for Signature {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         let alen = self.algo.len() as u32;
         let slen = self.data.len() as u32;
@@ -64,13 +62,13 @@ impl Encode for Signature {
     }
 }
 
-impl Decode for Signature {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for Signature {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         let len = d.take_u32be()?;
         let innr = d.take_bytes(len as usize)?;
-        let innr = &mut SliceDecoder::new(innr);
-        let algo = Decode::decode(innr)?;
-        let data = DecodeRef::decode(innr).map(|x: &[u8]| Vec::from(x))?;
+        let innr = &mut RefDecoder::new(innr);
+        let algo = innr.take_str_framed().map(String::from)?;
+        let data = innr.take_bytes_framed().map(Vec::from)?;
         innr.expect_eoi()?;
         Some(Self { algo, data })
     }

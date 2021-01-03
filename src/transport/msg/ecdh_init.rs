@@ -1,5 +1,6 @@
-use super::*;
-use crate::transport::Message;
+use super::super::ecdh::EcdhAlgorithm;
+use super::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct MsgKexEcdhInit<A: EcdhAlgorithm> {
@@ -16,29 +17,25 @@ impl<A: EcdhAlgorithm> Message for MsgKexEcdhInit<A> {
     const NUMBER: u8 = 30;
 }
 
-impl<A: EcdhAlgorithm> Encode for MsgKexEcdhInit<A>
+impl<A: EcdhAlgorithm> SshEncode for MsgKexEcdhInit<A>
 where
-    A::PublicKey: Encode,
+    A::PublicKey: SshEncode,
 {
-    fn size(&self) -> usize {
-        1 + self.dh_public.size()
-    }
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push(&self.dh_public)
     }
 }
 
-impl<A: EcdhAlgorithm> Decode for MsgKexEcdhInit<A>
+impl<A: EcdhAlgorithm> SshDecode for MsgKexEcdhInit<A>
 where
-    A::PublicKey: Decode,
+    A::PublicKey: SshDecode,
 {
-    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
+    fn decode<'a, D: SshDecoder<'a>>(c: &mut D) -> Option<Self> {
         c.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
-            dh_public: DecodeRef::decode(c)?,
-        }
-        .into()
+        Some(Self {
+            dh_public: SshDecodeRef::decode(c)?,
+        })
     }
 }
 
@@ -71,12 +68,12 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(&[30][..], &SliceEncoder::encode(&msg)[..]);
+        assert_eq!(&[30][..], &SshCodec::encode(&msg).unwrap()[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(&Some(msg), &SliceDecoder::decode(&[30][..]));
+        assert_eq!(&Some(msg), &SshCodec::decode(&[30][..]));
     }
 }

@@ -1,164 +1,62 @@
 mod decoder;
 mod encoder;
+mod ref_decoder;
+mod ref_encoder;
+mod size_encoder;
 mod ssh_decode;
+mod ssh_decoder;
 mod ssh_encode;
 mod ssh_encoder;
 
 pub use self::decoder::*;
 pub use self::encoder::*;
+pub use self::ref_decoder::*;
+pub use self::ref_encoder::*;
+pub use self::size_encoder::*;
 pub use self::ssh_decode::*;
+pub use self::ssh_decoder::*;
 pub use self::ssh_encode::*;
 pub use self::ssh_encoder::*;
 
-use crate::util::check;
+/// Utility type for the encoding of SSH data structures as specified in RFC 4251 and others.
+pub struct SshCodec;
 
-/// `List` is a wrapper around `Vec` but with different encoding rules:
-/// Instead of the number of elements, the leading u32 designates the following bytes.
-pub struct List<T>(pub Vec<T>);
+impl SshCodec {
+    /// Determine the size in bytes of the `SshEncode`d form.
+    ///
+    /// This only iterates the data structure and does not really encode it nor
+    /// does it allocate anything.
+    pub fn size<T: SshEncode>(x: &T) -> Option<usize> {
+        let mut e = SizeEncoder::new();
+        e.push(x)?;
+        Some(e.into())
+    }
 
-impl<T: Decode> Decode for List<T> {
-    fn decode<'a, D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let len = c.take_u32be()?;
-        let bytes = c.take_bytes(len as usize)?;
-        let mut vec: Vec<T> = Vec::new();
-        let mut dec = SliceDecoder::new(&bytes);
-        while let Some(s) = Decode::decode(&mut dec) {
-            vec.push(s);
-        }
-        dec.expect_eoi()?;
-        Some(Self(vec))
+    /// `SshEncode` a given structue into a `Vec<u8>`.
+    pub fn encode<T: SshEncode>(x: &T) -> Option<Vec<u8>> {
+        let size = Self::size(x)?;
+        let mut vec = Vec::with_capacity(size);
+        vec.resize(size, 0);
+        let mut e = RefEncoder::new(&mut vec);
+        e.push(x)?;
+        crate::util::check(e.is_full())?;
+        Some(vec)
     }
-}
 
-/// Like `List` but contains a reference to `Vec`.
-pub struct ListRef<'a, T>(pub &'a Vec<T>);
+    /// `SshEncode` a given structue into supplied buffer of correct size.
+    pub fn encode_into<'a, T: SshEncode>(x: &T, buf: &'a mut [u8]) -> Option<()> {
+        let mut e = RefEncoder::new(buf);
+        e.push(x)?;
+        crate::util::check(e.is_full())
+    }
 
-impl<'a, T: Encode> Encode for ListRef<'a, T> {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u32>() + self.0.iter().map(Encode::size).sum::<usize>()
-    }
-    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_usize(self.0.iter().map(Encode::size).sum::<usize>())?;
-        for x in self.0 {
-            Encode::encode(x, e)?;
-        }
-        Some(())
-    }
-}
-
-/// Certain lists in SSH (i.e. the SSH_KEX_INIT) message contain comma-separated ASCII lists.
-/// This type contains operations for handling them.
-pub enum NameList {}
-
-impl NameList {
-    pub fn size<T: AsRef<[u8]>>(vec: &Vec<T>) -> usize {
-        let mut size = std::mem::size_of::<u32>();
-        let mut names = vec.iter();
-        if let Some(name) = names.next() {
-            size += name.as_ref().len();
-            for name in names {
-                size += 1 + name.as_ref().len();
-            }
-        }
-        size
-    }
-    #[must_use]
-    pub fn encode<T: AsRef<[u8]>, E: Encoder>(vec: &Vec<T>, c: &mut E) -> Option<()> {
-        c.push_u32be(NameList::size(vec) as u32 - std::mem::size_of::<u32>() as u32)?;
-        let mut names = vec.iter();
-        if let Some(name) = names.next() {
-            c.push_bytes(name.as_ref())?;
-            for name in names {
-                c.push_u8(',' as u8)?;
-                c.push_bytes(name.as_ref())?;
-            }
-        }
-        Some(())
-    }
-    pub fn decode_str<'a, D: Decoder<'a>>(c: &mut D) -> Option<Vec<&'a str>> {
-        let len = c.take_u32be()?;
-        let mut vec = Vec::new();
-        if len > 0 {
-            let bytes: &'a [u8] = c.take_bytes(len as usize)?;
-            for name in bytes.split(|c| c == &(',' as u8)) {
-                vec.push(std::str::from_utf8(name).ok()?);
-            }
-        }
-        vec.into()
-    }
-    pub fn decode_string<'a, D: Decoder<'a>>(c: &mut D) -> Option<Vec<String>> {
-        let len = c.take_u32be()?;
-        let mut vec = Vec::new();
-        if len > 0 {
-            let bytes: &'a [u8] = c.take_bytes(len as usize)?;
-            for name in bytes.split(|c| c == &(',' as u8)) {
-                vec.push(String::from_utf8(Vec::from(name)).ok()?);
-            }
-        }
-        vec.into()
-    }
-}
-
-/// FIXME: How does it relate to BigUint?
-/// FIXME: Unit tests!
-///
-/// RFC 4251:
-/// "Represents multiple precision integers in two's complement format,
-/// stored as a string, 8 bits per byte, MSB first.  Negative numbers
-/// have the value 1 as the most significant bit of the first byte of
-/// the data partition.  If the most significant bit would be set for
-/// a positive number, the number MUST be preceded by a zero byte.
-/// Unnecessary leading bytes with the value 0 or 255 MUST NOT be
-/// included.  The value zero MUST be stored as a string with zero
-/// bytes of data."
-pub struct MPInt<'a>(pub &'a [u8]);
-
-impl<'a> Encode for MPInt<'a> {
-    fn size(&self) -> usize {
-        let mut x: &[u8] = self.0;
-        while let Some(0) = x.get(0) {
-            x = &x[1..];
-        }
-        if let Some(n) = x.get(0) {
-            if *n > 127 {
-                5 + x.len()
-            } else {
-                4 + x.len()
-            }
-        } else {
-            4
-        }
-    }
-    #[must_use]
-    fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        let mut x: &[u8] = self.0;
-        while let Some(0) = x.get(0) {
-            x = &x[1..];
-        }
-        if let Some(n) = x.get(0) {
-            if *n > 127 {
-                e.push_u32be(x.len() as u32 + 1)?;
-                e.push_u8(0)?;
-            } else {
-                e.push_u32be(x.len() as u32)?;
-            }
-            e.push_bytes(&x)?;
-        } else {
-            e.push_u32be(0)?;
-        }
-        Some(())
-    }
-}
-
-impl<'a> DecodeRef<'a> for MPInt<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        let len = d.take_u32be()? as usize;
-        let bytes = d.take_bytes(len)?;
-        if bytes[0] > 127 {
-            // TODO: out of bounds
-            Some(MPInt(&bytes[1..]))
-        } else {
-            Some(MPInt(bytes))
-        }
+    /// Try to `SshDecode` the given input as `T`.
+    ///
+    /// All bytes of input must be consumed or the decoding will fail.
+    pub fn decode<'a, T: SshDecodeRef<'a>>(buf: &'a [u8]) -> Option<T> {
+        let mut d = RefDecoder::new(buf);
+        let t = d.take()?;
+        d.expect_eoi()?;
+        Some(t)
     }
 }

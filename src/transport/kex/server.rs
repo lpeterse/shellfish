@@ -1,9 +1,8 @@
-use super::kex::*;
+use super::super::*;
 
 #[derive(Debug)]
-pub struct ServerKex {}
+pub struct ServerKex;
 
-#[allow(dead_code)] // FIXME
 impl ServerKex {
     pub fn new(_config: &Arc<TransportConfig>) -> Self {
         Self {}

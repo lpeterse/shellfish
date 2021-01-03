@@ -11,23 +11,26 @@ impl Message for MsgIdentitiesAnswer {
     const NUMBER: u8 = 12;
 }
 
-impl Encode for MsgIdentitiesAnswer {
-    fn size(&self) -> usize {
-        1 + self.identities.size()
-    }
+impl SshEncode for MsgIdentitiesAnswer {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(<Self as Message>::NUMBER as u8)?;
-        e.push(&self.identities)
+        e.push_u8(<Self as Message>::NUMBER)?;
+        e.push_usize(self.identities.len())?;
+        for id in &self.identities {
+            e.push(id)?;
+        }
+        Some(())
     }
 }
 
-impl Decode for MsgIdentitiesAnswer {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgIdentitiesAnswer {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+        let mut identities = vec![];
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
-            identities: Decode::decode(d)?,
+        let len = d.take_usize()?;
+        for _ in 0..len {
+            identities.push(d.take()?)
         }
-        .into()
+        Some(Self { identities })
     }
 }
 
@@ -42,12 +45,13 @@ mod tests {
             121, 32, 49, 0, 0, 0, 2, 4, 5, 0, 0, 0, 10, 105, 100, 101, 110, 116, 105, 116, 121, 32,
             50,
         ];
-        let actual: Vec<u8> = SliceEncoder::encode(&MsgIdentitiesAnswer {
+        let actual: Vec<u8> = SshCodec::encode(&MsgIdentitiesAnswer {
             identities: vec![
                 (Identity::from(vec![1, 2, 3]), "identity 1".into()),
                 (Identity::from(vec![4, 5]), "identity 2".into()),
             ],
-        });
+        })
+        .unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -58,7 +62,7 @@ mod tests {
             121, 32, 49, 0, 0, 0, 2, 4, 5, 0, 0, 0, 10, 105, 100, 101, 110, 116, 105, 116, 121, 32,
             50,
         ];
-        let actual: Option<MsgIdentitiesAnswer> = SliceDecoder::decode(input.as_ref());
+        let actual: Option<MsgIdentitiesAnswer> = SshCodec::decode(input.as_ref());
         let expected = Some(MsgIdentitiesAnswer {
             identities: vec![
                 (Identity::from(vec![1, 2, 3]), "identity 1".into()),

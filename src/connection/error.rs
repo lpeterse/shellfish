@@ -1,7 +1,7 @@
 use super::*;
 use crate::transport::TransportError;
 
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum ConnectionError {
     IoError(std::io::ErrorKind),
     TransportError(TransportError),
@@ -74,13 +74,6 @@ mod tests {
             format!("{:?}", ConnectionError::IoError(std::io::ErrorKind::Other))
         );
         assert_eq!(
-            "TransportError(BadPacketLength)",
-            format!(
-                "{:?}",
-                ConnectionError::TransportError(TransportError::BadPacketLength)
-            )
-        );
-        assert_eq!(
             "ChannelIdInvalid",
             format!("{:?}", ConnectionError::ChannelIdInvalid)
         );
@@ -110,14 +103,6 @@ mod tests {
     fn test_from_io_error_01() {
         match std::io::Error::new(std::io::ErrorKind::Other, "").into() {
             ConnectionError::IoError(_) => (),
-            _ => panic!(""),
-        }
-    }
-
-    #[test]
-    fn test_from_transport_error_01() {
-        match TransportError::BadPacketLength.into() {
-            ConnectionError::TransportError(_) => (),
             _ => panic!(""),
         }
     }

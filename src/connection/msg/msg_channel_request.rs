@@ -13,26 +13,23 @@ impl<'a, T> Message for MsgChannelRequest<'a, T> {
     const NUMBER: u8 = 98;
 }
 
-impl<'a, T: Encode> Encode for MsgChannelRequest<'a, T> {
-    fn size(&self) -> usize {
-        1 + 4 + 4 + self.request.len() + 1 + self.specific.size()
-    }
+impl<'a, T: SshEncode> SshEncode for MsgChannelRequest<'a, T> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)?;
         e.push_str_framed(&self.request)?;
-        e.push_u8(self.want_reply as u8)?;
+        e.push_bool(self.want_reply)?;
         e.push(&self.specific)
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgChannelRequest<'a, &'a [u8]> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl<'a> SshDecodeRef<'a> for MsgChannelRequest<'a, &'a [u8]> {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             recipient_channel: d.take_u32be()?,
-            request: DecodeRef::decode(d)?,
-            want_reply: d.take_u8()? != 0,
+            request: d.take_str_framed()?,
+            want_reply: d.take_bool()?,
             specific: d.take_bytes_all()?,
         }
         .into()
@@ -62,7 +59,7 @@ mod tests {
             want_reply: true,
             specific: (),
         };
-        let actual = SliceEncoder::encode(&x);
+        let actual = SshCodec::encode(&x).unwrap();
         let expected = [
             98, 0, 0, 0, 23, 0, 0, 0, 7, 114, 101, 113, 117, 101, 115, 116, 1,
         ];
@@ -71,7 +68,7 @@ mod tests {
 
     #[test]
     fn test_decode_01() {
-        let x: MsgChannelRequest<&[u8]> = SliceDecoder::decode(
+        let x: MsgChannelRequest<&[u8]> = SshCodec::decode(
             &[
                 98, 0, 0, 0, 23, 0, 0, 0, 7, 114, 101, 113, 117, 101, 115, 116, 1, 0, 0, 0, 8, 115,
                 112, 101, 99, 105, 102, 105, 99,

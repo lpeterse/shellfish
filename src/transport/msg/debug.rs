@@ -1,4 +1,4 @@
-use crate::transport::Message;
+use super::Message;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
@@ -12,27 +12,23 @@ impl<'a> Message for MsgDebug<'a> {
     const NUMBER: u8 = 4;
 }
 
-impl<'a> Encode for MsgDebug<'a> {
-    fn size(&self) -> usize {
-        1 + 1 + 4 + self.message.len() + 4 + self.language.len()
-    }
+impl<'a> SshEncode for MsgDebug<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(<Self as Message>::NUMBER as u8)?;
-        e.push_u8(self.always_display as u8)?;
+        e.push_u8(<Self as Message>::NUMBER)?;
+        e.push_bool(self.always_display)?;
         e.push_str_framed(&self.message)?;
         e.push_str_framed(&self.language)
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgDebug<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl<'a> SshDecodeRef<'a> for MsgDebug<'a> {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
-            always_display: d.take_u8()? != 0,
-            message: DecodeRef::decode(d)?,
-            language: DecodeRef::decode(d)?,
-        }
-        .into()
+        Some(Self {
+            always_display: d.take_bool()?,
+            message: d.take_str_framed()?,
+            language: d.take_str_framed()?,
+        })
     }
 }
 
@@ -62,7 +58,7 @@ mod tests {
         };
         assert_eq!(
             &[4, 1, 0, 0, 0, 3, 109, 115, 103, 0, 0, 0, 4, 108, 97, 110, 103][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
@@ -75,7 +71,7 @@ mod tests {
         };
         assert_eq!(
             &[4, 0, 0, 0, 0, 1, 109, 0, 0, 0, 1, 108][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
@@ -84,7 +80,7 @@ mod tests {
         let buf: [u8; 17] = [
             4, 23, 0, 0, 0, 3, 109, 115, 103, 0, 0, 0, 4, 108, 97, 110, 103,
         ];
-        let msg: MsgDebug = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgDebug = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(true, msg.always_display);
         assert_eq!("msg", msg.message);
         assert_eq!("lang", msg.language);
@@ -93,7 +89,7 @@ mod tests {
     #[test]
     fn test_decode_02() {
         let buf: [u8; 12] = [4, 0, 0, 0, 0, 1, 109, 0, 0, 0, 1, 108];
-        let msg: MsgDebug = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgDebug = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(false, msg.always_display);
         assert_eq!("m", msg.message);
         assert_eq!("l", msg.language);

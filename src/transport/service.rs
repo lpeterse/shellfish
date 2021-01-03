@@ -1,5 +1,4 @@
-use crate::transport::Transport;
-
+use super::GenericTransport;
 use std::sync::Arc;
 
 pub trait Service {
@@ -7,5 +6,5 @@ pub trait Service {
 
     const NAME: &'static str;
 
-    fn new(config: &Arc<Self::Config>, transport: Box<dyn Transport>) -> Self;
+    fn new(config: &Arc<Self::Config>, transport: GenericTransport) -> Self;
 }

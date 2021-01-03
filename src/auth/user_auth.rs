@@ -12,6 +12,7 @@ use self::signature::*;
 
 use crate::auth::*;
 use crate::connection::Connection;
+use crate::identity::*;
 use crate::transport::*;
 use crate::util::codec::*;
 
@@ -27,26 +28,14 @@ pub struct UserAuth {}
 impl UserAuth {
     pub const NAME: &'static str = "ssh-userauth";
 
-    pub async fn offer<S: Service>(
-        t: Box<dyn Transport>,
-        c: Arc<<S as Service>::Config>,
-    ) -> Result<UserAuthRequest<S>, UserAuthError> {
-        let t = TransportExt::offer_service(t, Self::NAME).await?;
-        Ok(UserAuthRequest {
-            t,
-            c,
-            username: "".into(),
-        })
-    }
-
     /// Request another service with user authentication.
     pub async fn request<S: Service>(
-        transport: Box<dyn Transport>,
+        transport: GenericTransport,
         config: &Arc<<S as Service>::Config>,
         user: &str,
         agent: &Arc<dyn Agent>,
     ) -> Result<S, UserAuthError> {
-        let mut t = TransportExt::request_service(transport, Self::NAME).await?;
+        let mut t = transport.request_service(Self::NAME).await?;
         let service = <S as Service>::NAME;
         let identities = agent.identities().await?;
         for (id, comment) in identities {
@@ -60,7 +49,7 @@ impl UserAuth {
     }
 
     async fn try_pubkey(
-        transport: &mut Box<dyn Transport>,
+        transport: &mut GenericTransport,
         agent: &Arc<dyn Agent>,
         service: &str,
         user: &str,
@@ -73,7 +62,7 @@ impl UserAuth {
             service_name: service,
             identity: &identity,
         };
-        let data = SliceEncoder::encode(&data);
+        let data = SshCodec::encode(&data).ok_or(TransportError::InvalidEncoding)?;
         let signature = agent.signature(&identity, &data, 0).await?;
         if signature.is_none() {
             return Ok(false);
@@ -86,9 +75,12 @@ impl UserAuth {
                 signature,
             },
         };
-        TransportExt::send(transport, &msg).await?;
-        TransportExt::flush(transport).await?;
-        Ok(TransportExt::receive::<Result<MsgSuccess, MsgFailure>>(transport).await?.is_ok())
+        transport.send(&msg).await?;
+        transport.flush().await?;
+        Ok(transport
+            .receive::<Result<MsgSuccess, MsgFailure>>()
+            .await?
+            .is_ok())
     }
 }
 

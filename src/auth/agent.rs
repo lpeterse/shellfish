@@ -2,7 +2,7 @@ mod local;
 
 pub use self::local::*;
 
-use super::*;
+use crate::identity::*;
 use crate::util::*;
 
 pub type AgentError = BoxError;

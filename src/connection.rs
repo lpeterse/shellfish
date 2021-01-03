@@ -19,7 +19,7 @@ use self::msg::*;
 pub use self::state::*;
 
 use crate::client::Client;
-use crate::transport::{DisconnectReason, Service, Transport};
+use crate::transport::{GenericTransport, DisconnectReason, Service, Transport};
 use crate::util::codec::*;
 use crate::util::oneshot;
 
@@ -43,7 +43,7 @@ impl Connection {
     ///
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
-    fn new(config: &Arc<ConnectionConfig>, transport: Box<dyn Transport>) -> Self {
+    fn new(config: &Arc<ConnectionConfig>, transport: GenericTransport) -> Self {
         let state = ConnectionState::new(config, transport);
         let state = Arc::new(Mutex::new(state));
         let future = ConnectionFuture::new(&state);
@@ -128,7 +128,7 @@ impl Service for Connection {
 
     const NAME: &'static str = "ssh-connection";
 
-    fn new(config: &Arc<Self::Config>, transport: Box<dyn Transport>) -> Self {
+    fn new(config: &Arc<Self::Config>, transport: GenericTransport) -> Self {
         Self::new(config, transport)
     }
 }

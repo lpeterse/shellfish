@@ -12,7 +12,7 @@ use super::super::*;
 use crate::client::Client;
 
 //use crate::util::codec::*;
-use crate::role::Role;
+use crate::core::Role;
 
 /// A session is a remote execution of a program.  The program may be a
 /// shell, an application, a system command, or some built-in subsystem.
@@ -49,7 +49,6 @@ impl Session<Client> {
     }
 
     async fn request(self, _request: SessionRequest) -> Result<Self, ConnectionError> {
-        
         let mut state = (self.state)
             .0
             .lock()

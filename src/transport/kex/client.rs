@@ -1,10 +1,9 @@
-use super::super::config::*;
-use super::kex::*;
-
+use super::super::keys::*;
+use super::super::*;
 use crate::util::BoxFuture;
-
 use async_std::future::Future;
 use futures_timer::Delay;
+use std::sync::Arc;
 
 /// The client side state machine for key exchange.
 #[derive(Debug)]
@@ -85,8 +84,7 @@ impl State {
                         return Poll::Ready(Ok(()));
                     }
                     Err(e) => {
-                        log::debug!("Host key unverifiable: {}", e);
-                        return Poll::Ready(Err(TransportError::HostKeyUnverifiable));
+                        return Poll::Ready(Err(TransportError::InvalidHostKey(e)));
                     }
                 }
             }
@@ -157,7 +155,7 @@ impl Kex for ClientKex {
                 return Ok(());
             }
         }
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn push_init_rx(&mut self, tx: u64, rx: u64, msg: MsgKexInit) -> Result<(), TransportError> {
@@ -168,7 +166,7 @@ impl Kex for ClientKex {
                 return Ok(());
             }
         }
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn poll_ecdh_init(
@@ -201,11 +199,11 @@ impl Kex for ClientKex {
                 return Ok(());
             }
         }
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn push_ecdh_init_rx(&mut self, _msg: MsgKexEcdhInit<X25519>) -> Result<(), TransportError> {
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn poll_ecdh_reply(
@@ -216,7 +214,7 @@ impl Kex for ClientKex {
     }
 
     fn push_ecdh_reply_tx(&mut self) -> Result<(), TransportError> {
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn push_ecdh_reply_rx(&mut self, msg: MsgKexEcdhReply<X25519>) -> Result<(), TransportError> {
@@ -232,8 +230,8 @@ impl Kex for ClientKex {
                     //let k = X25519::secret_as_ref(&k);
                     // Compute the exchange hash over the data exchanged so far.
                     let h: SessionId = KexEcdhHash::<X25519> {
-                        client_identification: &self.config.identification,
-                        server_identification: &self.remote_id,
+                        client_id: &self.config.identification,
+                        server_id: &self.remote_id,
                         client_kex_init: &local,
                         server_kex_init: &remote,
                         server_host_key: &msg.host_key,
@@ -249,19 +247,31 @@ impl Kex for ClientKex {
                     // The session id is only computed during first kex and constant afterwards
                     let sid = self.session_id.get_or_insert_with(|| h.clone());
                     let algos = AlgorithmAgreement::agree(&local, &remote)?;
-                    let gks: GenericKeyStream =
-                        KeyStreamX25519::new(k.to_bytes(), h, sid.clone()).into();
+                    let keys_c2s = KeyStream::new(
+                        KeyDirection::ClientToServer,
+                        KeyAlgorithm::Sha256,
+                        k.to_bytes(),
+                        h.clone(),
+                        sid.clone(),
+                    );
+                    let keys_s2c = KeyStream::new(
+                        KeyDirection::ServerToClient,
+                        KeyAlgorithm::Sha256,
+                        k.to_bytes(),
+                        h.clone(),
+                        sid.clone(),
+                    );
                     let enc = CipherConfig {
                         ea: algos.ea_c2s,
                         ca: algos.ca_c2s,
                         ma: algos.ma_c2s,
-                        ke: gks.c2s(),
+                        ke: keys_c2s,
                     };
                     let dec = CipherConfig {
                         ea: algos.ea_s2c,
                         ca: algos.ca_s2c,
                         ma: algos.ma_s2c,
-                        ke: gks.s2c(),
+                        ke: keys_s2c,
                     };
                     let fut = self.known_hosts.verify(&self.remote_name, &msg.host_key);
                     state.ecdh_rx = Some(Err(fut));
@@ -270,7 +280,7 @@ impl Kex for ClientKex {
                 }
             }
         }
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn poll_new_keys_tx(
@@ -282,7 +292,7 @@ impl Kex for ClientKex {
             return if let Some((ref enc, _)) = state.cipher {
                 Poll::Ready(Ok(enc.clone()))
             } else {
-                Poll::Ready(Err(TransportError::ProtocolError))
+                Poll::Ready(Err(TransportError::InvalidState))
             };
         }
         Poll::Pending
@@ -297,7 +307,7 @@ impl Kex for ClientKex {
             return if let Some((_, ref dec)) = state.cipher {
                 Poll::Ready(Ok(dec.clone()))
             } else {
-                Poll::Ready(Err(TransportError::ProtocolError))
+                Poll::Ready(Err(TransportError::InvalidState))
             };
         }
         Poll::Pending
@@ -315,7 +325,7 @@ impl Kex for ClientKex {
                 }
             }
         }
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn push_new_keys_rx(&mut self) -> Result<(), TransportError> {
@@ -330,7 +340,7 @@ impl Kex for ClientKex {
                 }
             }
         }
-        Err(TransportError::ProtocolError)
+        Err(TransportError::InvalidState)
     }
 
     fn session_id(&self) -> Result<&SessionId, TransportError> {
@@ -607,7 +617,7 @@ mod tests {
         }
     }
 
-    /// Shall return ProtocolError when remote init is pushed twice
+    /// Shall return InvalidState when remote init is pushed twice
     #[test]
     fn test_client_kex_push_init_03() {
         let config = ClientConfig::default();
@@ -620,12 +630,12 @@ mod tests {
 
         assert!(kex.push_init(ri.clone()).is_ok());
         match kex.push_init(ri) {
-            Err(TransportError::ProtocolError) => (),
+            Err(TransportError::InvalidState) => (),
             _ => assert!(false),
         }
     }
 
-    /// Shall return ProtocolError when remote init is pushed to incompatible state
+    /// Shall return InvalidState when remote init is pushed to incompatible state
     #[test]
     fn test_client_kex_push_init_04() {
         let config = ClientConfig::default();
@@ -646,12 +656,12 @@ mod tests {
         kex.state = Some(Box::new(State::NewKeysSent(cc)));
 
         match kex.push_init(ri) {
-            Err(TransportError::ProtocolError) => (),
+            Err(TransportError::InvalidState) => (),
             _ => assert!(false),
         }
     }
 
-    /// Shall return ProtocolError when MSG_ECDH_INIT is pushed
+    /// Shall return InvalidState when MSG_ECDH_INIT is pushed
     #[test]
     fn test_client_kex_push_ecdh_init() {
         let config = ClientConfig::default();
@@ -664,7 +674,7 @@ mod tests {
         let ecdh_init = MsgKexEcdhInit { dh_public };
 
         match kex.push_ecdh_init(ecdh_init) {
-            Err(TransportError::ProtocolError) => (),
+            Err(TransportError::InvalidState) => (),
             _ => assert!(false),
         }
     }
@@ -811,7 +821,7 @@ mod tests {
         };
 
         match kex.push_ecdh_reply(ecdh_reply) {
-            Err(TransportError::ProtocolError) => (),
+            Err(TransportError::InvalidState) => (),
             _ => assert!(false),
         }
     }
@@ -867,7 +877,7 @@ mod tests {
         assert!(kex.state.is_none());
     }
 
-    /// Shall return ProtocolError when receiving MSG_NEWKEYS whlie kex is not in progress
+    /// Shall return InvalidState when receiving MSG_NEWKEYS whlie kex is not in progress
     #[test]
     fn test_client_kex_push_new_keys_03() {
         let config = ClientConfig::default();

@@ -1,9 +1,8 @@
 use super::channel::*;
 use super::*;
 
-use crate::transport::{DisconnectReason, TransportError};
+use crate::transport::{DisconnectReason, GenericTransport, TransportError};
 use crate::util::check;
-use crate::transport::TransportExt;
 
 use async_std::task::{ready, Context, Poll, Waker};
 use std::collections::VecDeque;
@@ -23,7 +22,7 @@ use std::sync::Arc;
 #[derive(Debug)]
 pub struct ConnectionState {
     config: Arc<ConnectionConfig>,
-    transport: Box<dyn Transport>,
+    transport: GenericTransport,
     channels: ChannelList,
     local_requests: VecDeque<GlobalRequest>,
     local_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
@@ -41,7 +40,7 @@ impl ConnectionState {
     ///
     /// The config `Arc` will be cloned. All queues are initialised with zero
     /// capacity in expectation that they will never be used.
-    pub fn new(config: &Arc<ConnectionConfig>, transport: Box<dyn Transport>) -> Self {
+    pub fn new(config: &Arc<ConnectionConfig>, transport: GenericTransport) -> Self {
         Self {
             config: config.clone(),
             transport,
@@ -89,7 +88,7 @@ impl ConnectionState {
         // written their output to the transport. This is benefecial for network performance as it
         // allows multiple messages to be sent in a single TCP segment (even with TCP_NODELAY) and
         // impedes traffic analysis.
-        ready!(self.transport.poll_flush(cx))?;
+        ready!(self.transport.tx_flush(cx))?;
         Poll::Pending
     }
 
@@ -114,7 +113,7 @@ impl ConnectionState {
     /// `Some(Ok(_))` means the peer sent a disconnect. This is usually not an error condition.
     /// `Some(Err(_))` means that the connection terminated/shall terminate for any other reason.
     pub fn result(&self) -> Option<Result<DisconnectReason, ConnectionError>> {
-        self.result
+        self.result.clone()
     }
 
     /// Enqueue a global request (outbound).
@@ -134,9 +133,9 @@ impl ConnectionState {
     /// Otherwise, this flags the inner task for wakeup, but doesn't actually wake it up right away.
     /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
     pub fn request_want_reply(&mut self, name: String, data: Vec<u8>) -> GlobalReplyFuture {
-        if let Some(result) = self.result {
+        if let Some(ref result) = self.result {
             let (tx, rx) = oneshot::channel();
-            tx.send(Err(result.into()));
+            tx.send(Err(result.clone().into()));
             return GlobalReplyFuture::new(rx);
         }
         let (request, reply) = GlobalRequest::new_want_reply(name, data);
@@ -152,13 +151,15 @@ impl ConnectionState {
     /// Otherwise, this flags the inner task for wakeup, but doesn't actually wake it up right away.
     /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
     pub fn open<C: Channel>(&mut self, o: C::Open) -> ChannelOpenFuture<C> {
-        if let Some(result) = self.result {
+        if let Some(ref result) = self.result {
             let (tx, rx) = oneshot::channel();
-            tx.send(Err(result.into()));
+            tx.send(Err(result.clone().into()));
             return ChannelOpenFuture::new(rx);
         }
 
-        let rx = self.channels.open_outbound(C::NAME, SliceEncoder::encode(&o));
+        let rx = self
+            .channels
+            .open_outbound(C::NAME, SshCodec::encode(&o).unwrap()); // FIXME FIXME !!!
         self.flag_inner_task_for_wakeup();
         ChannelOpenFuture::new(rx)
     }
@@ -178,13 +179,13 @@ impl ConnectionState {
     ///
     /// This shall be the last thing to be done by the `ConnectionFuture`.
     pub fn terminate(&mut self, result: Result<DisconnectReason, ConnectionError>) {
-        let _ = self.result.get_or_insert(result);
-        let e = result.into();
+        let _ = self.result.get_or_insert(result.clone());
+        let e: ConnectionError = result.into();
         while let Some(mut x) = self.local_requests.pop_front() {
-            x.reply.take().map(|x| x.send(Err(e))).unwrap_or(())
+            x.reply.take().map(|x| x.send(Err(e.clone()))).unwrap_or(())
         }
         while let Some(x) = self.local_replies.pop_front() {
-            x.send(Err(e))
+            x.send(Err(e.clone()))
         }
         self.channels.terminate(e);
         self.flag_outer_task_for_wakeup();
@@ -250,11 +251,11 @@ impl ConnectionState {
     /// If the result is a `TransportError::DisconnectByUs`, it is attempted to send a corresponding
     /// MSG_DISCONNECT to the peer (but we don't block if this fails or pends).
     fn poll_result(&mut self, cx: &mut Context) -> Poll<Result<DisconnectReason, ConnectionError>> {
-        if let Some(r) = self.result {
+        if let Some(ref r) = self.result {
             if let Err(ConnectionError::TransportError(TransportError::DisconnectByUs(d))) = r {
-                self.transport.send_disconnect(cx, d);
+                self.transport.send_disconnect(cx, *d);
             }
-            return Poll::Ready(r);
+            return Poll::Ready(r.clone());
         }
         Poll::Pending
     }
@@ -270,7 +271,7 @@ impl ConnectionState {
                 request.data.clone(),
                 request.reply.is_some(),
             );
-            ready!(TransportExt::poll_send(&mut self.transport, cx, &msg))?;
+            ready!(poll_send(&mut self.transport, cx, &msg))?;
             if let Some(ref mut request) = self.local_requests.pop_front() {
                 if let Some(reply) = request.reply.take() {
                     self.local_replies.push_back(reply);
@@ -287,10 +288,14 @@ impl ConnectionState {
     fn poll_global_replies(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
         while let Some(ref mut future) = self.remote_replies.front_mut() {
             if let Some(data) = ready!(future.peek(cx)) {
-                ready!(TransportExt::poll_send(&mut self.transport, cx, &MsgRequestSuccess::new(&data?)))?;
+                ready!(poll_send(
+                    &mut self.transport,
+                    cx,
+                    &MsgRequestSuccess::new(&data?)
+                ))?;
             } else {
                 let msg = MsgRequestFailure;
-                ready!(TransportExt::poll_send(&mut self.transport, cx, &msg))?;
+                ready!(poll_send(&mut self.transport, cx, &msg))?;
             };
             let _ = self.remote_replies.pop_front();
         }
@@ -312,11 +317,11 @@ impl ConnectionState {
     /// NB: Any message that is received gets dispatched. The dispatch mechanism does not cause
     /// the operation to return `Pending`. This is important to avoid deadlock situations!
     fn poll_transport(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        ready!(self.transport.poll_flush(cx))?;
+        ready!(self.transport.tx_flush(cx))?;
         loop {
-            let rx = ready!(self.transport.poll_peek(cx))?;
+            let rx = ready!(self.transport.rx_peek(cx))?;
             // MSG_CHANNEL_DATA
-            if let Some(msg) = SliceDecoder::decode(rx) {
+            if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelData = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_DATA ({} bytes)",
@@ -328,7 +333,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_EXTENDED_DATA
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelExtendedData = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_EXTENDED_DATA ({} bytes)",
@@ -340,7 +345,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_WINDOW_ADJUST
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelWindowAdjust = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST",
@@ -351,7 +356,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_EOF
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelEof = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_EOF",
@@ -362,7 +367,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_CLOSE
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelClose = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_CLOSE",
@@ -373,7 +378,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_OPEN
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelOpen = msg;
                 log::debug!("Received MSG_CHANNEL_OPEN ({})", msg.name);
                 self.check_resource_exhaustion()?;
@@ -382,7 +387,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_OPEN_CONFIRMATION
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelOpenConfirmation = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION",
@@ -401,7 +406,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_OPEN_FAILURE
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelOpenFailure = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_OPEN_FAILURE",
@@ -411,7 +416,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_REQUEST
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelRequest<&[u8]> = msg;
                 let rid = msg.recipient_channel;
                 let req = msg.request.into();
@@ -422,7 +427,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_SUCCESS
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelSuccess = msg;
                 log::debug!(
                     "Channel {}: Received MSG_CHANNEL_SUCCESS",
@@ -433,7 +438,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_CHANNEL_FAILURE
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelFailure = msg;
                 log::debug!("Received MSG_CHANNEL_FAILURE");
                 let channel = self.channels.get_open(msg.recipient_channel)?;
@@ -441,7 +446,7 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_GLOBAL_REQUEST
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgGlobalRequest = msg;
                 log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
                 self.check_resource_exhaustion()?;
@@ -449,24 +454,25 @@ impl ConnectionState {
                 Ok(())
             }
             // MSG_REQUEST_SUCCESS
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgRequestSuccess = msg;
                 log::debug!("Received MSG_REQUEST_SUCCESS");
                 let data = msg.data.into();
                 self.push_success(data)
             }
             // MSG_REQUEST_FAILURE
-            else if let Some(msg) = SliceDecoder::decode(rx) {
+            else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgRequestFailure = msg;
                 log::debug!("Received MSG_REQUEST_FAILURE");
                 self.push_failure()
             }
             // Otherwise try to send MSG_UNIMPLEMENTED and return error.
             else {
-                self.transport.send_unimplemented(cx);
-                Err(TransportError::MessageUnexpected.into())
+                // FIXME
+                //self.transport.send_unimplemented(cx);
+                Err(TransportError::InvalidState.into())
             }?;
-            self.transport.consume();
+            self.transport.rx_consume();
         }
     }
 
@@ -520,6 +526,18 @@ impl ConnectionState {
         let exhausted = self.queued() >= self.config.queued_max_count as usize;
         check(!exhausted).ok_or(ConnectionError::ResourceExhaustion)
     }
+}
+
+pub fn poll_send<M: SshEncode>(
+    t: &mut GenericTransport,
+    cx: &mut Context,
+    msg: &M,
+) -> Poll<Result<(), TransportError>> {
+    let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
+    let buf = ready!(t.tx_alloc(cx, size))?;
+    SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
+    t.tx_commit();
+    Poll::Ready(Ok(()))
 }
 
 /*

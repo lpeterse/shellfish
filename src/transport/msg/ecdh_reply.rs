@@ -1,7 +1,6 @@
-use super::ecdh_algorithm::*;
-use super::*;
-use crate::auth::*;
-use crate::transport::Message;
+use super::super::ecdh::*;
+use super::Message;
+use crate::identity::*;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
@@ -15,14 +14,11 @@ impl<A: EcdhAlgorithm> Message for MsgKexEcdhReply<A> {
     const NUMBER: u8 = 31;
 }
 
-impl<A> Encode for MsgKexEcdhReply<A>
+impl<A> SshEncode for MsgKexEcdhReply<A>
 where
     A: EcdhAlgorithm,
-    A::PublicKey: Encode,
+    A::PublicKey: SshEncode,
 {
-    fn size(&self) -> usize {
-        1 + self.host_key.size() + self.dh_public.size() + self.signature.size()
-    }
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push(&self.host_key)?;
@@ -31,17 +27,17 @@ where
     }
 }
 
-impl<A: EcdhAlgorithm> Decode for MsgKexEcdhReply<A>
+impl<A: EcdhAlgorithm> SshDecode for MsgKexEcdhReply<A>
 where
     A: EcdhAlgorithm,
-    A::PublicKey: Decode,
+    A::PublicKey: SshDecode,
 {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            host_key: DecodeRef::decode(d)?,
-            dh_public: DecodeRef::decode(d)?,
-            signature: DecodeRef::decode(d)?,
+            host_key: d.take()?,
+            dh_public: d.take()?,
+            signature: d.take()?,
         }
         .into()
     }
@@ -91,7 +87,7 @@ mod tests {
             signature: host_signature,
         };
 
-        let actual = SliceEncoder::encode(&msg);
+        let actual = SshCodec::encode(&msg);
         let expected: [u8; 163] = [
             31, 0, 0, 0, 51, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57, 0, 0, 0,
             32, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23, 23,
@@ -125,7 +121,7 @@ mod tests {
             47, 47, 47, 47, 47, 47, 47, 47,
         ];
 
-        let actual: MsgKexEcdhReply<TestAlgorithm> = SliceDecoder::decode(&input[..]).unwrap();
+        let actual: MsgKexEcdhReply<TestAlgorithm> = SshCodec::decode(&input[..]).unwrap();
         let expected = MsgKexEcdhReply::<TestAlgorithm> {
             host_key,
             dh_public: ep,

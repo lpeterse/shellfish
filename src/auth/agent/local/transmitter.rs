@@ -12,13 +12,13 @@ pub struct Transmitter<S: Socket = UnixStream> {
 impl<S: Socket> Transmitter<S> {
     const MAX_FRAME_LEN: usize = 35000;
 
-    pub async fn send<Msg: Encode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
-        let vec = SliceEncoder::encode(&Frame(msg));
+    pub async fn send<Msg: SshEncode>(&mut self, msg: &Msg) -> Result<(), AgentError> {
+        let vec = SshCodec::encode(&Frame(msg)).ok_or("encoding failed")?;
         self.socket.write_all(&vec).await?;
         Ok(())
     }
 
-    pub async fn receive<Msg: Decode>(&mut self) -> Result<Msg, AgentError> {
+    pub async fn receive<Msg: SshDecode>(&mut self) -> Result<Msg, AgentError> {
         let mut len: [u8; 4] = [0; 4];
         self.socket.read_exact(&mut len[..]).await?;
         let len = u32::from_be_bytes(len) as usize;
@@ -26,7 +26,7 @@ impl<S: Socket> Transmitter<S> {
         let mut vec = Vec::with_capacity(len);
         vec.resize(len, 0);
         self.socket.read_exact(&mut vec[..]).await?;
-        SliceDecoder::decode(&vec).ok_or("decoding failed".into())
+        SshCodec::decode(&vec).ok_or("decoding failed".into())
     }
 }
 

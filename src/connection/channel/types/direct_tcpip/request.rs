@@ -1,5 +1,3 @@
-
-
 pub enum DirectTcpIpRequest {}
 
 impl ChannelRequest for DirectTcpIpRequest {
@@ -8,11 +6,7 @@ impl ChannelRequest for DirectTcpIpRequest {
     }
 }
 
-impl Encode for DirectTcpIpRequest {
-    fn size(&self) -> usize {
-        unreachable!()
-    }
-
+impl SshEncode for DirectTcpIpRequest {
     fn encode<E: SshEncoder>(&self, _e: &mut E) {
         unreachable!()
     }

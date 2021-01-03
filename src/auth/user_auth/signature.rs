@@ -1,6 +1,6 @@
 use super::method::*;
 use super::msg_userauth_request::*;
-use crate::auth::*;
+use crate::identity::*;
 use crate::transport::Message;
 use crate::transport::SessionId;
 use crate::util::codec::*;
@@ -20,19 +20,7 @@ pub struct SignatureData<'a> {
     pub identity: &'a Identity,
 }
 
-impl<'a> Encode for SignatureData<'a> {
-    fn size(&self) -> usize {
-        let mut n = 0;
-        n += self.session_id.size();
-        n += 1;
-        n += 4 + self.user_name.len();
-        n += 4 + self.service_name.len();
-        n += 4 + <PublicKeyMethod as AuthMethod>::NAME.len();
-        n += 1;
-        n += 4 + self.identity.algorithm().len();
-        n += self.identity.size();
-        n
-    }
+impl<'a> SshEncode for SignatureData<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push(self.session_id)?;
         e.push_u8(<MsgUserAuthRequest<PublicKeyMethod> as Message>::NUMBER)?;
@@ -65,7 +53,7 @@ mod tests {
                 161, 162, 243, 150, 202, 192, 242, 222, 166, 188, 190, 158, 169, 52, 114,
             ])),
         };
-        let actual = SliceEncoder::encode(&x);
+        let actual = SshCodec::encode(&x);
         let expected = [
             0, 0, 0, 32, 41, 47, 231, 244, 246, 141, 145, 191, 204, 234, 29, 219, 118, 44, 26, 47,
             205, 64, 26, 209, 97, 125, 207, 58, 188, 51, 187, 202, 81, 75, 126, 77, 50, 0, 0, 0, 9,

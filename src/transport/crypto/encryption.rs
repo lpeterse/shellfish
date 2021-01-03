@@ -3,14 +3,15 @@ mod plain;
 
 use self::chacha20_poly1305::*;
 use self::plain::*;
-use super::*;
+use super::super::keys::*;
 use super::super::*;
+use super::*;
 
 pub trait EncryptionAlgorithm {
     const NAME: &'static str;
 }
 
-pub struct Chacha20Poly1305AtOpensshDotCom {}
+pub struct Chacha20Poly1305AtOpensshDotCom;
 
 impl EncryptionAlgorithm for Chacha20Poly1305AtOpensshDotCom {
     const NAME: &'static str = "chacha20-poly1305@openssh.com";
@@ -73,7 +74,7 @@ impl CipherContext {
         }
     }
 
-    pub fn decrypt_len(&self, pc: u64, len: [u8; 4]) -> Option<usize> {
+    pub fn decrypt_len(&self, pc: u64, len: [u8; 4]) -> Result<usize, TransportError> {
         match self {
             Self::Plain(ctx) => ctx.decrypt_len(pc, len),
             Self::Chacha20Poly1305(ctx) => ctx.decrypt_len(pc, len),
@@ -89,8 +90,8 @@ impl CipherContext {
 
     pub fn padding_len(&self, payload_len: usize) -> usize {
         match self {
-            Self::Plain(_) => PlainContext::padding_len(payload_len),
-            Self::Chacha20Poly1305(_) => Chacha20Poly1305Context::padding_len(payload_len),
+            Self::Plain(ctx) => ctx.padding_len(payload_len),
+            Self::Chacha20Poly1305(ctx) => ctx.padding_len(payload_len),
         }
     }
 }
@@ -238,7 +239,7 @@ mod tests {
         // size = 4 (packet len) + 1 (padding len) + 0 (payload len) + 11 (padding)
         assert_eq!(packet.size(), 16);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[0, 0, 0, 12, 11, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0][..]
         );
     }
@@ -250,7 +251,7 @@ mod tests {
         // size = 4 (packet len) + 1 (padding len) + 1 (payload len) + 10 (padding)
         assert_eq!(packet.size(), 16);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[0, 0, 0, 12, 10, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0][..]
         );
     }
@@ -263,7 +264,7 @@ mod tests {
         // RFC: "There must be at least 4 bytes of padding"
         assert_eq!(packet.size(), 24);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[0, 0, 0, 20, 11, 1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0][..]
         );
     }
@@ -274,7 +275,7 @@ mod tests {
         let packet = ctx.packet(&Bytes16 {});
         assert_eq!(packet.size(), 32);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[
                 0, 0, 0, 28, 11, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0
@@ -292,7 +293,7 @@ mod tests {
         // obvious when reading the original transport layer RFC).
         assert_eq!(packet.size(), 36);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[
                 0, 0, 0, 16, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -307,7 +308,7 @@ mod tests {
         let packet = ctx.packet(&Bytes1 {});
         assert_eq!(packet.size(), 36);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[
                 0, 0, 0, 16, 14, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -322,7 +323,7 @@ mod tests {
         let packet = ctx.packet(&Bytes8 {});
         assert_eq!(packet.size(), 36);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[
                 0, 0, 0, 16, 7, 1, 2, 3, 4, 5, 6, 7, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -337,7 +338,7 @@ mod tests {
         let packet = ctx.packet(&Bytes16 {});
         assert_eq!(packet.size(), 44);
         assert_eq!(
-            &SliceEncoder::encode(&packet)[..],
+            &SshCodec::encode(&packet)[..],
             &[
                 0, 0, 0, 24, 7, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 0, 0, 0, 0,
                 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
@@ -347,10 +348,7 @@ mod tests {
 
     pub struct Bytes1 {}
 
-    impl Encode for Bytes1 {
-        fn size(&self) -> usize {
-            1
-        }
+    impl SshEncode for Bytes1 {
         fn encode<E: SshEncoder>(&self, e: &mut E) {
             e.push_u8(1);
         }
@@ -358,10 +356,7 @@ mod tests {
 
     pub struct Bytes8 {}
 
-    impl Encode for Bytes8 {
-        fn size(&self) -> usize {
-            8
-        }
+    impl SshEncode for Bytes8 {
         fn encode<E: SshEncoder>(&self, e: &mut E) {
             e.push_u8(1);
             e.push_u8(2);
@@ -376,10 +371,7 @@ mod tests {
 
     pub struct Bytes16 {}
 
-    impl Encode for Bytes16 {
-        fn size(&self) -> usize {
-            16
-        }
+    impl SshEncode for Bytes16 {
         fn encode<E: SshEncoder>(&self, e: &mut E) {
             e.push_u8(1);
             e.push_u8(2);

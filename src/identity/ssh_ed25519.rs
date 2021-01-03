@@ -22,23 +22,17 @@ impl<'a> SshEd25519PublicKey<'a> {
     }
 }
 
-impl<'a> Encode for SshEd25519PublicKey<'a> {
-    fn size(&self) -> usize {
-        4 + SshEd25519::NAME.len() + 4 + self.0.len()
-    }
+impl<'a> SshEncode for SshEd25519PublicKey<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_str_framed(SshEd25519::NAME)?;
         e.push_bytes_framed(self.0)
     }
 }
 
-impl<'a> DecodeRef<'a> for SshEd25519PublicKey<'a> {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        c.expect_u32be(11)?;
-        c.expect_bytes(&SshEd25519::NAME)?;
-        c.expect_u32be(32)?;
-        let bytes = c.take_bytes(32)?;
-        Some(SshEd25519PublicKey(bytes.try_into().ok()?))
+impl<'a> SshDecodeRef<'a> for SshEd25519PublicKey<'a> {
+    fn decode<D: SshDecoder<'a>>(c: &mut D) -> Option<Self> {
+        c.expect_str_framed(SshEd25519::NAME)?;
+        c.take_bytes_framed()?.try_into().ok().map(Self)
     }
 }
 

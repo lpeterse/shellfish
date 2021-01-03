@@ -1,5 +1,5 @@
 use super::*;
-use crate::role::Role;
+use crate::core::Role;
 
 use async_std::io::Read;
 use async_std::stream::Stream;

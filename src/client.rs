@@ -6,6 +6,7 @@ pub use self::error::*;
 
 use crate::auth::*;
 use crate::connection::*;
+use crate::core::*;
 use crate::known_hosts::*;
 use crate::transport::*;
 
@@ -40,12 +41,12 @@ impl Client {
         let tc = &self.config.transport;
         let cc = &self.config.connection;
         let t = DefaultTransport::connect(tc, &kh, hostname, socket).await?;
-        let t = Box::new(t);
+        let t = GenericTransport::from(t);
         Ok(match self.username {
             Some(ref user) => UserAuth::request(t, cc, user, &self.auth_agent).await?,
             None => {
                 let n = <Connection as Service>::NAME;
-                let t = TransportExt::request_service(t, n).await?;
+                let t = t.request_service(n).await?;
                 Connection::new(cc, t)
             }
         })
@@ -83,3 +84,5 @@ impl Default for Client {
         }
     }
 }
+
+impl Role for Client {}

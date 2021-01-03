@@ -6,6 +6,7 @@ pub use self::error::*;
 
 use crate::auth::{Agent, LocalAgent, UserAuth, UserAuthRequest};
 use crate::connection::*;
+use crate::core::*;
 use crate::transport::*;
 use crate::util::BoxFuture;
 
@@ -46,11 +47,14 @@ impl Server {
         let agent = self.auth_agent.clone();
         let tconfig = self.config.transport.clone();
         let cconfig = self.config.connection.clone();
-        let future = Box::pin(async move {
-            let t = DefaultTransport::accept(tconfig, agent, socket).await?;
-            let r = UserAuth::offer(Box::new(t), cconfig).await?;
-            Ok(r)
-        });
-        Ok((future, addr))
+        todo!()
+        // let future = Box::pin(async move {
+        //     let t = DefaultTransport::accept(tconfig, agent, socket).await?;
+        //     let r = UserAuth::offer(Box::new(t), cconfig).await?;
+        //     Ok(r)
+        // });
+        // Ok((future, addr))
     }
 }
+
+impl Role for Server {}

@@ -12,11 +12,7 @@ pub struct RsaPublicKey {
     pub public_n: Vec<u8>,
 }
 
-impl Encode for RsaPublicKey {
-    fn size(&self) -> usize {
-        12 + SshRsa::NAME.len() + self.public_e.len() + self.public_n.len()
-    }
-
+impl SshEncode for RsaPublicKey {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_str_framed(SshRsa::NAME)?;
         e.push_bytes_framed(&self.public_e)?;
@@ -24,9 +20,9 @@ impl Encode for RsaPublicKey {
     }
 }
 
-impl<'a> DecodeRef<'a> for RsaPublicKey {
-    fn decode<D: Decoder<'a>>(c: &mut D) -> Option<Self> {
-        let _: &str = DecodeRef::decode(c).filter(|x| *x == SshRsa::NAME)?;
+impl<'a> SshDecodeRef<'a> for RsaPublicKey {
+    fn decode<D: SshDecoder<'a>>(c: &mut D) -> Option<Self> {
+        c.expect_str_framed(SshRsa::NAME)?;
         let l = c.take_u32be()?;
         let e = Vec::from(c.take_bytes(l as usize)?);
         let l = c.take_u32be()?;

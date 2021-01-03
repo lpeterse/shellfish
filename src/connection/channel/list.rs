@@ -1,9 +1,9 @@
+use super::super::state::poll_send;
 use super::super::ConnectionConfig;
 use super::super::{MsgChannelOpen, MsgChannelOpenConfirmation, MsgChannelOpenFailure};
 use super::*;
 
-use crate::transport::Transport;
-use crate::transport::TransportExt;
+use crate::transport::GenericTransport;
 
 use async_std::task::{ready, Context, Poll};
 
@@ -149,7 +149,7 @@ impl ChannelList {
     pub fn poll(
         &mut self,
         cx: &mut Context,
-        transport: &mut Box<dyn Transport>,
+        transport: &mut GenericTransport,
     ) -> Poll<Result<(), ConnectionError>> {
         // Iterate over all channel slots and poll each present channel.
         // Remove channel if the futures is ready (close has been sent _and_ received).
@@ -169,7 +169,7 @@ impl ChannelList {
                                     maximum_packet_size: self.config.channel_max_packet_size,
                                     specific: &[],
                                 };
-                                ready!(TransportExt::poll_send(transport, cx, &msg))?;
+                                ready!(poll_send(transport, cx, &msg))?;
                                 let y = std::mem::replace(slot, Slot::Free);
                                 if let Slot::OpeningInbound2(y) = y {
                                     *slot = Slot::Open(y.ch);
@@ -178,7 +178,7 @@ impl ChannelList {
                             }
                             Poll::Ready(Err(reason)) => {
                                 let msg = MsgChannelOpenFailure::new(x.rid, reason);
-                                ready!(TransportExt::poll_send(transport, cx, &msg))?;
+                                ready!(poll_send(transport, cx, &msg))?;
                                 *slot = Slot::Free;
                             }
                             Poll::Pending => (),
@@ -193,7 +193,7 @@ impl ChannelList {
                                 self.config.channel_max_packet_size as u32,
                                 x.data.clone(),
                             );
-                            ready!(TransportExt::poll_send(transport, cx, &msg))?;
+                            ready!(poll_send(transport, cx, &msg))?;
                             x.sent = true;
                         }
                     }
@@ -202,7 +202,7 @@ impl ChannelList {
                         Poll::Ready(Ok(())) => {
                             log::warn!("FREE CHANNEL {}", id);
                             *slot = Slot::Free
-                        },
+                        }
                         Poll::Pending => (),
                     },
                 }
@@ -247,10 +247,10 @@ impl ChannelList {
         for slot in self.slots.iter_mut() {
             match std::mem::replace(slot, Slot::Free) {
                 Slot::Free => (),
-                Slot::Open(mut x) => x.terminate(e),
+                Slot::Open(mut x) => x.terminate(e.clone()),
                 Slot::OpeningInbound1(_) => (),
-                Slot::OpeningInbound2(mut x) => x.ch.terminate(e),
-                Slot::OpeningOutbound(x) => x.tx.send(Err(e)),
+                Slot::OpeningInbound2(mut x) => x.ch.terminate(e.clone()),
+                Slot::OpeningOutbound(x) => x.tx.send(Err(e.clone())),
             }
         }
     }

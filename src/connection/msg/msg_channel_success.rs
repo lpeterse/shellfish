@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug)]
 pub(crate) struct MsgChannelSuccess {
@@ -10,23 +10,19 @@ impl Message for MsgChannelSuccess {
     const NUMBER: u8 = 99;
 }
 
-impl Encode for MsgChannelSuccess {
-    fn size(&self) -> usize {
-        1 + 4
-    }
+impl SshEncode for MsgChannelSuccess {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)
     }
 }
 
-impl Decode for MsgChannelSuccess {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgChannelSuccess {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
+        Some(Self {
             recipient_channel: d.take_u32be()?,
-        }
-        .into()
+        })
     }
 }
 
@@ -50,13 +46,13 @@ mod tests {
         let msg = MsgChannelSuccess {
             recipient_channel: 23,
         };
-        assert_eq!(&[99, 0, 0, 0, 23][..], &SliceEncoder::encode(&msg)[..]);
+        assert_eq!(&[99, 0, 0, 0, 23][..], &SshCodec::encode(&msg).unwrap()[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 5] = [99, 0, 0, 0, 23];
-        let msg: MsgChannelSuccess = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgChannelSuccess = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
     }
 }

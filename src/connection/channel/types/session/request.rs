@@ -45,16 +45,7 @@ impl ChannelRequest for SessionRequest {
     }
 }
 
-impl Encode for SessionRequest {
-    fn size(&self) -> usize {
-        match self {
-            Self::EnvRequest(x) => x.size(),
-            Self::PtyRequest(x) => x.size(),
-            Self::ExecRequest(x) => x.size(),
-            Self::ShellRequest(x) => x.size(),
-            Self::SubsystemRequest(x) => x.size(),
-        }
-    }
+impl SshEncode for SessionRequest {
     fn encode<E: SshEncoder>(&self, e: &mut E) {
         match self {
             Self::EnvRequest(x) => x.encode(e),
@@ -78,13 +69,10 @@ impl ChannelRequest for EnvRequest {
     }
 }
 
-impl Encode for EnvRequest {
-    fn size(&self) -> usize {
-        Encode::size(&self.name) + Encode::size(&self.value)
-    }
+impl SshEncode for EnvRequest {
     fn encode<E: SshEncoder>(&self, e: &mut E) {
-        Encode::encode(&self.name, e);
-        Encode::encode(&self.value, e);
+        SshEncode::encode(&self.name, e);
+        SshEncode::encode(&self.value, e);
     }
 }
 
@@ -97,10 +85,7 @@ impl ChannelRequest for PtyRequest {
     }
 }
 
-impl Encode for PtyRequest {
-    fn size(&self) -> usize {
-        0
-    }
+impl SshEncode for PtyRequest {
     fn encode<E: SshEncoder>(&self, _e: &mut E) {
         // FIXME
     }
@@ -117,12 +102,9 @@ impl ChannelRequest for ExecRequest {
     }
 }
 
-impl Encode for ExecRequest {
-    fn size(&self) -> usize {
-        Encode::size(&self.command)
-    }
+impl SshEncode for ExecRequest {
     fn encode<E: SshEncoder>(&self, e: &mut E) {
-        Encode::encode(&self.command, e)
+        SshEncode::encode(&self.command, e)
     }
 }
 
@@ -135,10 +117,7 @@ impl ChannelRequest for ShellRequest {
     }
 }
 
-impl Encode for ShellRequest {
-    fn size(&self) -> usize {
-        0
-    }
+impl SshEncode for ShellRequest {
     fn encode<E: SshEncoder>(&self, _e: &mut E) {
         // Nothing to do
     }
@@ -155,10 +134,7 @@ impl ChannelRequest for SubsystemRequest {
     }
 }
 
-impl Encode for SubsystemRequest {
-    fn size(&self) -> usize {
-        0
-    }
+impl SshEncode for SubsystemRequest {
     fn encode<E: SshEncoder>(&self, _e: &mut E) {
         // FIXME
     }

@@ -35,7 +35,7 @@ impl KnownHosts {
             name
         };
         if let Some(cert) = id.as_cert() {
-            cert.validate_as_host(name)?;
+            cert.verify_for_host(name)?;
             self.query_files(name, id, Some(cert.authority())).await
         } else {
             self.query_files(name, id, None).await
@@ -53,7 +53,7 @@ impl KnownHosts {
         for path in &self.paths {
             match File::open(path).await {
                 Ok(file) => {
-                    found = Self::query_file(name, id, ca, file).await?;
+                    found |= Self::query_file(name, id, ca, file).await?;
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                     continue;
@@ -73,7 +73,7 @@ impl KnownHosts {
         let mut found = false;
         let mut lines = BufReader::new(file).lines();
         while let Some(line) = lines.next().await {
-            found = KnownHostsLine(&line?).test(name, id, ca)?;
+            found |= KnownHostsLine(&line?).test(name, id, ca)?;
         }
         Ok(found)
     }

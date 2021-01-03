@@ -13,16 +13,9 @@ impl<'a> Message for MsgSignRequest<'a> {
     const NUMBER: u8 = 13;
 }
 
-impl<'a> Encode for MsgSignRequest<'a> {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u8>()
-            + Encode::size(self.id)
-            + std::mem::size_of::<u32>()
-            + self.data.len()
-            + std::mem::size_of::<u32>()
-    }
+impl<'a> SshEncode for MsgSignRequest<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(<Self as Message>::NUMBER as u8)?;
+        e.push_u8(<Self as Message>::NUMBER)?;
         e.push(self.id)?;
         e.push_bytes_framed(self.data)?;
         e.push_u32be(self.flags)
@@ -44,7 +37,7 @@ mod tests {
         };
         assert_eq!(
             vec![13, 0, 0, 0, 3, 1, 2, 3, 0, 0, 0, 4, 100, 97, 116, 97, 0, 0, 0, 123],
-            SliceEncoder::encode(&msg)
+            SshCodec::encode(&msg).unwrap()
         );
     }
 }

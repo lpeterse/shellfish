@@ -1,6 +1,5 @@
 use super::*;
-use crate::auth::*;
-
+use crate::identity::*;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
@@ -37,6 +36,22 @@ pub struct TransportConfig {
     ///
     /// Defaults to the empty list.
     pub mac_algorithms: Vec<&'static str>,
+    /// The initial receive buffer size in bytes.
+    ///
+    /// Defaults to `1200`.
+    pub rx_buffer_size_min: usize,
+    /// The maximum receive buffer size in bytes.
+    ///
+    /// Defaults to `35000` (smaller values will fall-back to default).
+    pub rx_buffer_size_max: usize,
+    /// The initial send buffer size in bytes.
+    ///
+    /// Defaults to `1200`.
+    pub tx_buffer_size_min: usize,
+    /// The maximum send buffer size in bytes.
+    ///
+    /// Defaults to `35000` (smaller values will fall-back to default).
+    pub tx_buffer_size_max: usize,
 }
 
 impl Default for TransportConfig {
@@ -50,6 +65,10 @@ impl Default for TransportConfig {
             encryption_algorithms: ENCRYPTION_ALGORITHMS.to_vec(),
             compression_algorithms: COMPRESSION_ALGORITHMS.to_vec(),
             mac_algorithms: MAC_ALGORITHMS.to_vec(),
+            rx_buffer_size_min: 1200,
+            rx_buffer_size_max: 35000,
+            tx_buffer_size_min: 1200,
+            tx_buffer_size_max: 35000,
         }
     }
 }

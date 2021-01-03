@@ -1,6 +1,5 @@
 use super::*;
-
-use crate::util::codec::SliceDecoder;
+use crate::util::codec::*;
 
 #[derive(Debug)]
 pub struct ChannelOpenRequest {
@@ -29,7 +28,7 @@ impl ChannelOpenRequest {
     pub fn data<D: Channel>(&self) -> Result<D::Open, ConnectionError> {
         if self.is::<D>() {
             let e = ConnectionError::ChannelTypeMismatch;
-            return Ok(SliceDecoder::decode(&self.data).ok_or(e)?);
+            return Ok(SshCodec::decode(&self.data).ok_or(e)?);
         }
         Err(ConnectionError::ChannelTypeMismatch)
     }

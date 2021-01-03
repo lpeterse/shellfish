@@ -2,7 +2,7 @@ mod files;
 
 pub use self::files::*;
 
-use crate::auth::*;
+use crate::identity::*;
 use crate::util::BoxFuture;
 
 /// This trait captures the capability of verifying host identities.
@@ -19,12 +19,12 @@ pub trait KnownHostsLike: std::fmt::Debug + Send + Sync + 'static {
     fn verify(&self, name: &str, identity: &Identity) -> BoxFuture<Result<(), KnownHostsError>>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum KnownHostsError {
     Unverifiable,
     KeyRevoked,
     CertError(CertError),
-    OtherError(Box<dyn std::error::Error + Send + Sync + 'static>),
+    OtherError(String),
 }
 
 impl From<CertError> for KnownHostsError {
@@ -35,7 +35,7 @@ impl From<CertError> for KnownHostsError {
 
 impl From<std::io::Error> for KnownHostsError {
     fn from(e: std::io::Error) -> Self {
-        Self::OtherError(Box::new(e))
+        Self::OtherError(format!("{}", e))
     }
 }
 

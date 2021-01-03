@@ -17,25 +17,19 @@ pub struct ExitSignal {
     message: String,
 }
 
-impl Encode for ExitStatus {
-    fn size(&self) -> usize {
-        4
-    }
+impl SshEncode for ExitStatus {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(self.0)
     }
 }
 
-impl Decode for ExitStatus {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for ExitStatus {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_u32be().map(Self)
     }
 }
 
-impl Encode for ExitSignal {
-    fn size(&self) -> usize {
-        13 + self.signal.len() + self.message.len()
-    }
+impl SshEncode for ExitSignal {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_str_framed(&self.signal)?;
         e.push_u8(self.core_dumped as u8)?;
@@ -44,12 +38,12 @@ impl Encode for ExitSignal {
     }
 }
 
-impl Decode for ExitSignal {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        let signal = Decode::decode(d)?;
+impl SshDecode for ExitSignal {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+        let signal = SshDecode::decode(d)?;
         let core_dumped = d.take_bool()?;
-        let message = Decode::decode(d)?;
-        let _: &str = DecodeRef::decode(d)?;
+        let message = SshDecode::decode(d)?;
+        let _: &str = d.take_str_framed()?;
         Self {
             signal,
             core_dumped,
@@ -105,7 +99,7 @@ mod tests {
     #[test]
     fn test_exit_status_encode_01() {
         let x = ExitStatus(23);
-        let v = SliceEncoder::encode(&x);
+        let v = SshCodec::encode(&x).unwrap();
         assert_eq!(&v[..], &[0, 0, 0, 23][..]);
     }
 
@@ -116,7 +110,7 @@ mod tests {
             core_dumped: true,
             message: "msg".into(),
         };
-        let v = SliceEncoder::encode(&x);
+        let v = SshCodec::encode(&x).unwrap();
         assert_eq!(
             &v[..],
             &[0, 0, 0, 4, 65, 66, 82, 84, 1, 0, 0, 0, 3, 109, 115, 103, 0, 0, 0, 0][..]
@@ -125,13 +119,13 @@ mod tests {
 
     #[test]
     fn test_exit_status_decode_01() {
-        let x: ExitStatus = SliceDecoder::decode(&[0, 0, 0, 23][..]).unwrap();
+        let x: ExitStatus = SshCodec::decode(&[0, 0, 0, 23][..]).unwrap();
         assert_eq!(x.0, 23);
     }
 
     #[test]
     fn test_exit_signal_decode_01() {
-        let x: ExitSignal = SliceDecoder::decode(
+        let x: ExitSignal = SshCodec::decode(
             &[
                 0, 0, 0, 4, 65, 66, 82, 84, 1, 0, 0, 0, 3, 109, 115, 103, 0, 0, 0, 0,
             ][..],

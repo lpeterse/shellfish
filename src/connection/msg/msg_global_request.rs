@@ -22,10 +22,7 @@ impl Message for MsgGlobalRequest {
     const NUMBER: u8 = 80;
 }
 
-impl Encode for MsgGlobalRequest {
-    fn size(&self) -> usize {
-        1 + 4 + self.name.len() + 1 + self.data.len()
-    }
+impl SshEncode for MsgGlobalRequest {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_str_framed(&self.name)?;
@@ -34,12 +31,12 @@ impl Encode for MsgGlobalRequest {
     }
 }
 
-impl Decode for MsgGlobalRequest {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgGlobalRequest {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            name: DecodeRef::decode(d)?,
-            want_reply: d.take_u8()? != 0,
+            name: d.take_str_framed()?.into(),
+            want_reply: d.take_bool()?,
             data: d.take_bytes_all()?.into(),
         }
         .into()
@@ -72,14 +69,14 @@ mod tests {
         };
         assert_eq!(
             &[80, 0, 0, 0, 4, 110, 97, 109, 101, 1, 100, 97, 116, 97][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 14] = [80, 0, 0, 0, 4, 110, 97, 109, 101, 1, 100, 97, 116, 97];
-        let msg: MsgGlobalRequest = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgGlobalRequest = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.name, "name");
         assert_eq!(msg.want_reply, true);
         assert_eq!(msg.data, &b"data"[..]);

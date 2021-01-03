@@ -1,6 +1,6 @@
 use super::pattern::*;
 use super::KnownHostsError;
-use crate::auth::*;
+use crate::identity::*;
 
 /// A single line of a `known_hosts` file.
 pub struct KnownHostsLine<'a>(pub &'a str);

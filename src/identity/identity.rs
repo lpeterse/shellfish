@@ -14,15 +14,15 @@ pub type PublicKey = Identity;
 
 impl Identity {
     pub fn algorithm(&self) -> &str {
-        SliceDecoder::decode_prefix(&self.0).unwrap_or("")
+        RefDecoder::new(&self.0).take_str_framed().unwrap_or("")
     }
 
     pub fn as_ssh_ed25519(&self) -> Option<SshEd25519PublicKey> {
-        SliceDecoder::decode(&self.0)
+        SshCodec::decode(&self.0)
     }
 
     pub fn as_ssh_ed25519_cert(&self) -> Option<SshEd25519Cert> {
-        SliceDecoder::decode(&self.0)
+        SshCodec::decode(&self.0)
     }
 
     pub fn as_cert(&self) -> Option<Box<dyn Cert>> {
@@ -40,17 +40,14 @@ impl From<Vec<u8>> for Identity {
     }
 }
 
-impl Encode for Identity {
-    fn size(&self) -> usize {
-        4 + self.0.len()
-    }
+impl SshEncode for Identity {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_bytes_framed(&self.0)
     }
 }
 
-impl Decode for Identity {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for Identity {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         let len = d.take_u32be()?;
         let bytes = d.take_bytes(len as usize)?;
         Some(Self(Vec::from(bytes)))

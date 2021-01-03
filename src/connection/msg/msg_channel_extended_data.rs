@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug)]
 pub(crate) struct MsgChannelExtendedData<'a> {
@@ -22,10 +22,7 @@ impl<'a> Message for MsgChannelExtendedData<'a> {
     const NUMBER: u8 = 95;
 }
 
-impl<'a> Encode for MsgChannelExtendedData<'a> {
-    fn size(&self) -> usize {
-        1 + 4 + 4 + 4 + self.data.len()
-    }
+impl<'a> SshEncode for MsgChannelExtendedData<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push_u32be(self.recipient_channel)?;
@@ -34,19 +31,14 @@ impl<'a> Encode for MsgChannelExtendedData<'a> {
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgChannelExtendedData<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl<'a> SshDecodeRef<'a> for MsgChannelExtendedData<'a> {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        let recipient_channel = d.take_u32be()?;
-        let data_type_code = d.take_u32be()?;
-        let len = d.take_u32be()?;
-        let data = d.take_bytes(len as usize)?;
-        Self {
-            recipient_channel,
-            data_type_code,
-            data,
-        }
-        .into()
+        Some(Self {
+            recipient_channel: d.take_u32be()?,
+            data_type_code: d.take_u32be()?,
+            data: d.take_bytes_framed()?,
+        })
     }
 }
 
@@ -76,14 +68,14 @@ mod tests {
         };
         assert_eq!(
             &[95, 0, 0, 0, 23, 0, 0, 0, 4, 0, 0, 0, 3, 1, 2, 3][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 16] = [95, 0, 0, 0, 23, 0, 0, 0, 4, 0, 0, 0, 3, 1, 2, 3];
-        let msg: MsgChannelExtendedData = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgChannelExtendedData = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
         assert_eq!(msg.data_type_code, 4);
         assert_eq!(msg.data, [1, 2, 3]);

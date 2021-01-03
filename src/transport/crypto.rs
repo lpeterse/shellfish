@@ -1,11 +1,9 @@
 mod compression;
 mod encryption;
-mod mac;
 mod kex;
 
 pub use self::compression::*;
 pub use self::encryption::*;
-pub use self::mac::*;
 pub use self::kex::*;
 
 pub(crate) const MAC_ALGORITHMS: [&'static str; 0] = [];

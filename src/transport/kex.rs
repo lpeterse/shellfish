@@ -3,16 +3,10 @@ mod server;
 
 pub use self::client::*;
 pub use self::cookie::*;
-pub use self::ecdh_algorithm::*;
-pub use self::ecdh_hash::*;
-pub use self::msg_ecdh_init::*;
-pub use self::msg_ecdh_reply::*;
-pub use self::msg_kex_init::*;
-pub use self::msg_new_keys::*;
+pub use self::ecdh::*;
+pub use self::msg::*;
 pub use self::server::*;
-
 use super::*;
-
 use async_std::task::Poll;
 
 /// A state machine for key exchange.

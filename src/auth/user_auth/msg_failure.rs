@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
 pub struct MsgFailure<T = String> {
@@ -11,25 +11,24 @@ impl Message for MsgFailure {
     const NUMBER: u8 = 51;
 }
 
-impl Encode for MsgFailure<&'static str> {
-    fn size(&self) -> usize {
-        1 + NameList::size(&self.methods) + 1
-    }
+impl SshEncode for MsgFailure<&'static str> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(MsgFailure::NUMBER as u8)?;
-        NameList::encode(&self.methods, e)?;
-        e.push_u8(self.partial_success as u8)
+        e.push_u8(MsgFailure::NUMBER)?;
+        e.push_name_list(&self.methods)?;
+        e.push_bool(self.partial_success)
     }
 }
 
-impl Decode for MsgFailure {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        d.take_u8().filter(|x| x == &<Self as Message>::NUMBER)?;
-        Self {
-            methods: NameList::decode_string(d)?,
-            partial_success: d.take_u8().map(|x| x != 0)?,
-        }
-        .into()
+impl SshDecode for MsgFailure {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+        d.expect_u8(<Self as Message>::NUMBER)?;
+        let methods = d.take_name_list()?.filter(|x| !x.is_empty());
+        let methods = methods.map(Into::into).collect();
+        let partial_success = d.take_bool()?;
+        Some(Self {
+            methods,
+            partial_success,
+        })
     }
 }
 
@@ -60,7 +59,7 @@ mod tests {
                 51, 0, 0, 0, 18, 112, 97, 115, 115, 119, 111, 114, 100, 44, 112, 117, 98, 108, 105,
                 99, 107, 101, 121, 1
             ][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
@@ -70,10 +69,7 @@ mod tests {
             methods: vec![],
             partial_success: false,
         };
-        assert_eq!(
-            &[51, 0, 0, 0, 0, 0][..],
-            &SliceEncoder::encode(&msg)[..]
-        );
+        assert_eq!(&[51, 0, 0, 0, 0, 0][..], &SshCodec::encode(&msg).unwrap()[..]);
     }
 
     #[test]
@@ -82,7 +78,7 @@ mod tests {
             51, 0, 0, 0, 18, 112, 97, 115, 115, 119, 111, 114, 100, 44, 112, 117, 98, 108, 105, 99,
             107, 101, 121, 1,
         ];
-        let msg: MsgFailure = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgFailure = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.methods, vec!["password", "publickey"]);
         assert_eq!(msg.partial_success, true);
     }
@@ -90,7 +86,7 @@ mod tests {
     #[test]
     fn test_decode_02() {
         let buf: [u8; 6] = [51, 0, 0, 0, 0, 0];
-        let msg: MsgFailure = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgFailure = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.methods.is_empty(), true);
         assert_eq!(msg.partial_success, false);
     }

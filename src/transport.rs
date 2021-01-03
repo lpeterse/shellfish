@@ -2,45 +2,29 @@ pub(crate) mod config;
 pub(crate) mod cookie;
 pub(crate) mod crypto;
 pub(crate) mod default;
-pub(crate) mod ecdh_algorithm;
-pub(crate) mod ecdh_hash;
+pub(crate) mod disconnect;
+pub(crate) mod ecdh;
 pub(crate) mod error;
-pub(crate) mod identification;
+pub(crate) mod id;
 pub(crate) mod kex;
-pub(crate) mod key_streams;
-pub(crate) mod message;
-pub(crate) mod msg_debug;
-pub(crate) mod msg_disconnect;
-pub(crate) mod msg_ecdh_init;
-pub(crate) mod msg_ecdh_reply;
-pub(crate) mod msg_ignore;
-pub(crate) mod msg_kex_init;
-pub(crate) mod msg_new_keys;
-pub(crate) mod msg_service_accept;
-pub(crate) mod msg_service_request;
-pub(crate) mod msg_unimplemented;
+pub(crate) mod keys;
+pub(crate) mod msg;
 pub(crate) mod service;
-pub(crate) mod session_id;
+pub(crate) mod session;
 pub(crate) mod transceiver;
 
-pub use self::config::*;
-pub use self::default::*;
-pub use self::error::*;
-pub use self::identification::*;
-pub use self::message::*;
-pub use self::service::*;
-pub use self::session_id::*;
+pub(crate) use self::config::*;
+pub(crate) use self::crypto::*;
+pub(crate) use self::disconnect::*;
+pub(crate) use self::ecdh::*;
+pub(crate) use self::id::*;
+pub(crate) use self::kex::*;
+pub(crate) use self::msg::*;
+pub(crate) use self::service::*;
+pub(crate) use self::session::*;
 
-pub use self::crypto::*;
-pub use self::kex::*;
-use self::key_streams::*;
-use self::msg_debug::*;
-pub use self::msg_disconnect::*;
-use self::msg_ignore::*;
-use self::msg_service_accept::*;
-use self::msg_service_request::*;
-use self::msg_unimplemented::*;
-use self::transceiver::*;
+pub use self::default::DefaultTransport;
+pub use self::error::TransportError;
 
 use crate::auth::Agent;
 use crate::known_hosts::*;
@@ -58,51 +42,36 @@ use std::sync::Arc;
 
 pub const PAYLOAD_MAX_LEN: usize = 32_768;
 pub const PADDING_MIN_LEN: usize = 4;
-pub const PADDING_LEN_BYTES: usize = 1;
 pub const PACKET_MIN_LEN: usize = 16;
 pub const PACKET_MAX_LEN: usize = 35_000;
-pub const PACKET_LEN_BYTES: usize = 4;
 
 pub trait Transport: Debug + Send + Unpin + 'static {
-    /// Try to receive the next message buffer.
+    /// Try to receive the next message.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if no message is available for now.
     ///
-    /// NB: Polling drives kex to completion.
-    fn poll_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>>;
-
+    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>>;
     /// Consumed the current rx buffer (only after `rx_peek`).
     ///
     /// The message shall have been decoded and processed before being cosumed.
-    fn consume(&mut self);
-
-    /// Try to reserve buffer space for the next message to send.
+    fn rx_consume(&mut self) -> Result<(), TransportError>;
+    /// Try to allocate buffer space for the next message to send.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if the output buffer is too full and must be flushed first.
-    ///
-    /// NB: Polling drives kex to completion.
-    fn poll_alloc(&mut self, cx: &mut Context, len: usize) -> Poll<Result<&mut [u8], TransportError>>;
-
+    fn tx_alloc(&mut self, cx: &mut Context, len: usize)
+        -> Poll<Result<&mut [u8], TransportError>>;
     /// Commits the current tx buffer as ready for sending (only after `tx_alloc`).
     ///
     /// A message shall have been written to the tx buffer.
-    fn commit(&mut self);
-
+    fn tx_commit(&mut self) -> Result<(), TransportError>;
     /// Try to flush all pending operations and output buffers.
-    fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>>;
-
+    fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>>;
     /// Try to send MSG_DISCONNECT and swallow all errors.
     ///
     /// Message delivery may silently fail on errors or if output buffer is full.
     fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason);
-
-    /// Try to send MSG_UNIMPLEMENTED and swallow all errors.
-    ///
-    /// Message delivery may silently fail on errors or if output buffer is full.
-    fn send_unimplemented(&mut self, cx: &mut Context);
-
     /// Return the connection's session id.
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
@@ -110,222 +79,114 @@ pub trait Transport: Debug + Send + Unpin + 'static {
     fn session_id(&self) -> Result<&SessionId, TransportError>;
 }
 
-pub struct TransportExt {}
+/// A box wrapper around all types that implement [Transport] with extra async methods.
+///
+/// This is the type you should be working with in generic code like service extensions etc.
+/// Decoupling the real transport by a level of indirection is also useful for testing.
+///
+/// Serveral convenient async methods for sending and receiving are supplied. They are easy to work
+/// with, but do not offer features like direct buffer access which is required for highest
+/// performance. In such a case the re-exposed the low-level [Transport] methods need to be used.
+#[derive(Debug)]
+pub struct GenericTransport(Box<dyn Transport>);
 
-impl TransportExt {
-    /// Send a message.
-    pub async fn send<M: Encode>(
-        t: &mut Box<dyn Transport>,
-        msg: &M,
-    ) -> Result<(), TransportError> {
-        poll_fn(|cx| Self::poll_send(t, cx, msg)).await
+impl GenericTransport {
+    /// Create a new boxed transport object.
+    ///
+    /// The passed transport should already be connected as this type does not offer methods
+    /// for the establishment of connections. Connected transports are role-agnostic: Both the
+    /// client and server sides behave exactly the same form a users perspective (just like
+    /// network sockets).
+    pub fn from<T: Transport>(transport: T) -> Self {
+        Self(Box::new(transport))
     }
-
-    /// Receive a message.
-    pub async fn receive<M: Decode>(t: &mut Box<dyn Transport>) -> Result<M, TransportError> {
+    /// Send a message.
+    ///
+    /// You may only send non-transport message or the behavior is undefined.
+    /// Sending a message only enqueues it for transmission, but it is not guaranteed that it has
+    /// been transmitted when this function returns. Use [flush](Self::flush) when you want all
+    /// queued messages to be transmitted (but use it wisely).
+    pub async fn send<M: SshEncode>(&mut self, msg: &M) -> Result<(), TransportError> {
         poll_fn(|cx| {
-            let rx = ready!(t.poll_peek(cx))?;
-            let msg = SliceDecoder::decode(rx).ok_or(TransportError::DecoderError)?;
-            t.consume();
+            let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
+            let buf = ready!(self.tx_alloc(cx, size))?;
+            SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
+            self.tx_commit();
+            Poll::Ready(Ok(()))
+        })
+        .await
+    }
+    /// Receive a message.
+    ///
+    /// You will only receive non-transport messages (others are dispatched internally).
+    /// The receive call blocks until either the next non-transport message arrives or an error
+    /// occurs.
+    pub async fn receive<M: SshDecode>(&mut self) -> Result<M, TransportError> {
+        poll_fn(|cx| {
+            let rx = ready!(self.rx_peek(cx))?;
+            let msg = SshCodec::decode(rx).ok_or(TransportError::InvalidEncoding)?;
+            self.rx_consume();
             Poll::Ready(Ok(msg))
         })
         .await
     }
-
-    /// Flush the transport.
-    pub async fn flush(t: &mut Box<dyn Transport>) -> Result<(), TransportError> {
-        poll_fn(|cx| t.poll_flush(cx)).await
+    /// Flush all output buffers.
+    ///
+    /// When the function returns without an error it is guaranteed that all messages that have
+    /// previously been enqueued with [send](Self::send) have been transmitted and all output
+    /// buffers are empty. Of course, this does not imply anything about successful reception of
+    /// those messages.
+    ///
+    /// Do not flush too deliberately! The transport will automatically transmit the output buffers
+    /// when you continue filling them by sending messages. Flush shall rather be used when
+    /// you sent something like a request and need to make sure it has been transmitted before
+    /// starting to wait for the response.
+    pub async fn flush(&mut self) -> Result<(), TransportError> {
+        poll_fn(|cx| self.tx_flush(cx)).await
     }
-
     /// Request a service by name.
     ///
-    /// Service requests either succeeed or the connection is terminated by a disconnect message.
-    pub async fn request_service(
-        t: Box<dyn Transport>,
-        service_name: &str,
-    ) -> Result<Box<dyn Transport>, TransportError> {
-        let mut t = t;
+    /// Service requests either succeed or the connection gets terminated with a disconnect message.
+    /// You cannot re-try with another service (which is why the method consumes `self`).
+    ///
+    /// Although any service might be requested by this method, in reality it is only really
+    /// useful for requesting the `ssh-userauth` service which in turn requests another service.
+    /// Requesting a service through this method means you're requesting a public/anonymous service.
+    pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
         let msg = MsgServiceRequest(service_name);
-        Self::send(&mut t, &msg).await?;
+        self.send(&msg).await?;
         log::debug!("Sent MSG_SERVICE_REQUEST");
-        Self::flush(&mut t).await?;
-        Self::receive::<MsgServiceAccept>(&mut t).await?;
+        self.flush().await?;
+        self.receive::<MsgServiceAccept>().await?;
         log::debug!("Received MSG_SERVICE_ACCEPT");
-        Ok(t)
+        Ok(self)
     }
+}
 
-    pub async fn offer_service(
-        _t: Box<dyn Transport>,
-        _service_name: &str,
-    ) -> Result<Box<dyn Transport>, TransportError> {
-        todo!()
+impl Transport for GenericTransport {
+    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>> {
+        self.0.rx_peek(cx)
     }
-
-    pub fn poll_send<M: Encode>(
-        t: &mut Box<dyn Transport>,
+    fn rx_consume(&mut self) -> Result<(), TransportError> {
+        self.0.rx_consume()
+    }
+    fn tx_alloc(
+        &mut self,
         cx: &mut Context,
-        msg: &M,
-    ) -> Poll<Result<(), TransportError>> {
-        let buf = ready!(t.poll_alloc(cx, msg.size()))?;
-        SliceEncoder::encode_into(msg, buf);
-        t.commit();
-        Poll::Ready(Ok(()))
+        len: usize,
+    ) -> Poll<Result<&mut [u8], TransportError>> {
+        self.0.tx_alloc(cx, len)
+    }
+    fn tx_commit(&mut self) -> Result<(), TransportError> {
+        self.0.tx_commit()
+    }
+    fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        self.0.tx_flush(cx)
+    }
+    fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+        self.0.send_disconnect(cx, reason)
+    }
+    fn session_id(&self) -> Result<&SessionId, TransportError> {
+        self.0.session_id()
     }
 }
-
-/*
-#[cfg(test)]
-pub mod tests {
-    use super::*;
-
-    use std::collections::VecDeque;
-
-    pub struct TestTransport {
-        send_count: usize,
-        receive_count: usize,
-        consume_count: usize,
-        flush_count: usize,
-        rx_buf: VecDeque<Vec<u8>>,
-        tx_buf: Vec<Vec<u8>>,
-        tx_sent: Vec<Vec<Vec<u8>>>,
-        tx_ready: bool,
-        tx_disconnect: Option<DisconnectReason>,
-        error: Option<TransportError>,
-    }
-
-    impl TestTransport {
-        pub fn new() -> Self {
-            Self {
-                send_count: 0,
-                receive_count: 0,
-                consume_count: 0,
-                flush_count: 0,
-                rx_buf: VecDeque::new(),
-                tx_buf: vec![],
-                tx_sent: vec![],
-                tx_ready: false,
-                tx_disconnect: None,
-                error: None,
-            }
-        }
-
-        pub fn check_error(&self) -> Result<(), TransportError> {
-            if let Some(e) = self.error {
-                Err(e)
-            } else {
-                Ok(())
-            }
-        }
-    }
-
-    impl TestTransport {
-        pub fn send_count(&self) -> usize {
-            self.send_count
-        }
-        pub fn receive_count(&self) -> usize {
-            self.receive_count
-        }
-        pub fn consume_count(&self) -> usize {
-            self.consume_count
-        }
-        pub fn flush_count(&self) -> usize {
-            self.flush_count
-        }
-        pub fn set_tx_ready(&mut self, ready: bool) {
-            self.tx_ready = ready;
-        }
-        pub fn tx_buf(&self) -> Vec<Vec<u8>> {
-            self.tx_buf.clone()
-        }
-        pub fn tx_sent(&self) -> Vec<Vec<Vec<u8>>> {
-            self.tx_sent.clone()
-        }
-        pub fn tx_disconnect(&self) -> Option<DisconnectReason> {
-            self.tx_disconnect
-        }
-        pub fn rx_push<E: Encode>(&mut self, msg: &E) {
-            self.rx_buf.push_back(SliceEncoder::encode(msg))
-        }
-        pub fn set_error(&mut self, e: TransportError) {
-            self.error = Some(e)
-        }
-    }
-
-    impl Transport for TestTransport {
-        fn rx_buffer(&self) -> Option<&[u8]> {
-            panic!()
-        }
-        fn tx_buffer(&mut self) -> &mut [u8] {
-            panic!()
-        }
-
-        fn decode<Msg: Decode>(&mut self) -> Option<Msg> {
-            if let Some(data) = self.rx_buf.front() {
-                SliceDecoder::decode(data)
-            } else {
-                None
-            }
-        }
-        fn decode_ref<'a, Msg: DecodeRef<'a>>(&'a mut self) -> Option<Msg> {
-            if let Some(data) = self.rx_buf.front() {
-                SliceDecoder::decode(data)
-            } else {
-                None
-            }
-        }
-        fn consume(&mut self) {
-            if self.rx_buf.pop_front().is_none() {
-                panic!("consume called on empty rx_buf")
-            }
-        }
-        fn flushed(&self) -> bool {
-            todo!("flushed")
-        }
-        fn poll_flush(&mut self, _cx: &mut Context) -> Poll<Result<(), TransportError>> {
-            self.flush_count += 1;
-            self.check_error()?;
-            if !self.tx_buf.is_empty() {
-                let buf = std::mem::replace(&mut self.tx_buf, vec![]);
-                self.tx_sent.push(buf);
-                Poll::Ready(Ok(()))
-            } else {
-                Poll::Ready(Ok(()))
-            }
-        }
-        fn poll_send<M: Encode>(
-            &mut self,
-            _cx: &mut Context,
-            msg: &M,
-        ) -> Poll<Result<(), TransportError>> {
-            self.send_count += 1;
-            self.check_error()?;
-            if self.tx_ready {
-                self.tx_buf.push(SliceEncoder::encode(msg));
-                Poll::Ready(Ok(()))
-            } else {
-                Poll::Pending
-            }
-        }
-        fn poll_receive(&mut self, _cx: &mut Context) -> Poll<Result<(), TransportError>> {
-            self.receive_count += 1;
-            self.check_error()?;
-            if !self.rx_buf.is_empty() {
-                Poll::Ready(Ok(()))
-            } else {
-                Poll::Pending
-            }
-        }
-        fn send_disconnect(&mut self, _cx: &mut Context, reason: DisconnectReason) {
-            if self.tx_ready {
-                self.tx_disconnect = Some(reason);
-            }
-        }
-        fn send_unimplemented(&mut self, _cx: &mut Context) {
-            todo!("send_unimplemented")
-        }
-        fn session_id(&self) -> Result<&SessionId, TransportError> {
-            todo!("session_id")
-        }
-    }
-}
-*/

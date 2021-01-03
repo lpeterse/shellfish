@@ -1,21 +1,9 @@
+use super::*;
 use crate::util::codec::*;
 use rand::rngs::OsRng;
 
-pub trait EcdhAlgorithm {
-    type PublicKey;
-    type EphemeralSecret;
-    type SharedSecret;
-
-    fn new() -> Self::EphemeralSecret;
-    fn public(s: &Self::EphemeralSecret) -> Self::PublicKey;
-    fn diffie_hellman(s: Self::EphemeralSecret, p: &Self::PublicKey) -> Self::SharedSecret;
-
-    fn public_as_ref(x: &Self::PublicKey) -> &[u8];
-    fn secret_as_ref(x: &Self::SharedSecret) -> &[u8];
-}
-
 #[derive(Debug)]
-pub struct X25519 {}
+pub struct X25519;
 
 impl EcdhAlgorithm for X25519 {
     type PublicKey = x25519_dalek::PublicKey;
@@ -43,18 +31,15 @@ impl EcdhAlgorithm for X25519 {
     }
 }
 
-impl Encode for x25519_dalek::PublicKey {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u32>() + 32
-    }
+impl SshEncode for x25519_dalek::PublicKey {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(32)?;
         e.push_bytes(self.as_bytes())
     }
 }
 
-impl Decode for x25519_dalek::PublicKey {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for x25519_dalek::PublicKey {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u32be(32)?;
         let mut buf: [u8; 32] = [0; 32];
         d.take_bytes_into(&mut buf)?;
@@ -67,21 +52,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_debug_01() {
-        assert_eq!("X25519", format!("{:?}", X25519 {}));
-    }
-
-    #[test]
-    fn test_code_01() {
+    fn x25519_encode_decode() {
         let s = X25519::new();
         let p1: <X25519 as EcdhAlgorithm>::PublicKey = <X25519 as EcdhAlgorithm>::public(&s);
-        let v = SliceEncoder::encode(&p1);
-        let p2: <X25519 as EcdhAlgorithm>::PublicKey = SliceDecoder::decode(&v[..]).unwrap();
+        let v = SshCodec::encode(&p1).unwrap();
+        let p2: <X25519 as EcdhAlgorithm>::PublicKey = SshCodec::decode(&v[..]).unwrap();
         assert_eq!(p1.as_bytes(), p2.as_bytes());
     }
 
     #[test]
-    fn test_dh_01() {
+    fn x25519_diffie_hellman() {
         let s1 = X25519::new();
         let s2 = X25519::new();
         let p1: <X25519 as EcdhAlgorithm>::PublicKey = <X25519 as EcdhAlgorithm>::public(&s1);

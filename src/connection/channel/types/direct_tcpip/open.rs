@@ -15,15 +15,7 @@ pub struct DirectTcpIpOpen {
     pub src_port: u16,
 }
 
-impl Encode for DirectTcpIpOpen {
-    fn size(&self) -> usize {
-        let mut n = 0;
-        n += 4 + self.dst_host.len();
-        n += 4;
-        n += 4 + self.src_addr.to_string().len();
-        n += 4;
-        n
-    }
+impl SshEncode for DirectTcpIpOpen {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_str_framed(&self.dst_host)?;
         e.push_u32be(self.dst_port as u32)?;
@@ -32,12 +24,12 @@ impl Encode for DirectTcpIpOpen {
     }
 }
 
-impl Decode for DirectTcpIpOpen {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for DirectTcpIpOpen {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         Self {
-            dst_host: Decode::decode(d)?,
+            dst_host: SshDecode::decode(d)?,
             dst_port: d.take_u32be()? as u16,
-            src_addr: IpAddr::from_str(DecodeRef::decode(d)?).ok()?,
+            src_addr: IpAddr::from_str(d.take_str_framed()?).ok()?,
             src_port: d.take_u32be()? as u16,
         }
         .into()
@@ -63,7 +55,7 @@ mod tests {
                 0, 0, 0, 9, 108, 111, 99, 97, 108, 104, 111, 115, 116, 0, 0, 0, 123, 0, 0, 0, 9,
                 49, 50, 55, 46, 48, 46, 48, 46, 49, 0, 0, 1, 200
             ][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
@@ -80,7 +72,7 @@ mod tests {
                 0, 0, 0, 9, 108, 111, 99, 97, 108, 104, 111, 115, 116, 0, 0, 0, 123, 0, 0, 0, 3,
                 58, 58, 49, 0, 0, 1, 200
             ][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
@@ -90,7 +82,7 @@ mod tests {
             0, 0, 0, 9, 108, 111, 99, 97, 108, 104, 111, 115, 116, 0, 0, 0, 123, 0, 0, 0, 9, 49,
             50, 55, 46, 48, 46, 48, 46, 49, 0, 0, 1, 200,
         ];
-        let actual: DirectTcpIpOpen = SliceDecoder::decode(&buf[..]).unwrap();
+        let actual: DirectTcpIpOpen = SshCodec::decode(&buf[..]).unwrap();
         let expected = DirectTcpIpOpen {
             dst_host: "localhost".into(),
             dst_port: 123,
@@ -106,7 +98,7 @@ mod tests {
             0, 0, 0, 9, 108, 111, 99, 97, 108, 104, 111, 115, 116, 0, 0, 0, 123, 0, 0, 0, 3, 58,
             58, 49, 0, 0, 1, 200,
         ];
-        let actual: DirectTcpIpOpen = SliceDecoder::decode(&buf[..]).unwrap();
+        let actual: DirectTcpIpOpen = SshCodec::decode(&buf[..]).unwrap();
         let expected = DirectTcpIpOpen {
             dst_host: "localhost".into(),
             dst_port: 123,

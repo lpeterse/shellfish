@@ -29,21 +29,12 @@ impl From<Identification<&'static str>> for Identification {
     fn from(x: Identification<&'static str>) -> Self {
         Self {
             version: x.version.into(),
-            comment: x.comment.into()
+            comment: x.comment.into(),
         }
     }
 }
 
-impl<T: AsRef<[u8]>> Encode for Identification<T> {
-    fn size(&self) -> usize {
-        Self::PREFIX.len()
-            + self.version.as_ref().len()
-            + if self.comment.as_ref().is_empty() {
-                0
-            } else {
-                1 + self.comment.as_ref().len()
-            }
-    }
+impl<T: AsRef<[u8]>> SshEncode for Identification<T> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_bytes(&Self::PREFIX)?;
         e.push_bytes(&self.version.as_ref())?;
@@ -55,8 +46,8 @@ impl<T: AsRef<[u8]>> Encode for Identification<T> {
     }
 }
 
-impl Decode for Identification<String> {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for Identification<String> {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_bytes(&Self::PREFIX)?;
         let pred = |x| (x as char).is_ascii_graphic() && x != ('-' as u8) && x != (' ' as u8);
         let version = d.take_bytes_while(pred)?;
@@ -79,10 +70,7 @@ impl Decode for Identification<String> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CrLf<T>(pub T);
 
-impl <T: Encode> Encode for CrLf<&T> {
-    fn size(&self) -> usize {
-        self.0.size() + 2
-    }
+impl<T: SshEncode> SshEncode for CrLf<&T> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push(self.0)?;
         e.push_u8(b'\r')?;
@@ -91,9 +79,10 @@ impl <T: Encode> Encode for CrLf<&T> {
     }
 }
 
-impl <T: Decode> Decode for CrLf<T> {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
-        let t = Decode::decode(d)?;
+// FIXME
+impl<T: SshDecode> SshDecode for CrLf<T> {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+        let t = SshDecode::decode(d)?;
         d.expect_u8(b'\r')?;
         d.expect_u8(b'\n')?;
         Some(CrLf(t))
@@ -106,7 +95,7 @@ mod tests {
 
     #[test]
     fn test_default_01() {
-        let id = SliceEncoder::encode(&Identification::default());
+        let id = SshCodec::encode(&Identification::default()).unwrap();
         let id_ = concat!(
             "SSH-2.0-",
             env!("CARGO_PKG_NAME"),
@@ -119,7 +108,7 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let id: Identification<String> = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &SliceEncoder::encode(&id)[..]);
+        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &SshCodec::encode(&id).unwrap()[..]);
     }
 
     /// Test the branch where the input is longer than MAX_LEN.
@@ -132,19 +121,19 @@ mod tests {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         assert_eq!(
             None,
-            SliceDecoder::decode::<Identification<String>>(input.as_ref())
+            SshCodec::decode::<Identification<String>>(input.as_ref())
         );
     }
 
     #[test]
     fn test_decode_02() {
         let id = Identification::new("ssh_0.1.0".into(), "".into());
-        assert_eq!(Some(id), SliceDecoder::decode(b"SSH-2.0-ssh_0.1.0"));
+        assert_eq!(Some(id), SshCodec::decode(b"SSH-2.0-ssh_0.1.0"));
     }
 
     #[test]
     fn test_decode_03() {
         let id = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(Some(id), SliceDecoder::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
+        assert_eq!(Some(id), SshCodec::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
     }
 }

@@ -11,23 +11,18 @@ impl Message for MsgSignResponse {
     const NUMBER: u8 = 14;
 }
 
-impl Encode for MsgSignResponse {
-    fn size(&self) -> usize {
-        std::mem::size_of::<u8>() + Encode::size(&self.signature)
-    }
+impl SshEncode for MsgSignResponse {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(<Self as Message>::NUMBER as u8)?;
+        e.push_u8(<Self as Message>::NUMBER)?;
         e.push(&self.signature)
     }
 }
 
-impl Decode for MsgSignResponse {
-    fn decode<'a, D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgSignResponse {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
-            signature: DecodeRef::decode(d)?,
-        }
-        .into()
+        let signature = d.take()?;
+        Some(Self { signature })
     }
 }
 
@@ -47,7 +42,7 @@ mod tests {
                 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,
                 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3
             ],
-            SliceEncoder::encode(&msg)
+            SshCodec::encode(&msg).unwrap()
         );
     }
 
@@ -58,7 +53,7 @@ mod tests {
         };
         assert_eq!(
             Some(msg),
-            SliceDecoder::decode(
+            SshCodec::decode(
                 &[
                     14, 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57,
                     0, 0, 0, 64, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,

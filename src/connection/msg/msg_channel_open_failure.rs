@@ -58,10 +58,7 @@ impl<'a> Message for MsgChannelOpenFailure {
     const NUMBER: u8 = 92;
 }
 
-impl Encode for MsgChannelOpenFailure {
-    fn size(&self) -> usize {
-        1 + 4 + 4 + 4 + self.description.len() + 4 + self.language.len()
-    }
+impl SshEncode for MsgChannelOpenFailure {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
         e.push_u32be(self.recipient_channel)?;
@@ -71,16 +68,15 @@ impl Encode for MsgChannelOpenFailure {
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgChannelOpenFailure {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl<'a> SshDecodeRef<'a> for MsgChannelOpenFailure {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::NUMBER)?;
-        Self {
+        Some(Self {
             recipient_channel: d.take_u32be()?,
-            reason: ChannelOpenFailure(d.take_u32be()?),
-            description: DecodeRef::decode(d)?,
-            language: DecodeRef::decode(d)?,
-        }
-        .into()
+            reason: d.take_u32be().map(ChannelOpenFailure)?,
+            description: d.take_str_framed()?.into(),
+            language: d.take_str_framed()?.into(),
+        })
     }
 }
 
@@ -139,7 +135,7 @@ mod tests {
                 92, 0, 0, 0, 23, 0, 0, 0, 1, 0, 0, 0, 4, 100, 101, 115, 99, 0, 0, 0, 4, 108, 97,
                 110, 103
             ][..],
-            &SliceEncoder::encode(&msg)[..]
+            &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
@@ -149,7 +145,7 @@ mod tests {
             92, 0, 0, 0, 23, 0, 0, 0, 1, 0, 0, 0, 4, 100, 101, 115, 99, 0, 0, 0, 4, 108, 97, 110,
             103,
         ];
-        let msg: MsgChannelOpenFailure = SliceDecoder::decode(&buf[..]).unwrap();
+        let msg: MsgChannelOpenFailure = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
         assert_eq!(msg.reason, ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED);
         assert_eq!(msg.description, "desc");

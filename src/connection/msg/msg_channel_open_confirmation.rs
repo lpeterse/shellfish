@@ -13,10 +13,7 @@ impl<'a> Message for MsgChannelOpenConfirmation<'a> {
     const NUMBER: u8 = 91;
 }
 
-impl<'a> Encode for MsgChannelOpenConfirmation<'a> {
-    fn size(&self) -> usize {
-        1 + 4 + 4 + 4 + 4 + self.specific.len()
-    }
+impl<'a> SshEncode for MsgChannelOpenConfirmation<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
         e.push_u32be(self.recipient_channel)?;
@@ -27,16 +24,15 @@ impl<'a> Encode for MsgChannelOpenConfirmation<'a> {
     }
 }
 
-impl<'a> DecodeRef<'a> for MsgChannelOpenConfirmation<'a> {
-    fn decode<D: Decoder<'a>>(d: &mut D) -> Option<Self> {
+impl<'a> SshDecodeRef<'a> for MsgChannelOpenConfirmation<'a> {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        Self {
+        Some(Self {
             recipient_channel: d.take_u32be()?,
             sender_channel: d.take_u32be()?,
             initial_window_size: d.take_u32be()?,
             maximum_packet_size: d.take_u32be()?,
             specific: d.take_bytes_all()?,
-        }
-        .into()
+        })
     }
 }
