@@ -11,7 +11,7 @@ use super::*;
 use crate::transport::GenericTransport;
 use crate::util::check;
 
-use async_std::task::{ready, Context};
+use std::task::{ready, Context};
 use std::sync::{Arc, Mutex};
 
 const SSH_EXTENDED_DATA_STDERR: u32 = 1;
@@ -203,8 +203,8 @@ mod tests {
     use super::*;
     use crate::transport::tests::TestTransport;
     use crate::transport::TransportError;
-    use async_std::future::poll_fn;
-    use async_std::task::block_on;
+    use std::future::poll_fn;
+    use crate::util::runtime::block_on;
 
     // push_data: Happy path
     #[test]

@@ -4,8 +4,8 @@ use super::*;
 use crate::util::check;
 use crate::util::buffer::Buffer;
 
-use async_std::task::Context;
-use async_std::task::Waker;
+use std::task::Context;
+use std::task::Waker;
 
 #[derive(Debug)]
 pub struct ChannelState {
@@ -120,12 +120,13 @@ impl ChannelState {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    use async_std::future::poll_fn;
-    use async_std::task::block_on;
+    use std::future::poll_fn;
+    use crate::util::runtime::block_on;
 
     #[test]
     fn test_channel_state_inner_new_01() {
@@ -195,3 +196,4 @@ mod tests {
         }));
     }
 }
+*/

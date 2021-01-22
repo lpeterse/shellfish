@@ -1,7 +1,7 @@
 use super::*;
 
-use async_std::future::Future;
-use async_std::task::{ready, Context};
+use std::future::Future;
+use std::task::{ready, Context};
 use std::pin::Pin;
 
 pub struct ChannelOpenFuture<C: Channel> {

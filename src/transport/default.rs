@@ -1,4 +1,5 @@
 use super::transceiver::*;
+use crate::util::runtime::{Socket, TcpStream};
 use super::*;
 
 /// Implements the transport layer as described in RFC 4253.
@@ -17,14 +18,15 @@ impl<S: Socket> DefaultTransport<S> {
     /// The initial key exchange has been completed successfully when function returns.
     pub async fn connect(
         config: &Arc<TransportConfig>,
-        known_hosts: &Arc<dyn KnownHostsLike>,
-        hostname: String,
         socket: S,
+        host_name: &str,
+        host_port: u16,
+        host_verifier: &Arc<dyn HostVerifier>,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(config, socket);
         trx.tx_id(&config.identification).await?;
-        let id = trx.rx_id().await?;
-        let kex = ClientKex::new(&config, &known_hosts, id, hostname);
+        let id = trx.rx_id(true).await?;
+        let kex = ClientKex::new(config, id, host_name, host_port, host_verifier);
         let kex = Box::new(kex);
         let mut transport = Self { trx, kex };
         transport.rekey().await?;
@@ -34,16 +36,15 @@ impl<S: Socket> DefaultTransport<S> {
     /// Create a new transport acting as server.
     ///
     /// The initial key exchange has been completed successfully when function returns.
-    /// FIXME
     pub async fn accept(
-        config: Arc<TransportConfig>,
-        _auth_agent: Arc<dyn Agent>,
+        config: &Arc<TransportConfig>,
+        _agent: &Arc<dyn AuthAgent>,
         socket: S,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(&config, socket);
         trx.tx_id(&config.identification).await?;
-        let _id = trx.rx_id().await?;
-        let kex = ServerKex::new(&config);
+        let id = trx.rx_id(false).await?;
+        let kex = ServerKex::new(config, id);
         let kex = Box::new(kex);
         let mut transport = Self { trx, kex };
         transport.rekey().await?;
@@ -53,68 +54,18 @@ impl<S: Socket> DefaultTransport<S> {
     /// Initiate a rekeying and wait for it to complete.
     async fn rekey(&mut self) -> Result<(), TransportError> {
         self.kex.init(self.trx.tx_bytes(), self.trx.rx_bytes());
-        poll_fn(|cx| {
-            while self.kex.is_active() {
-                // FIXME
-                match self.rx_peek(cx).map(|x| x.map(|_| ())) {
-                    Poll::Ready(Err(e)) => Err(e)?,
-                    Poll::Pending if self.kex.is_active() => return Poll::Pending,
-                    _ => return Poll::Ready(Ok(())),
-                }
-            }
-            Poll::Ready(Ok(()))
-        })
-        .await
+        poll_fn(|cx| self.poll(cx, Condition::KexComplete)).await
     }
 
-    ///
-    ///
-    /// This function returns `Ready` unless sending a pending kex message blocks.
-    fn send_pending_kex_messages(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        let sent = self.trx.tx_bytes();
-        let rcvd = self.trx.rx_bytes();
+    /// Process all internal tasks like kex and all kinds of transport specific messages.
+    fn poll(&mut self, cx: &mut Context, cond: Condition) -> Poll<Result<(), TransportError>> {
+        let readable = loop {
+            let buf = match self.trx.rx_peek(cx) {
+                Poll::Ready(Ok(buf)) => buf,
+                Poll::Ready(Err(e)) => return Poll::Ready(Err(e)),
+                Poll::Pending => break false,
+            };
 
-        if let Poll::Ready(x) = self.kex.poll_init(cx, sent, rcvd) {
-            ready!(self.poll_send_raw(cx, &x?))?;
-            log::debug!("Sent MSG_KEX_INIT");
-            self.kex.push_init_tx()?;
-            ready!(self.tx_flush(cx))?;
-        }
-
-        if let Poll::Ready(x) = self.kex.poll_ecdh_init(cx) {
-            ready!(self.poll_send_raw(cx, &x?))?;
-            log::debug!("Sent MSG_ECDH_INIT");
-            self.kex.push_ecdh_init_tx()?;
-            ready!(self.tx_flush(cx))?;
-        }
-
-        if let Poll::Ready(x) = self.kex.poll_ecdh_reply(cx) {
-            ready!(self.poll_send_raw(cx, &x?))?;
-            log::debug!("Sent MSG_ECDH_REPLY");
-            self.kex.push_ecdh_reply_tx()?;
-            ready!(self.tx_flush(cx))?;
-        }
-
-        if let Poll::Ready(x) = self.kex.poll_new_keys_tx(cx) {
-            let enc = x?;
-            ready!(self.poll_send_raw(cx, &MsgNewKeys {}))?;
-            log::debug!("Sent MSG_NEWKEYS");
-            self.trx
-                .tx_cipher()
-                .update(enc.clone()) // FIXME clone
-                .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
-            self.kex.push_new_keys_tx()?;
-            ready!(self.tx_flush(cx))?;
-        }
-
-        Poll::Ready(Ok(()))
-    }
-
-    // Wenn die Funktion () returned, liegt eine Nicht-Transport Nachricht vor
-    fn process_transport_messages(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        loop {
-            ready!(self.send_pending_kex_messages(cx))?;
-            let buf = ready!(self.trx.rx_peek(cx))?;
             match *buf.get(0).ok_or(TransportError::InvalidPacket)? {
                 MsgDisconnect::NUMBER => {
                     // Try to interpret as MSG_DISCONNECT. If successful, convert it into an error
@@ -125,8 +76,11 @@ impl<S: Socket> DefaultTransport<S> {
                     return Poll::Ready(Err(TransportError::DisconnectByPeer(msg.reason)));
                 }
                 MsgUnimplemented::NUMBER => {
-                    // Throw the corresponding error.
-                    log::debug!("Received MSG_UNIMPLEMENTED");
+                    // Try to interpret as MSG_UNIMPLEMENTED. Throw error as long as there is no
+                    // need to handle it in a more sophisticated way.
+                    let msg: MsgUnimplemented =
+                        SshCodec::decode(buf).ok_or(TransportError::InvalidEncoding)?;
+                    log::error!("Received MSG_UNIMPLEMENTED: packet {}", msg.packet_number);
                     return Poll::Ready(Err(TransportError::InvalidState));
                 }
                 MsgIgnore::NUMBER => {
@@ -134,9 +88,7 @@ impl<S: Socket> DefaultTransport<S> {
                     // suggests) just ignored. Ignore messages may be introduced any time to impede
                     // traffic analysis and for keep alive.
                     log::debug!("Received MSG_IGNORE");
-                    drop(buf);
                     self.trx.rx_consume()?;
-                    continue;
                 }
                 MsgDebug::NUMBER => {
                     // Try to interpret as MSG_DEBUG. If successful, log as debug and continue.
@@ -144,7 +96,6 @@ impl<S: Socket> DefaultTransport<S> {
                         SshCodec::decode(buf).ok_or(TransportError::InvalidEncoding)?;
                     log::debug!("Received MSG_DEBUG: {:?}", msg.message);
                     self.trx.rx_consume()?;
-                    continue;
                 }
                 MsgKexInit::<String>::NUMBER => {
                     // Try to interpret as MSG_KEX_INIT. If successful, pass it to the kex handler.
@@ -156,7 +107,6 @@ impl<S: Socket> DefaultTransport<S> {
                     let rx = self.trx.rx_bytes();
                     self.kex.push_init_rx(tx, rx, msg)?;
                     self.trx.rx_consume()?;
-                    continue;
                 }
                 MsgKexEcdhReply::<X25519>::NUMBER => {
                     log::debug!("Received MSG_ECDH_REPLY");
@@ -164,7 +114,6 @@ impl<S: Socket> DefaultTransport<S> {
                         SshCodec::decode(buf).ok_or(TransportError::InvalidEncoding)?;
                     self.kex.push_ecdh_reply_rx(msg)?;
                     self.trx.rx_consume()?;
-                    continue;
                 }
                 MsgNewKeys::NUMBER => {
                     let dec = ready!(self.kex.poll_new_keys_rx(cx))?;
@@ -173,13 +122,72 @@ impl<S: Socket> DefaultTransport<S> {
                     self.kex.push_new_keys_rx()?;
                     self.trx.rx_consume()?;
                     log::debug!("Received MSG_NEWKEYS");
-                    continue;
                 }
                 _ if self.kex.is_receiving_critical() => {
-                    return Poll::Ready(Err(TransportError::InvalidState));
+                    return Poll::Ready(Err(TransportError::InvalidState))
                 }
-                _ => return Poll::Ready(Ok(())),
+                _ => break true,
             }
+        };
+
+        if !self.kex.is_active() {
+            let txb = self.trx.tx_bytes();
+            let rxb = self.trx.rx_bytes();
+            self.kex.init_if_necessary(cx, txb, rxb);
+        }
+
+        if self.kex.is_active() {
+            if let Some(x) = self.kex.peek_init(cx) {
+                ready!(self.tx_msg(cx, &x))?;
+                log::debug!("Sent MSG_KEX_INIT");
+                self.kex.push_init_tx()?;
+                ready!(self.trx.tx_flush(cx))?;
+            }
+
+            if let Some(x) = self.kex.peek_ecdh_init(cx)? {
+                ready!(self.tx_msg(cx, &x))?;
+                log::debug!("Sent MSG_ECDH_INIT");
+                self.kex.push_ecdh_init_tx()?;
+                ready!(self.trx.tx_flush(cx))?;
+            }
+
+            if let Some(x) = self.kex.peek_ecdh_reply(cx)? {
+                ready!(self.tx_msg(cx, &x))?;
+                log::debug!("Sent MSG_ECDH_REPLY");
+                self.kex.push_ecdh_reply_tx()?;
+                ready!(self.trx.tx_flush(cx))?;
+            }
+
+            if let Some(x) = ready!(self.kex.poll_new_keys_tx(cx))? {
+                ready!(self.tx_msg(cx, &MsgNewKeys))?;
+                log::debug!("Sent MSG_NEWKEYS");
+                self.trx
+                    .tx_cipher()
+                    .update(x)
+                    .ok_or(TransportError::NoCommonEncryptionAlgorithm)?;
+                self.kex.push_new_keys_tx()?;
+                ready!(self.trx.tx_flush(cx))?;
+            }
+        }
+
+        match cond {
+            // If `readable` is false it is guaranteed that the socket is blocked on IO and it is
+            // safe to return `Pending` (see above).
+            Condition::Readable if readable => Poll::Ready(Ok(())),
+            Condition::Readable => Poll::Pending,
+            // The transport is writable unless kex is critical for sending. The situation that
+            // the transport is readable (non-transport message) but sending is critical, may occur
+            // after we sent KEX_INIT and the other side is still sending regular data.
+            // At this point we return `Pending` out of thin air. It is required that a transport
+            // user also tries to read and consume in order to ensure progress!
+            Condition::Writable if !self.kex.is_sending_critical() => Poll::Ready(Ok(())),
+            Condition::Writable => Poll::Pending,
+            // Condition is fulfilled if kex is not active. If transport is readable this means
+            // that it must have blocked on sending kex messages in order to finish kex. Being
+            // here is invalid state. If transport is not readable it is safe to return `Pending`.
+            Condition::KexComplete if !self.kex.is_active() => Poll::Ready(Ok(())),
+            Condition::KexComplete if readable => Poll::Ready(Err(TransportError::InvalidState)),
+            Condition::KexComplete => Poll::Pending,
         }
     }
 
@@ -187,7 +195,7 @@ impl<S: Socket> DefaultTransport<S> {
     ///
     /// Returns `Pending` if the sender does not have enough space and needs to be flushed first.
     /// Resets the alive timer on success.
-    pub fn poll_send_raw<Msg: SshEncode>(
+    fn tx_msg<Msg: SshEncode>(
         &mut self,
         cx: &mut Context,
         msg: &Msg,
@@ -203,12 +211,7 @@ impl<S: Socket> DefaultTransport<S> {
 
 impl<S: Socket> Transport for DefaultTransport<S> {
     fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>> {
-        // Transport messages are handled internally by this function. In such a case the loop
-        // will iterate more than once but always terminate with either Ready or Pending.
-        // In case a running kex forbids receiving non-kex packets we need to drive kex to
-        // completion first: This means dispatching transport messages only; all other packets
-        // will cause an error.
-        ready!(self.process_transport_messages(cx))?;
+        ready!(self.poll(cx, Condition::Readable))?;
         self.trx.rx_peek(cx)
     }
 
@@ -221,13 +224,7 @@ impl<S: Socket> Transport for DefaultTransport<S> {
         cx: &mut Context,
         len: usize,
     ) -> Poll<Result<&mut [u8], TransportError>> {
-        // In case a running kex forbids sending no-kex packets we need to drive
-        // kex to completion first. This requires dispatching transport messages.
-        ready!(self.send_pending_kex_messages(cx))?;
-        // Wenn sending critical ist, wurde noch kein MSG_NEW_KEYS gesendet
-        while self.kex.is_sending_critical() {
-            ready!(self.process_transport_messages(cx))?;
-        }
+        ready!(self.poll(cx, Condition::Writable))?;
         self.trx.tx_alloc(cx, len)
     }
 
@@ -239,13 +236,23 @@ impl<S: Socket> Transport for DefaultTransport<S> {
         self.trx.tx_flush(cx)
     }
 
-    fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+    fn tx_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
         let msg = MsgDisconnect::new(reason);
-        let _ = self.poll_send_raw(cx, &msg);
+        let _ = self.tx_msg(cx, &msg);
         let _ = self.tx_flush(cx);
     }
 
     fn session_id(&self) -> Result<&SessionId, TransportError> {
         self.kex.session_id()
     }
+}
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum Condition {
+    /// Ready for transmission of non-transport message
+    Writable,
+    /// Ready for reception of non-transport message
+    Readable,
+    /// Kex is complete (sent and received MSG_NEWKEYS)
+    KexComplete,
 }

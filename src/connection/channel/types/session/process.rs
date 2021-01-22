@@ -1,17 +1,17 @@
 use super::*;
 use crate::core::Role;
 
-use async_std::io::Read;
-use async_std::stream::Stream;
-use async_std::task::{Context, Poll};
+use futures_util::io::AsyncRead;
+use futures_util::stream::Stream;
 use std::pin::Pin;
+use std::task::{Context, Poll};
 
-pub struct Process<R: Role>(pub (crate) Session<R>);
+pub struct Process<R: Role>(pub(crate) Session<R>);
 
 #[derive(Debug, Clone)]
 pub enum ProcessEvent {
     //Data,
-    //Exit(()),
+//Exit(()),
 }
 
 impl<R: Role> Process<R> {
@@ -64,7 +64,7 @@ impl<R: Role> Stream for Process<R> {
 
 pub struct Stdout<'a, R: Role>(&'a mut Process<R>);
 
-impl<'a, R: Role> Read for Stdout<'a, R> {
+impl<'a, R: Role> AsyncRead for Stdout<'a, R> {
     fn poll_read(
         self: Pin<&mut Self>,
         _cx: &mut Context,
@@ -94,7 +94,7 @@ impl<'a, R: Role> Read for Stdout<'a, R> {
 
 pub struct Stderr<'a, R: Role>(&'a mut Process<R>);
 
-impl<'a, R: Role> Read for Stderr<'a, R> {
+impl<'a, R: Role> AsyncRead for Stderr<'a, R> {
     fn poll_read(
         self: Pin<&mut Self>,
         _cx: &mut Context,

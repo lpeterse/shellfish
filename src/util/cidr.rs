@@ -33,7 +33,7 @@ impl<'a> Cidr<'a> {
                 }
                 _ => None,
             }
-        };
+        }
         contains_(self.0, addr).is_some()
     }
 }

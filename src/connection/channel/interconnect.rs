@@ -1,6 +1,6 @@
-use super::*;
-use crate::util::socket::Socket;
-use async_std::future::Future;
+use super::ChannelHandle;
+use crate::util::runtime::Socket;
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -35,7 +35,7 @@ impl<S: Socket> Future for Interconnect<S> {
         self_.s1.with_state(|s1| {
             if !*s1_closed {
                 while !s1.std_rx().is_empty() {
-                    match s2.as_mut().poll_write(cx, s1.std_rx().as_ref()) {
+                    match Socket::poll_write(s2.as_mut(), cx, s1.std_rx().as_ref()) {
                         Poll::Pending => break,
                         Poll::Ready(result) => {
                             let written = result?;
@@ -48,7 +48,7 @@ impl<S: Socket> Future for Interconnect<S> {
                     }
                 }
                 if s1.reof {
-                    match s2.as_mut().poll_close(cx) {
+                    match Socket::poll_close(s2.as_mut(), cx) {
                         Poll::Pending => (),
                         Poll::Ready(result) => {
                             result?;
@@ -57,7 +57,7 @@ impl<S: Socket> Future for Interconnect<S> {
                         }
                     }
                 } else {
-                    match s2.as_mut().poll_flush(cx) {
+                    match Socket::poll_flush(s2.as_mut(), cx) {
                         Poll::Pending => (),
                         Poll::Ready(result) => result?,
                     }
@@ -80,7 +80,7 @@ impl<S: Socket> Future for Interconnect<S> {
                 let rws = s1.rws as usize;
                 let buf = s1.std_tx().available_mut();
                 let len = std::cmp::min(buf.len(), rws);
-                match s2.as_mut().poll_read(cx, &mut buf[..len]) {
+                match Socket::poll_read(s2.as_mut(), cx, &mut buf[..len]) {
                     Poll::Pending => break,
                     Poll::Ready(result) => {
                         let read = result?;

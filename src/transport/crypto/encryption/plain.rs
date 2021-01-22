@@ -1,6 +1,4 @@
 use super::*;
-use crate::transport::PACKET_MIN_LEN;
-use crate::transport::PADDING_MIN_LEN;
 
 #[derive(Debug)]
 pub struct PlainContext;
@@ -8,6 +6,9 @@ pub struct PlainContext;
 impl PlainContext {
     pub const BLOCK_LEN: usize = 8;
     pub const MAC_LEN: usize = 0;
+
+    const PADDING_MIN_LEN: usize = 4;
+    const PACKET_MIN_LEN: usize = 16;
 
     pub fn new() -> Self {
         Self
@@ -28,10 +29,10 @@ impl PlainContext {
     pub fn padding_len(&self, payload_len: usize) -> usize {
         let l = 4 + 1 + payload_len;
         let mut p = Self::BLOCK_LEN - (l % Self::BLOCK_LEN);
-        if p < PADDING_MIN_LEN {
+        if p < Self::PADDING_MIN_LEN {
             p += Self::BLOCK_LEN
         };
-        while p + l < PACKET_MIN_LEN {
+        while p + l < Self::PACKET_MIN_LEN {
             p += Self::BLOCK_LEN
         }
         p

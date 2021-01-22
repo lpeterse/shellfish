@@ -1,5 +1,5 @@
 use super::pattern::*;
-use super::KnownHostsError;
+use super::HostVerificationError;
 use crate::identity::*;
 
 /// A single line of a `known_hosts` file.
@@ -18,7 +18,7 @@ impl<'a> KnownHostsLine<'a> {
         host_name: &str,
         host_key: &PublicKey,
         host_ca_key: Option<&PublicKey>,
-    ) -> Result<bool, KnownHostsError> {
+    ) -> Result<bool, HostVerificationError> {
         // Split the line by whitespace. Complication is introduced by optional @-marker.
         let mut ws = self.0.split_whitespace();
         let w1 = ws.next().unwrap_or("");
@@ -43,7 +43,7 @@ impl<'a> KnownHostsLine<'a> {
             if let Ok(key) = base64::decode(key) {
                 let key = PublicKey::from(key);
                 if &key == host_key || Some(&key) == host_ca_key {
-                    return Err(KnownHostsError::KeyRevoked);
+                    return Err(HostVerificationError::KeyRevoked);
                 }
             }
             return Ok(false);
@@ -183,7 +183,7 @@ mod tests {
         ]);
         let line = KnownHostsLine("@revoked localhost ssh-rsa AAAAB3NzaC1yc2EAAAAA");
         match line.test("XXX", &id, None) {
-            Err(KnownHostsError::KeyRevoked) => (),
+            Err(HostVerificationError::KeyRevoked) => (),
             other => panic!("{:?}", other),
         }
     }
@@ -197,7 +197,7 @@ mod tests {
         ]);
         let line = KnownHostsLine("@revoked localhost ssh-rsa AAAAB3NzaC1yc2EAAAAA");
         match line.test("XXX", &id, Some(&ca)) {
-            Err(KnownHostsError::KeyRevoked) => (),
+            Err(HostVerificationError::KeyRevoked) => (),
             other => panic!("{:?}", other),
         }
     }

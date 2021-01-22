@@ -6,6 +6,7 @@ mod msg_sign_request;
 mod msg_sign_response;
 mod msg_success;
 mod transmitter;
+mod error;
 
 use self::frame::*;
 use self::msg_failure::*;
@@ -14,11 +15,12 @@ use self::msg_identities_request::*;
 use self::msg_sign_request::*;
 use self::msg_sign_response::*;
 use self::transmitter::*;
+use self::error::*;
 use super::*;
 
 use crate::util::codec::*;
+use crate::util::runtime::UnixStream;
 
-use async_std::os::unix::net::UnixStream;
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
 
@@ -46,8 +48,8 @@ impl LocalAgent {
     }
 }
 
-impl Agent for LocalAgent {
-    fn identities(&self) -> AgentFuture<Vec<(Identity, String)>> {
+impl AuthAgent for LocalAgent {
+    fn identities(&self) -> AuthAgentFuture<Vec<(Identity, String)>> {
         let self_ = self.clone();
         Box::pin(async move {
             let mut t: Transmitter = UnixStream::connect(&self_.path).await?.into();
@@ -58,7 +60,12 @@ impl Agent for LocalAgent {
         })
     }
 
-    fn signature(&self, id: &Identity, data: &[u8], flags: u32) -> AgentFuture<Option<Signature>> {
+    fn signature(
+        &self,
+        id: &Identity,
+        data: &[u8],
+        flags: u32,
+    ) -> AuthAgentFuture<Option<Signature>> {
         let self_ = self.clone();
         let id = id.clone();
         let data = Vec::from(data);

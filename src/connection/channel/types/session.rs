@@ -56,7 +56,7 @@ impl Session<Client> {
         state.request = RequestState::Open(request);
         //state.inner_wake(); // FIXME
         drop(state);
-        async_std::future::poll_fn(|cx| {
+        std::future::poll_fn(|cx| {
             let mut state = (self.state)
                 .0
                 .lock()

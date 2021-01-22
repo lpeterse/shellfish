@@ -4,7 +4,7 @@ use super::*;
 use crate::transport::{DisconnectReason, GenericTransport, TransportError};
 use crate::util::check;
 
-use async_std::task::{ready, Context, Poll, Waker};
+use std::task::{ready, Context, Poll, Waker};
 use std::collections::VecDeque;
 use std::sync::Arc;
 
@@ -19,9 +19,9 @@ use std::sync::Arc;
 /// are even more efficient implementations (parking_lot) especially for the not-contented case.
 /// For now (Feb 2020), we'll sacrifice that potential performance increase in favour of simplicity.
 /// We'll automatically benefit from any improvements in std in the future.
-#[derive(Debug)]
 pub struct ConnectionState {
     config: Arc<ConnectionConfig>,
+    handler: Box<dyn ConnectionHandler>,
     transport: GenericTransport,
     channels: ChannelList,
     local_requests: VecDeque<GlobalRequest>,
@@ -40,9 +40,14 @@ impl ConnectionState {
     ///
     /// The config `Arc` will be cloned. All queues are initialised with zero
     /// capacity in expectation that they will never be used.
-    pub fn new(config: &Arc<ConnectionConfig>, transport: GenericTransport) -> Self {
+    pub fn new(
+        config: &Arc<ConnectionConfig>,
+        handler: Box<dyn ConnectionHandler>,
+        transport: GenericTransport,
+    ) -> Self {
         Self {
             config: config.clone(),
+            handler,
             transport,
             channels: ChannelList::new(&config),
             local_requests: VecDeque::with_capacity(0),
@@ -253,7 +258,7 @@ impl ConnectionState {
     fn poll_result(&mut self, cx: &mut Context) -> Poll<Result<DisconnectReason, ConnectionError>> {
         if let Some(ref r) = self.result {
             if let Err(ConnectionError::TransportError(TransportError::DisconnectByUs(d))) = r {
-                self.transport.send_disconnect(cx, *d);
+                self.transport.tx_disconnect(cx, *d);
             }
             return Poll::Ready(r.clone());
         }
@@ -472,7 +477,7 @@ impl ConnectionState {
                 //self.transport.send_unimplemented(cx);
                 Err(TransportError::InvalidState.into())
             }?;
-            self.transport.rx_consume();
+            self.transport.rx_consume()?;
         }
     }
 
@@ -536,249 +541,12 @@ pub fn poll_send<M: SshEncode>(
     let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
     let buf = ready!(t.tx_alloc(cx, size))?;
     SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
-    t.tx_commit();
+    t.tx_commit()?;
     Poll::Ready(Ok(()))
 }
 
-/*
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::transport::tests::TestTransport;
-
-    /// Test internal state after creation.
-    #[test]
-    fn test_connection_state_new_01() {
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let x = ConnectionState::new(&c, t);
-
-        assert_eq!(x.result.is_some(), false);
-        assert_eq!(x.inner_task_wake, false);
-        assert_eq!(x.outer_task_wake, false);
-    }
-
-    /// Test poll after creation.
-    #[test]
-    fn test_connection_state_poll_01() {
-        use async_std::future::poll_fn;
-        use async_std::task::*;
-
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        block_on(poll_fn(|cx| {
-            assert_eq!(x.poll(cx).is_pending(), true);
-            assert_eq!(x.inner_task_wake, false);
-            assert_eq!(x.outer_task_wake, false);
-            assert_eq!(x.transport.send_count(), 0, "send_count");
-            assert_eq!(x.transport.receive_count(), 1, "receive_count");
-            assert_eq!(x.transport.consume_count(), 0, "consume_count");
-            assert_eq!(x.transport.flush_count(), 2, "flush_count");
-            Poll::Ready(())
-        }));
-    }
-
-    /// Test poll after disconnect.
-    #[test]
-    fn test_connection_state_poll_02() {
-        use async_std::future::poll_fn;
-        use async_std::task::*;
-
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        let reason = DisconnectReason::BY_APPLICATION;
-        x.transport.set_tx_ready(true);
-        x.disconnect(reason);
-
-        block_on(poll_fn(|cx| {
-            assert_eq!(x.poll(cx).is_pending(), false);
-            assert_eq!(x.transport.tx_disconnect(), Some(reason));
-            Poll::Ready(())
-        }));
-    }
-
-    /// Test poll with ready global reply (transport ready).
-    #[test]
-    fn test_connection_state_poll_03() {
-        use async_std::future::poll_fn;
-        use async_std::task::*;
-
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        x.transport.set_tx_ready(true);
-        // Accept
-        let (tx, rx) = oneshot::channel();
-        tx.send(Ok(b"abc"[..].into()));
-        x.remote_replies.push_back(rx);
-        // Reject
-        let (_, rx) = oneshot::channel();
-        x.remote_replies.push_back(rx);
-
-        block_on(poll_fn(|cx| {
-            assert_eq!(x.poll(cx).is_pending(), true);
-            assert_eq!(x.outer_task_wake, false);
-            assert_eq!(x.inner_task_wake, false);
-            assert_eq!(
-                x.transport.tx_sent(),
-                vec![vec![vec![81, 97, 98, 99], vec![82]]]
-            );
-            Poll::Ready(())
-        }));
-    }
-
-    /// Test poll with ready global request (transport ready).
-    #[test]
-    fn test_connection_state_poll_04() {
-        use async_std::future::poll_fn;
-        use async_std::task::*;
-
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        x.transport.set_tx_ready(true);
-        let req = GlobalRequest::new("abc".into(), vec![1, 2, 3]);
-        x.local_requests.push_back(req);
-
-        block_on(poll_fn(|cx| {
-            assert_eq!(x.poll(cx).is_pending(), true);
-            assert_eq!(x.inner_task_wake, false);
-            assert_eq!(x.outer_task_wake, false);
-            assert_eq!(
-                x.transport.tx_sent(),
-                vec![vec![vec![80, 0, 0, 0, 3, 97, 98, 99, 0, 1, 2, 3]]]
-            );
-            Poll::Ready(())
-        }));
-    }
-
-    /// Test poll with ready channel open request (transport ready).
-    #[test]
-    fn test_connection_state_poll_05() {
-        use async_std::future::poll_fn;
-        use async_std::task::*;
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-        x.transport.set_tx_ready(true);
-
-        let _ = x.open::<Session<Client>>(());
-
-        block_on(poll_fn(|cx| {
-            assert_eq!(x.poll(cx).is_pending(), true);
-            assert_eq!(x.inner_task_wake, true);
-            assert_eq!(x.outer_task_wake, false);
-            assert_eq!(
-                x.transport.tx_sent(),
-                vec![vec![vec![
-                    90, 0, 0, 0, 7, 115, 101, 115, 115, 105, 111, 110, 0, 0, 0, 0, 0, 16, 0, 0, 0,
-                    0, 128, 0
-                ]]]
-            );
-            Poll::Ready(())
-        }));
-    }
-
-    /// Test poll with global inbound request ready on transport.
-    #[test]
-    fn test_connection_state_poll_06() {
-        use async_std::future::poll_fn;
-        use async_std::task::*;
-
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        x.transport.set_tx_ready(true);
-        x.transport
-            .rx_push(&MsgGlobalRequest::new("abc", vec![], false));
-
-        block_on(poll_fn(|cx| {
-            assert_eq!(x.poll(cx).is_pending(), true);
-            assert_eq!(x.inner_task_wake, false);
-            assert_eq!(x.outer_task_wake, true);
-            assert_eq!(x.remote_requests.len(), 1);
-            Poll::Ready(())
-        }));
-    }
-
-    /// Test next after creation.
-    #[test]
-    fn test_connection_state_next_01() {
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        assert_eq!(x.next().is_none(), true);
-        assert_eq!(x.inner_task_wake, false);
-        assert_eq!(x.outer_task_wake, false);
-    }
-
-    /// Test next when global request present.
-    #[test]
-    fn test_connection_state_next_02() {
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        let req = GlobalRequest::new("abc".into(), vec![1, 2, 3]);
-        x.remote_requests.push_back(req);
-
-        match x.next() {
-            Some(ConnectionRequest::Global(_)) => (),
-            _ => panic!("expected global request"),
-        }
-        assert_eq!(x.inner_task_wake, true);
-        assert_eq!(x.outer_task_wake, false);
-    }
-
-    /// Test next when channel open request present.
-    #[test]
-    fn test_connection_state_next_03() {
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        let msg = MsgChannelOpen::new("session".into(), 0, 0, 0, vec![]);
-        x.channels.open_inbound(msg);
-
-        match x.next() {
-            Some(ConnectionRequest::ChannelOpen(_)) => (),
-            _ => panic!("expected channel open request"),
-        }
-        assert_eq!(x.inner_task_wake, true);
-        assert_eq!(x.outer_task_wake, false);
-    }
-
-    /// Test request_global.
-    #[test]
-    fn test_connection_state_request_global_01() {
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        assert_eq!(x.local_requests.len(), 0);
-        x.request("abc".into(), vec![123]);
-        assert_eq!(x.local_requests.len(), 1);
-    }
-
-    /// Test request_global_want_reply.
-    #[test]
-    fn test_connection_state_request_global_want_reply_01() {
-        let c = Arc::new(ConnectionConfig::default());
-        let t = TestTransport::new();
-        let mut x = ConnectionState::new(&c, t);
-
-        assert_eq!(x.local_requests.len(), 0);
-        x.request_want_reply("abc".into(), vec![123]);
-        assert_eq!(x.local_requests.len(), 1);
+impl std::fmt::Debug for ConnectionState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ConnectionState {{ ... }}")
     }
 }
-*/

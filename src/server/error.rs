@@ -1,5 +1,5 @@
 use crate::transport::TransportError;
-use crate::auth::UserAuthError;
+use crate::user_auth::UserAuthError;
 
 use std::error::Error;
 
@@ -9,7 +9,6 @@ pub enum ServerError {
     AcceptError(std::io::Error),
     TransportError(TransportError),
     UserAuthError(UserAuthError),
-    Foo,
 }
 
 impl Error for ServerError {}

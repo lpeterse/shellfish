@@ -4,83 +4,68 @@ mod error;
 pub use self::config::*;
 pub use self::error::*;
 
-use crate::auth::*;
 use crate::connection::*;
 use crate::core::*;
-use crate::known_hosts::*;
 use crate::transport::*;
-
-use async_std::net::TcpStream;
+use crate::user_auth::*;
+use crate::util::runtime::TcpStream;
 use std::sync::Arc;
 
-#[derive(Debug)]
+/// The client is a connection factory.
+///
+/// The client creates a new connection for each call to [connect](Self::connect). It is not coupled
+/// with the connection and may be used several times in order to establish connections to different
+/// hosts.
+#[derive(Clone, Debug)]
 pub struct Client {
-    config: ClientConfig,
-    username: Option<String>,
-    auth_agent: Arc<dyn Agent>,
-    known_hosts: Arc<dyn KnownHostsLike>,
+    config: Arc<ClientConfig>,
 }
 
 impl Client {
-    pub async fn connect<H: Into<String>>(&self, hostname: H) -> Result<Connection, ClientError> {
-        let f = |e: std::io::Error| ClientError::ConnectError(e.kind());
-        let hostname = hostname.into();
-        let socket = TcpStream::connect(&hostname).await.map_err(f)?;
-        if let Some(ref keepalive) = self.config.tcp.keepalive {
-            keepalive.apply(&socket).map_err(f)?;
+    /// Create a new client with given config.
+    pub fn new(config: ClientConfig) -> Self {
+        Self {
+            config: Arc::new(config),
         }
-        self.handle(socket, hostname).await
     }
 
-    pub async fn handle(
+    /// Get a reference on the configuration used by this client.
+    pub fn config(&self) -> &ClientConfig {
+        &self.config
+    }
+
+    /// Create a new connection to the given host.
+    ///
+    /// The user name and authentication methods are contained in the configuration and set to
+    /// sensible defaults. By default, the user name will be extracted from the environment and
+    /// a running `ssh-agent` is expected for key or certificate authentication (`SSH_AUTH_SOCK`
+    /// environment variable).
+    pub async fn connect<H: ConnectionHandler>(
         &self,
-        socket: TcpStream,
-        hostname: String,
+        user: &str,
+        host: &str,
+        port: u16,
+        handler: H,
     ) -> Result<Connection, ClientError> {
-        let kh = self.known_hosts.clone();
+        let e = |e: std::io::Error| TransportError::from(e);
+        let socket = TcpStream::connect((host, port)).await.map_err(e)?;
+        if let Some(ref keepalive) = self.config.socket.tcp_keepalive {
+            keepalive.apply(&socket).map_err(e)?;
+        }
         let tc = &self.config.transport;
         let cc = &self.config.connection;
-        let t = DefaultTransport::connect(tc, &kh, hostname, socket).await?;
+        let hv = &self.config.host_verifier;
+        let aa = &self.config.auth_agent;
+        let t = DefaultTransport::connect(tc, socket, host, port, hv).await?;
         let t = GenericTransport::from(t);
-        Ok(match self.username {
-            Some(ref user) => UserAuth::request(t, cc, user, &self.auth_agent).await?,
-            None => {
-                let n = <Connection as Service>::NAME;
-                let t = t.request_service(n).await?;
-                Connection::new(cc, t)
-            }
-        })
-    }
-
-    pub fn config(&mut self) -> &mut ClientConfig {
-        &mut self.config
-    }
-
-    pub fn username(&mut self) -> &mut Option<String> {
-        &mut self.username
-    }
-
-    pub fn auth_agent(&mut self) -> &mut Arc<dyn Agent> {
-        &mut self.auth_agent
-    }
-
-    pub fn known_hosts(&mut self) -> &mut Arc<dyn KnownHostsLike> {
-        &mut self.known_hosts
+        Ok(UserAuth::request_connection(t, cc, handler, user, aa).await?)
     }
 }
 
 impl Default for Client {
     fn default() -> Self {
         Self {
-            config: ClientConfig::default(),
-            username: std::env::var("LOGNAME")
-                .or_else(|_| std::env::var("USER"))
-                .ok(),
-            auth_agent: match LocalAgent::new_env() {
-                Some(agent) => Arc::new(agent),
-                None => Arc::new(()),
-            },
-            known_hosts: Arc::new(KnownHosts::default()),
+            config: Arc::new(ClientConfig::default()),
         }
     }
 }

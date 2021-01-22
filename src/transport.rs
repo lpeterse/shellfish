@@ -9,41 +9,33 @@ pub(crate) mod id;
 pub(crate) mod kex;
 pub(crate) mod keys;
 pub(crate) mod msg;
-pub(crate) mod service;
 pub(crate) mod session;
 pub(crate) mod transceiver;
 
-pub(crate) use self::config::*;
 pub(crate) use self::crypto::*;
 pub(crate) use self::disconnect::*;
 pub(crate) use self::ecdh::*;
 pub(crate) use self::id::*;
 pub(crate) use self::kex::*;
 pub(crate) use self::msg::*;
-pub(crate) use self::service::*;
 pub(crate) use self::session::*;
 
+pub use self::config::TransportConfig;
 pub use self::default::DefaultTransport;
 pub use self::error::TransportError;
 
-use crate::auth::Agent;
-use crate::known_hosts::*;
+use crate::agent::*;
+use crate::host::*;
 use crate::util::codec::*;
 use crate::util::socket::*;
 
-use async_std::future::poll_fn;
-use async_std::net::TcpStream;
-use async_std::task::{ready, Context, Poll};
+use core::future::poll_fn;
+use std::task::{ready, Context, Poll};
 use std::convert::From;
 use std::fmt::Debug;
 use std::option::Option;
 use std::pin::Pin;
 use std::sync::Arc;
-
-pub const PAYLOAD_MAX_LEN: usize = 32_768;
-pub const PADDING_MIN_LEN: usize = 4;
-pub const PACKET_MIN_LEN: usize = 16;
-pub const PACKET_MAX_LEN: usize = 35_000;
 
 pub trait Transport: Debug + Send + Unpin + 'static {
     /// Try to receive the next message.
@@ -71,7 +63,7 @@ pub trait Transport: Debug + Send + Unpin + 'static {
     /// Try to send MSG_DISCONNECT and swallow all errors.
     ///
     /// Message delivery may silently fail on errors or if output buffer is full.
-    fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason);
+    fn tx_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason);
     /// Return the connection's session id.
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
@@ -111,7 +103,7 @@ impl GenericTransport {
             let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
             let buf = ready!(self.tx_alloc(cx, size))?;
             SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
-            self.tx_commit();
+            self.tx_commit()?;
             Poll::Ready(Ok(()))
         })
         .await
@@ -125,7 +117,7 @@ impl GenericTransport {
         poll_fn(|cx| {
             let rx = ready!(self.rx_peek(cx))?;
             let msg = SshCodec::decode(rx).ok_or(TransportError::InvalidEncoding)?;
-            self.rx_consume();
+            self.rx_consume()?;
             Poll::Ready(Ok(msg))
         })
         .await
@@ -183,8 +175,8 @@ impl Transport for GenericTransport {
     fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         self.0.tx_flush(cx)
     }
-    fn send_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
-        self.0.send_disconnect(cx, reason)
+    fn tx_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+        self.0.tx_disconnect(cx, reason)
     }
     fn session_id(&self) -> Result<&SessionId, TransportError> {
         self.0.session_id()

@@ -1,0 +1,34 @@
+use crate::agent::AuthAgentError;
+use crate::transport::TransportError;
+use std::error::Error;
+
+#[derive(Clone, Debug)]
+pub enum UserAuthError {
+    NoMoreAuthMethods,
+    AuthAgentError(AuthAgentError),
+    TransportError(TransportError),
+}
+
+impl From<AuthAgentError> for UserAuthError {
+    fn from(e: AuthAgentError) -> Self {
+        Self::AuthAgentError(e)
+    }
+}
+
+impl From<TransportError> for UserAuthError {
+    fn from(e: TransportError) -> Self {
+        Self::TransportError(e)
+    }
+}
+
+impl Error for UserAuthError {}
+
+impl std::fmt::Display for UserAuthError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoMoreAuthMethods => write!(f, "No more auth methods"),
+            Self::AuthAgentError(e) => write!(f, "Auth agent: {}", e),
+            Self::TransportError(e) => write!(f, "Transport: {}", e),
+        }
+    }
+}

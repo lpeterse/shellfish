@@ -1,7 +1,7 @@
 use super::*;
 
-use async_std::future::Future;
-use async_std::task::*;
+use std::future::Future;
+use std::task::*;
 use core::pin::*;
 
 #[derive(Debug)]

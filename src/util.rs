@@ -1,13 +1,12 @@
 pub mod buffer;
+pub mod cidr;
 pub mod codec;
 pub mod glob;
 pub mod oneshot;
 pub mod socket;
 pub mod socks5;
 pub mod tcp;
-pub mod cidr;
-
-use std::future::Future;
+pub mod runtime;
 
 /// Takes a `bool` and converts it `Option<()>` to be used as early return point with `?`.
 #[inline(always)]
@@ -20,5 +19,5 @@ pub fn check(x: bool) -> Option<()> {
     }
 }
 
-pub type BoxFuture<T> = core::pin::Pin<Box<dyn Future<Output = T> + Send>>;
-pub type BoxError = Box<dyn std::error::Error + Send + Sync + 'static>;
+pub type BoxFuture<T> = core::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
+pub type ArcError = std::sync::Arc<dyn std::error::Error + Send + Sync + 'static>;

@@ -2,13 +2,15 @@ use super::*;
 
 use std::error::Error;
 
-#[derive(Debug)]
+/// The client error is a supertype for all that might occur when working with a client.
+#[derive(Clone, Debug)]
 pub enum ClientError {
-    ConnectError(std::io::ErrorKind),
     TransportError(TransportError),
     UserAuthError(UserAuthError),
     ConnectionError(ConnectionError),
 }
+
+impl Error for ClientError {}
 
 impl From<UserAuthError> for ClientError {
     fn from(e: UserAuthError) -> Self {
@@ -28,10 +30,12 @@ impl From<ConnectionError> for ClientError {
     }
 }
 
-impl Error for ClientError {}
-
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self)
+        match self {
+            Self::TransportError(e) => write!(f, "Transport: {}", e),
+            Self::UserAuthError(e) => write!(f, "UserAuth: {}", e),
+            Self::ConnectionError(e) => write!(f, "Connection: {}", e),
+        }
     }
 }

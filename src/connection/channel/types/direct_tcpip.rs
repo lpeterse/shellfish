@@ -4,12 +4,12 @@ use super::super::*;
 
 pub use self::open::*;
 
-use async_std::io::{Read, Write};
-use async_std::task::Context;
+use futures_util::io::{AsyncRead, AsyncWrite};
 use std::io::Error;
 use std::pin::Pin;
+use std::task::Context;
 
-use crate::util::socket::Socket;
+use crate::util::runtime::Socket;
 
 #[derive(Debug)]
 pub struct DirectTcpIp(pub(crate) ChannelHandle);
@@ -30,7 +30,7 @@ impl Channel for DirectTcpIp {
     }
 }
 
-impl Read for DirectTcpIp {
+impl AsyncRead for DirectTcpIp {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -40,7 +40,7 @@ impl Read for DirectTcpIp {
     }
 }
 
-impl Write for DirectTcpIp {
+impl AsyncWrite for DirectTcpIp {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context,

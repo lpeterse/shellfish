@@ -1,7 +1,7 @@
 use super::state::*;
 
-use async_std::future::Future;
-use async_std::task::{Context, Poll, Waker};
+use std::future::Future;
+use std::task::{Context, Poll, Waker};
 use std::pin::*;
 use std::sync::{Arc, Mutex};
 

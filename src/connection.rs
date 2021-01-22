@@ -3,6 +3,7 @@ mod config;
 mod error;
 mod future;
 mod global;
+mod handler;
 mod msg;
 mod request;
 mod state;
@@ -11,23 +12,22 @@ pub use self::channel::*;
 pub use self::config::*;
 pub use self::error::*;
 pub use self::global::*;
+pub use self::handler::ConnectionHandler;
 pub use self::msg::ChannelOpenFailure;
 pub use self::request::ConnectionRequest;
+pub use self::state::*;
 
 use self::future::*;
 use self::msg::*;
-pub use self::state::*;
-
 use crate::client::Client;
-use crate::transport::{GenericTransport, DisconnectReason, Service, Transport};
+use crate::transport::{DisconnectReason, GenericTransport, Transport};
 use crate::util::codec::*;
 use crate::util::oneshot;
-
-use async_std::future::Future;
-use async_std::stream::Stream;
-use async_std::task::{Context, Poll, Waker};
+use futures_util::stream::Stream;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll, Waker};
 
 /// The `ssh-connection` service offers channel multiplexing for a variety of applications like remote
 /// shell and command execution as well as TCP/IP port forwarding and various other extensions.
@@ -35,7 +35,7 @@ use std::sync::{Arc, Mutex};
 /// Unless client or server request a service on top of this protocol the connection just keeps
 /// itself alive and does nothing. Dropping the connection object will close the connection and
 /// free all resources. It will also terminate all dependant channels (shells and forwardings etc).
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Connection(Arc<Mutex<ConnectionState>>);
 
 impl Connection {
@@ -43,11 +43,16 @@ impl Connection {
     ///
     /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
     /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
-    fn new(config: &Arc<ConnectionConfig>, transport: GenericTransport) -> Self {
-        let state = ConnectionState::new(config, transport);
+    pub fn new<H: ConnectionHandler>(
+        config: &Arc<ConnectionConfig>,
+        handler: H,
+        transport: GenericTransport,
+    ) -> Self {
+        let handler = Box::new(handler);
+        let state = ConnectionState::new(config, handler, transport);
         let state = Arc::new(Mutex::new(state));
         let future = ConnectionFuture::new(&state);
-        async_std::task::spawn(future);
+        crate::util::runtime::spawn(future);
         Self(state)
     }
 
@@ -111,27 +116,27 @@ impl Connection {
     }
 }
 
-impl Clone for Connection {
-    fn clone(&self) -> Self {
-        Self(self.0.clone())
-    }
-}
-
 impl Drop for Connection {
     fn drop(&mut self) {
         self.with_state(|x| x.flag_inner_task_for_wakeup())
     }
 }
 
+/*
 impl Service for Connection {
     type Config = ConnectionConfig;
+    type Handler = Box<dyn ConnectionHandler>;
 
     const NAME: &'static str = "ssh-connection";
 
-    fn new(config: &Arc<Self::Config>, transport: GenericTransport) -> Self {
-        Self::new(config, transport)
+    fn new(
+        config: &Arc<Self::Config>,
+        handler: Self::Handler,
+        transport: GenericTransport,
+    ) -> Self {
+        Self::new(config, handler, transport)
     }
-}
+}*/
 
 impl Stream for Connection {
     type Item = ConnectionRequest;

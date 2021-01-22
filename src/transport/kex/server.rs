@@ -4,13 +4,16 @@ use super::super::*;
 pub struct ServerKex;
 
 impl ServerKex {
-    pub fn new(_config: &Arc<TransportConfig>) -> Self {
-        Self {}
+    pub fn new(_config: &Arc<TransportConfig>, _id: Identification) -> Self {
+        unimplemented!()
     }
 }
 
 impl Kex for ServerKex {
     fn init(&mut self, _tx: u64, _rx: u64) {
+        unimplemented!()
+    }
+    fn init_if_necessary(&mut self, cx: &mut Context, tx: u64, rx: u64) {
         unimplemented!()
     }
     fn is_active(&self) -> bool {
@@ -22,12 +25,7 @@ impl Kex for ServerKex {
     fn is_receiving_critical(&self) -> bool {
         unimplemented!()
     }
-    fn poll_init(
-        &mut self,
-        _cx: &mut Context,
-        _tx: u64,
-        _rx: u64,
-    ) -> Poll<Result<MsgKexInit<&'static str>, TransportError>> {
+    fn peek_init(&mut self, _cx: &mut Context) -> Option<MsgKexInit<&'static str>> {
         todo!()
     }
     fn push_init_tx(&mut self) -> Result<(), TransportError> {
@@ -37,10 +35,10 @@ impl Kex for ServerKex {
         todo!()
     }
 
-    fn poll_ecdh_init(
+    fn peek_ecdh_init(
         &mut self,
         _cx: &mut Context,
-    ) -> Poll<Result<MsgKexEcdhInit<X25519>, TransportError>> {
+    ) -> Result<Option<MsgKexEcdhInit<X25519>>, TransportError> {
         todo!()
     }
     fn push_ecdh_init_tx(&mut self) -> Result<(), TransportError> {
@@ -50,10 +48,10 @@ impl Kex for ServerKex {
         todo!()
     }
 
-    fn poll_ecdh_reply(
+    fn peek_ecdh_reply(
         &mut self,
         _cx: &mut Context,
-    ) -> Poll<Result<MsgKexEcdhReply<X25519>, TransportError>> {
+    ) -> Result<Option<MsgKexEcdhReply<X25519>>, TransportError> {
         todo!()
     }
     fn push_ecdh_reply_tx(&mut self) -> Result<(), TransportError> {
@@ -66,7 +64,7 @@ impl Kex for ServerKex {
     fn poll_new_keys_tx(
         &mut self,
         _cx: &mut Context,
-    ) -> Poll<Result<EncryptionConfig, TransportError>> {
+    ) -> Poll<Result<Option<EncryptionConfig>, TransportError>> {
         todo!()
     }
     fn poll_new_keys_rx(

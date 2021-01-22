@@ -1,6 +1,4 @@
 use super::super::super::keys::*;
-use super::super::super::PACKET_MIN_LEN;
-use super::super::super::PADDING_MIN_LEN;
 use super::*;
 use crate::util::check;
 use chacha20::cipher::stream::{NewStreamCipher, SyncStreamCipher};
@@ -22,14 +20,17 @@ impl Chacha20Poly1305Context {
     pub const BLOCK_LEN: usize = 8;
     pub const MAC_LEN: usize = 16;
 
-    pub fn new(ks: &mut KeyStream) -> Self {
+    const PADDING_MIN_LEN: usize = 4;
+    const PACKET_MIN_LEN: usize = 16;
+
+    pub fn new(ks: &KeyStream) -> Self {
         let mut k2: [u8; 32] = [0; 32];
         let mut k1: [u8; 32] = [0; 32];
         ks.encryption_32_32(&mut k2, &mut k1);
         Self { k1, k2 }
     }
 
-    pub fn update(&mut self, ks: &mut KeyStream) {
+    pub fn update(&mut self, ks: &KeyStream) {
         ks.encryption_32_32(&mut self.k2, &mut self.k1);
     }
 
@@ -100,10 +101,10 @@ impl Chacha20Poly1305Context {
     pub fn padding_len(&self, payload_len: usize) -> usize {
         let l = 1 + payload_len;
         let mut p = Self::BLOCK_LEN - (l % Self::BLOCK_LEN);
-        if p < PADDING_MIN_LEN {
+        if p < Self::PADDING_MIN_LEN {
             p += Self::BLOCK_LEN
         };
-        while p + l < PACKET_MIN_LEN {
+        while p + l < Self::PACKET_MIN_LEN {
             p += Self::BLOCK_LEN
         }
         p
@@ -127,176 +128,160 @@ impl Drop for Chacha20Poly1305Context {
 mod tests {
     use super::*;
 
-    /*
-        #[test]
-        fn new() {
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let ctx = Chacha20Poly1305Context::new(&mut ks.c());
-            assert_eq!(
-                ctx.k1,
-                [
-                    173, 191, 14, 248, 243, 145, 163, 223, 39, 37, 40, 156, 162, 23, 40, 136, 44, 116,
-                    35, 192, 159, 209, 196, 195, 238, 229, 27, 214, 96, 87, 212, 125
-                ]
-            );
-            assert_eq!(
-                ctx.k2,
-                [
-                    228, 75, 14, 90, 219, 45, 123, 205, 221, 72, 66, 95, 217, 0, 83, 243, 254, 205,
-                    234, 128, 163, 38, 66, 235, 159, 133, 85, 193, 130, 109, 89, 100
-                ]
-            );
-        }
-    }
+    #[test]
+    fn new() {
+        let dir = KeyDirection::ClientToServer;
+        let algo = KeyAlgorithm::Sha256;
+        let k = [0u8; 32];
+        let h = SessionId::new([0u8; 32]);
+        let sid = SessionId::new([0u8; 32]);
+        let ks = KeyStream::new(dir, algo, k, h, sid);
+        let ctx = Chacha20Poly1305Context::new(&ks);
 
-
-        #[test]
-        fn update() {
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let mut ctx = Chacha20Poly1305Context::new(&mut ks.c());
-            ctx.update(&mut ks.d());
-            assert_eq!(
-                ctx.k1,
-                [
-                    64, 198, 150, 122, 78, 175, 56, 160, 162, 193, 208, 197, 21, 11, 23, 52, 240, 146,
-                    219, 132, 200, 175, 240, 167, 252, 98, 12, 219, 143, 97, 181, 228
-                ]
-            );
-            assert_eq!(
-                ctx.k2,
-                [
-                    69, 185, 54, 154, 124, 158, 197, 187, 140, 130, 203, 250, 232, 158, 125, 83, 224,
-                    127, 234, 8, 184, 143, 137, 204, 181, 39, 244, 213, 253, 14, 38, 50
-                ]
-            );
-        }
-
-        #[test]
-        fn encrypt_01() {
-            let pc = 7;
-            let k1 = [
-                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234, 137,
-                133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
-            ];
-            let k2 = [
-                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7, 131,
-                160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
-            ];
-            let mut plain: [u8; 36] = [
-                0, 0, 0, 16, 10, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0,
-            ];
-            let cipher: [u8; 36] = [
-                76, 188, 158, 20, 126, 192, 194, 231, 77, 234, 102, 185, 54, 122, 208, 204, 155, 191,
-                192, 209, 17, 47, 195, 149, 9, 143, 13, 207, 74, 6, 81, 152, 41, 219, 140, 154,
-            ];
-
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let mut ctx = Chacha20Poly1305Context::new(&mut ks.c());
-            ctx.k1 = k1;
-            ctx.k2 = k2;
-            ctx.encrypt(pc, &mut plain);
-            assert_eq!(&plain[..], &cipher[..]);
-        }
-
-        #[test]
-        fn decrypt_len_01() {
-            let pc = 7;
-            let k1 = [
-                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234, 137,
-                133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
-            ];
-            let cipher: [u8; 4] = [76, 188, 158, 20];
-            let plain: Option<usize> = Some(36);
-
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let mut ctx = Chacha20Poly1305Context::new(&mut ks.c());
-            ctx.k1 = k1;
-
-            assert_eq!(plain, ctx.decrypt_len(pc, cipher));
-        }
-
-        #[test]
-        fn decrypt_len_02() {
-            let pc = 7;
-            let cipher: [u8; 4] = [76, 188, 158, 20];
-            let plain: Option<usize> = None;
-
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let ctx = Chacha20Poly1305Context::new(&mut ks.c());
-
-            assert_eq!(plain, ctx.decrypt_len(pc, cipher));
-        }
-
-        #[test]
-        fn decrypt_01() {
-            let pc = 7;
-            let k1 = [
-                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234, 137,
-                133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
-            ];
-            let k2 = [
-                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7, 131,
-                160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
-            ];
-            let plain: [u8; 36] = [
-                126, 246, 197, 155, 10, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 23, 27, 21, 224,
-                187, 181, 146, 232, 50, 83, 6, 112, 219, 69, 113, 0,
-            ];
-            let mut cipher: [u8; 36] = [
-                76, 188, 158, 20, 126, 192, 194, 231, 77, 234, 102, 185, 54, 122, 208, 204, 155, 191,
-                192, 209, 17, 47, 195, 149, 9, 143, 13, 207, 74, 6, 81, 152, 41, 219, 140, 154,
-            ];
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let mut ctx = Chacha20Poly1305Context::new(&mut ks.c());
-            ctx.k1 = k1;
-            ctx.k2 = k2;
-            let r = ctx.decrypt(pc, &mut cipher);
-            assert_eq!(&plain[4..20], &cipher[4..20]);
-            assert_eq!(Some(16), r);
-        }
-
-        #[test]
-        fn decrypt_02() {
-            let pc = 7;
-            let k1 = [
-                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234, 137,
-                133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
-            ];
-            let k2 = [
-                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7, 131,
-                160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
-            ];
-            let mut cipher: [u8; 36] = [
-                76, 188, 158, 20, 126, 192, 194, 231, 77, 234, 102, 185, 54, 122, 208, 204, 155, 191,
-                192, 209, 17, 47, 195, 149, 9, 143, 13, 207, 74, 6, 81, 152, 41, 219, 140, 154,
-            ];
-
-            let ks = KeyStreams::new_sha256(&[], &[], &[]);
-            let mut ctx = Chacha20Poly1305Context::new(&mut ks.c());
-            ctx.k1 = k1;
-            ctx.k2 = k2;
-            cipher[8] += 1; // Introduce bitflip in ciphertext
-            let r = ctx.decrypt(pc, &mut cipher);
-            assert_eq!(None, r);
-        }
-
-        #[test]
-        fn test_poly1305() {
-            let key = [
-                2, 36, 186, 199, 156, 219, 160, 59, 58, 72, 185, 13, 36, 91, 46, 55, 10, 206, 108, 143,
-                250, 250, 227, 41, 164, 26, 13, 4, 248, 136, 67, 35,
+        assert_eq!(
+            ctx.k1,
+            [
+                85, 81, 83, 240, 138, 99, 36, 217, 202, 127, 50, 172, 203, 46, 164, 128, 21, 133,
+                223, 211, 200, 213, 89, 52, 64, 125, 127, 142, 70, 33, 40, 115
             ]
-            .into();
-            let msg = [1, 2, 3, 4, 5, 6, 7, 8];
-            let tag = [
-                5, 144, 82, 159, 246, 206, 249, 18, 184, 150, 179, 37, 193, 39, 161, 138,
-            ];
-            let mut poly = Poly1305::new(&key);
-            poly.update(&msg);
-            assert_eq!(&tag, poly.result().into_bytes().as_ref());
-        }
+        );
+        assert_eq!(
+            ctx.k2,
+            [
+                139, 224, 214, 59, 139, 12, 205, 174, 32, 35, 203, 218, 65, 18, 110, 106, 130, 31,
+                241, 34, 79, 188, 53, 185, 12, 230, 223, 30, 129, 126, 7, 229
+            ]
+        );
     }
 
-    */
+    #[test]
+    fn update() {
+        // Initial context
+        let dir = KeyDirection::ClientToServer;
+        let algo = KeyAlgorithm::Sha256;
+        let k = [0u8; 32];
+        let h = SessionId::new([0u8; 32]);
+        let sid = SessionId::new([0u8; 32]);
+        let ks = KeyStream::new(dir, algo, k, h, sid);
+        let mut ctx = Chacha20Poly1305Context::new(&ks);
+        // Updated context
+        let dir = KeyDirection::ClientToServer;
+        let algo = KeyAlgorithm::Sha256;
+        let k = [1u8; 32]; // <- sic!
+        let h = SessionId::new([0u8; 32]);
+        let sid = SessionId::new([0u8; 32]);
+        let ks = KeyStream::new(dir, algo, k, h, sid);
+
+        ctx.update(&ks);
+
+        assert_eq!(
+            ctx.k1,
+            [
+                119, 187, 217, 228, 158, 71, 184, 30, 179, 7, 206, 239, 67, 106, 37, 18, 60, 42,
+                204, 177, 19, 172, 108, 227, 27, 65, 212, 146, 80, 79, 91, 81
+            ]
+        );
+        assert_eq!(
+            ctx.k2,
+            [
+                153, 191, 246, 179, 32, 250, 30, 173, 105, 136, 94, 221, 187, 96, 194, 129, 136,
+                50, 33, 207, 25, 195, 181, 90, 197, 127, 62, 186, 234, 4, 58, 138
+            ]
+        );
+    }
+
+    #[test]
+    fn encrypt_01() {
+        let pc = 7;
+        let ctx = Chacha20Poly1305Context {
+            k1: [
+                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234,
+                137, 133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
+            ],
+            k2: [
+                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7,
+                131, 160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
+            ],
+        };
+        let mut plain: [u8; 36] = [
+            0, 0, 0, 16, 10, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0, 0, 0, 0, 0, 0,
+        ];
+        let cipher: [u8; 36] = [
+            76, 188, 158, 20, 126, 192, 194, 231, 77, 234, 102, 185, 54, 122, 208, 204, 155, 191,
+            192, 209, 17, 47, 195, 149, 9, 143, 13, 207, 74, 6, 81, 152, 41, 219, 140, 154,
+        ];
+
+        ctx.encrypt(pc, &mut plain).unwrap();
+        assert_eq!(&plain[..], &cipher[..]);
+    }
+
+    #[test]
+    fn decrypt_len_01() {
+        let pc = 7;
+        let ctx = Chacha20Poly1305Context {
+            k1: [
+                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234,
+                137, 133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
+            ],
+            k2: [
+                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7,
+                131, 160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
+            ],
+        };
+
+        assert_eq!(ctx.decrypt_len(pc, [76, 188, 158, 20]).unwrap(), 16);
+    }
+
+    #[test]
+    fn decrypt_valid() {
+        let pc = 7;
+        let ctx = Chacha20Poly1305Context {
+            k1: [
+                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234,
+                137, 133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
+            ],
+            k2: [
+                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7,
+                131, 160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
+            ],
+        };
+        let plain: [u8; 36] = [
+            126, 246, 197, 155, 10, 97, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 23, 27, 21, 224,
+            187, 181, 146, 232, 50, 83, 6, 112, 219, 69, 113, 0,
+        ];
+        let mut cipher: [u8; 36] = [
+            76, 188, 158, 20, 126, 192, 194, 231, 77, 234, 102, 185, 54, 122, 208, 204, 155, 191,
+            192, 209, 17, 47, 195, 149, 9, 143, 13, 207, 74, 6, 81, 152, 41, 219, 140, 154,
+        ];
+        ctx.decrypt(pc, &mut cipher).unwrap();
+
+        assert_eq!(&plain[4..20], &cipher[4..20]);
+    }
+
+    #[test]
+    fn decrypt_invalid_mac() {
+        let pc = 7;
+        let ctx = Chacha20Poly1305Context {
+            k1: [
+                220, 134, 135, 208, 1, 2, 121, 163, 164, 252, 211, 244, 36, 148, 174, 220, 234,
+                137, 133, 117, 40, 131, 157, 84, 211, 208, 74, 103, 215, 88, 145, 28,
+            ],
+            k2: [
+                136, 155, 238, 35, 145, 72, 154, 220, 247, 70, 199, 97, 239, 124, 7, 41, 45, 7,
+                131, 160, 203, 80, 54, 7, 100, 198, 188, 112, 19, 150, 155, 10,
+            ],
+        };
+        let mut cipher: [u8; 36] = [
+            76, 188, 158, 20, 126, 192, 194, 231, 77, 234, 102, 185, 54, 122, 208, 204, 155, 191,
+            192, 209, 17, 47, 195, 149, 9, 143, 13, 207, 74, 6, 81, 152, 41, 219, 140,
+            155, // <- !
+        ];
+
+        match ctx.decrypt(pc, &mut cipher) {
+            Err(TransportError::InvalidEncryption) => (),
+            Err(e) => panic!("unexpected error {:?}", e),
+            _ => panic!("should have failed due to invalid mac"),
+        }
+    }
 }

@@ -1,11 +1,11 @@
 use super::state::*;
 use super::*;
-use crate::util::socket::Socket;
-use async_std::io::{Read, Write};
-use async_std::task::Context;
+use crate::util::runtime::Socket;
+use futures_util::io::{AsyncRead, AsyncWrite};
 use std::io::Error;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::Context;
 
 #[derive(Debug)]
 pub struct ChannelHandle(Arc<Mutex<ChannelState>>);
@@ -36,7 +36,7 @@ impl From<&Arc<Mutex<ChannelState>>> for ChannelHandle {
     }
 }
 
-impl Read for ChannelHandle {
+impl AsyncRead for ChannelHandle {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -58,7 +58,7 @@ impl Read for ChannelHandle {
     }
 }
 
-impl Write for ChannelHandle {
+impl AsyncWrite for ChannelHandle {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context,

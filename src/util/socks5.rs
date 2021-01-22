@@ -1,8 +1,9 @@
-use async_std::io::Result;
-use async_std::net::{IpAddr, SocketAddr, TcpStream};
-use async_std::prelude::*;
+use std::io::Result;
+use std::net::{IpAddr, SocketAddr};
 
-pub async fn serve(mut sock: TcpStream) -> Result<ConnectRequest> {
+use crate::util::runtime::Socket;
+
+pub async fn serve<S: Socket>(mut sock: S) -> Result<ConnectRequest<S>> {
     let e: std::io::ErrorKind = std::io::ErrorKind::InvalidInput;
     let mut buf: [u8; 255] = [0; 255];
     // Read the first 2 bytes: Version and number of auth methods
@@ -72,14 +73,14 @@ pub async fn serve(mut sock: TcpStream) -> Result<ConnectRequest> {
 }
 
 #[derive(Debug)]
-pub struct ConnectRequest {
-    sock: TcpStream,
+pub struct ConnectRequest<S: Socket> {
+    sock: S,
     host: Host,
     port: u16,
 }
 
-impl ConnectRequest {
-    fn new(sock: TcpStream, host: Host, port: u16) -> Self {
+impl<S: Socket> ConnectRequest<S> {
+    fn new(sock: S, host: Host, port: u16) -> Self {
         Self { sock, host, port }
     }
 
@@ -91,7 +92,7 @@ impl ConnectRequest {
         self.port
     }
 
-    pub async fn accept(self, bind_addr: SocketAddr) -> Result<TcpStream> {
+    pub async fn accept(self, bind_addr: SocketAddr) -> Result<S> {
         let mut sock = self.sock;
         let t = match bind_addr.ip() {
             IpAddr::V4(_) => AddrType::IP_V4,

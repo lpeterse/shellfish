@@ -22,7 +22,7 @@ use super::ConnectionError;
 use crate::util::codec::{SshDecode, SshEncode};
 use crate::util::oneshot;
 
-use async_std::task::Poll;
+use std::task::Poll;
 use std::sync::Arc;
 
 pub trait Channel: Unpin + Sized {

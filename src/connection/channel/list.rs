@@ -5,7 +5,7 @@ use super::*;
 
 use crate::transport::GenericTransport;
 
-use async_std::task::{ready, Context, Poll};
+use std::task::{ready, Context, Poll};
 
 #[derive(Debug)]
 pub(crate) struct ChannelList {

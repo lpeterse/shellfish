@@ -1,10 +1,14 @@
+#![feature(ready_macro)]
+#![feature(future_poll_fn)]
+
 mod core;
 
-pub mod auth;
+pub mod agent;
 pub mod client;
 pub mod connection;
-pub mod known_hosts;
+pub mod host;
+pub mod identity;
 pub mod server;
 pub mod transport;
+pub mod user_auth;
 pub mod util;
-pub mod identity;

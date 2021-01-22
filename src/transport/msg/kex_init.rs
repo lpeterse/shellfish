@@ -107,7 +107,7 @@ impl SshDecode for MsgKexInit {
             languages_server_to_client: d.take_name_list()?.map(Into::into).collect(),
             first_packet_follows: d.take_u8().map(|x| x != 0)?,
         };
-        d.take_u32be()?;
+        d.expect_u32be(0)?;
         r.into()
     }
 }

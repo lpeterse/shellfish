@@ -88,5 +88,9 @@ mod tests {
         assert_eq!(c.encryption_algorithms, ENCRYPTION_ALGORITHMS.to_vec());
         assert_eq!(c.compression_algorithms, COMPRESSION_ALGORITHMS.to_vec());
         assert_eq!(c.mac_algorithms, MAC_ALGORITHMS.to_vec());
+        assert_eq!(c.rx_buffer_size_min, 1_200);
+        assert_eq!(c.rx_buffer_size_max, 35_000);
+        assert_eq!(c.tx_buffer_size_min, 1_200);
+        assert_eq!(c.tx_buffer_size_max, 35_000);
     }
 }

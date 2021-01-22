@@ -1,4 +1,4 @@
-use async_std::net::TcpStream;
+use crate::util::runtime::TcpStream;
 
 #[derive(Clone, Debug)]
 pub struct TcpKeepaliveConfig {
@@ -26,7 +26,7 @@ impl TcpKeepaliveConfig {
             }
         }
         let fd = socket.as_raw_fd();
-        let msg = "Setting TCP keepalive failed";
+        let msg = "Setting TCP keep-alive failed";
         let err = Err(std::io::Error::new(std::io::ErrorKind::Other, msg));
 
         if set_opt(fd, SOL_SOCKET, SO_KEEPALIVE, 1) != 0 {

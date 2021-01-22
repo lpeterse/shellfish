@@ -9,37 +9,42 @@ use crate::util::BoxFuture;
 ///
 /// The traditional mechanism for host-key verification is looking it up in system wide or user
 /// specific `known_hosts` files. The struct `KnownHostsFiles` implements this mechanism.
-pub trait KnownHostsLike: std::fmt::Debug + Send + Sync + 'static {
+pub trait HostVerifier: std::fmt::Debug + Send + Sync + 'static {
     /// Verify that the given hostname matches the presented identity.
     ///
     /// The result distiniguishes between errors to complete the verification process itself
     /// and its positive or negative outcome. `Ok(None)` shall be returned in case it is unknown
     /// whether the host shall be accepted or rejected. If no additional/alternative verification
     /// mechanism exists, this shall simply result in rejection as well.
-    fn verify(&self, name: &str, identity: &Identity) -> BoxFuture<Result<(), KnownHostsError>>;
+    fn verify(
+        &self,
+        name: &str,
+        port: u16,
+        identity: &Identity,
+    ) -> BoxFuture<Result<(), HostVerificationError>>;
 }
 
 #[derive(Debug, Clone)]
-pub enum KnownHostsError {
+pub enum HostVerificationError {
     Unverifiable,
     KeyRevoked,
     CertError(CertError),
     OtherError(String),
 }
 
-impl From<CertError> for KnownHostsError {
+impl From<CertError> for HostVerificationError {
     fn from(e: CertError) -> Self {
         Self::CertError(e)
     }
 }
 
-impl From<std::io::Error> for KnownHostsError {
+impl From<std::io::Error> for HostVerificationError {
     fn from(e: std::io::Error) -> Self {
         Self::OtherError(format!("{}", e))
     }
 }
 
-impl std::fmt::Display for KnownHostsError {
+impl std::fmt::Display for HostVerificationError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Unverifiable => write!(f, "Key/identity not found"),
@@ -50,4 +55,4 @@ impl std::fmt::Display for KnownHostsError {
     }
 }
 
-impl std::error::Error for KnownHostsError {}
+impl std::error::Error for HostVerificationError {}

@@ -1,15 +1,10 @@
-.PHONY: run test build kcov deps example clean
-
-run:
-	cargo build --release --target "x86_64-unknown-linux-musl" --example rssh-server
-	cargo build --release --target "x86_64-unknown-linux-musl" --example rssh-proxy
-	./target/x86_64-unknown-linux-musl/release/examples/rssh-proxy
-
-test:
-	cargo test
+.PHONY: run test build kcov deps example example-dev clean
 
 build:
 	cargo build
+
+test:
+	cargo test
 
 clean:
 	cargo clean
@@ -26,7 +21,8 @@ deps:
 	eog target/graph.png
 
 example:
-	RUST_LOG=debug cargo run --release --target "x86_64-unknown-linux-musl" --example rssh-proxy
+	cargo build --release --target "x86_64-unknown-linux-musl" --example shellfish-proxy
+	./target/x86_64-unknown-linux-musl/release/examples/shellfish-proxy socks5 localhost
 
 example-dev:
-	RUST_LOG=debug cargo run --target "x86_64-unknown-linux-musl" --example rssh-proxy
+	RUST_LOG=debug cargo run --target "x86_64-unknown-linux-musl" --example shellfish-proxy
