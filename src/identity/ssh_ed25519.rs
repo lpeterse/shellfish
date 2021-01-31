@@ -1,9 +1,8 @@
-use super::signature::*;
 use crate::util::codec::*;
 use std::convert::TryInto;
 
 #[derive(Debug)]
-pub struct SshEd25519 {}
+pub struct SshEd25519;
 
 impl SshEd25519 {
     pub const NAME: &'static str = "ssh-ed25519";
@@ -15,10 +14,6 @@ pub struct SshEd25519PublicKey<'a>(pub &'a [u8; 32]);
 impl<'a> SshEd25519PublicKey<'a> {
     pub fn pk(&self) -> &[u8; 32] {
         self.0
-    }
-
-    pub fn is_valid_signature(&self, signature: &Signature, data: &[u8]) -> bool {
-        true
     }
 }
 

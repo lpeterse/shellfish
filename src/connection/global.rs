@@ -1,37 +1,103 @@
-use super::*;
+mod hostkeys;
+mod keepalive;
 
-use std::future::Future;
-use std::task::*;
-use core::pin::*;
+pub use self::hostkeys::*;
+pub use self::keepalive::*;
 
-#[derive(Debug)]
-pub struct GlobalRequest {
-    pub(crate) name: String,
-    pub(crate) data: Vec<u8>,
-    pub(crate) reply: Option<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
+use crate::util::codec::*;
+use tokio::sync::oneshot;
+
+pub trait Global: Sized {
+    const NAME: &'static str;
+    type RequestData: SshEncode + SshDecode + std::fmt::Debug;
 }
 
-impl GlobalRequest {
+pub trait GlobalWantReply: Global {
+    type ResponseData: SshEncode + SshDecode + std::fmt::Debug;
+}
+
+impl Global for () {
+    const NAME: &'static str = "";
+    type RequestData = Vec<u8>;
+}
+
+impl GlobalWantReply for () {
+    type ResponseData = Vec<u8>;
+}
+
+#[derive(Debug)]
+pub struct GlobalRequest<T: Global = ()> {
+    name: String,
+    data: <T as Global>::RequestData,
+}
+
+impl GlobalRequest<()> {
     pub(crate) fn new(name: String, data: Vec<u8>) -> Self {
-        Self {
-            name,
-            data,
-            reply: None,
-        }
+        Self { name, data }
     }
 
-    pub(crate) fn new_want_reply(name: String, data: Vec<u8>) -> (Self, GlobalReplyFuture) {
-        let (tx, rx) = oneshot::channel();
-        let mut self_ = Self::new(name, data);
-        self_.reply = Some(tx);
-        (self_, GlobalReplyFuture(rx))
+    pub fn interpret<T: Global>(self) -> Result<GlobalRequest<T>, Self> {
+        if !T::NAME.is_empty() && T::NAME == &self.name {
+            if let Some(data) = SshCodec::decode(&self.data) {
+                return Ok(GlobalRequest {
+                    name: self.name,
+                    data,
+                });
+            }
+        }
+        Err(self)
+    }
+}
+
+impl<T: Global> GlobalRequest<T> {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn data(&self) -> &T::RequestData {
+        &self.data
+    }
+}
+
+#[derive(Debug)]
+pub struct GlobalRequestWantReply<T: GlobalWantReply = ()> {
+    name: String,
+    data: <T as Global>::RequestData,
+    repl: oneshot::Sender<Vec<u8>>,
+}
+
+impl GlobalRequestWantReply<()> {
+    pub(crate) fn new(name: String, data: Vec<u8>, repl: oneshot::Sender<Vec<u8>>) -> Self {
+        Self { name, data, repl }
     }
 
-    pub fn accept(self, data: Vec<u8>) {
-        let mut self_ = self;
-        if let Some(reply) = self_.reply.take() {
-            reply.send(Ok(data))
+    pub fn interpret<T: GlobalWantReply>(self) -> Result<GlobalRequestWantReply<T>, Self> {
+        if !T::NAME.is_empty() && T::NAME == &self.name {
+            if let Some(data) = SshCodec::decode(&self.data) {
+                return Ok(GlobalRequestWantReply {
+                    name: self.name,
+                    data,
+                    repl: self.repl
+                });
+            }
         }
+        Err(self)
+    }
+}
+
+
+
+impl<T: GlobalWantReply> GlobalRequestWantReply<T> {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    pub fn data(&self) -> &T::RequestData {
+        &self.data
+    }
+
+    pub fn accept(self, data: T::ResponseData) {
+        SshCodec::encode(&data)
+            .and_then(|data| self.repl.send(data).ok())
+            .unwrap_or(())
     }
 
     pub fn reject(self) {
@@ -39,30 +105,15 @@ impl GlobalRequest {
     }
 }
 
-impl GlobalRequest {
-    pub fn name(&self) -> &str {
-        self.name.as_str()
-    }
-    pub fn data(&self) -> &[u8] {
-        self.data.as_ref()
-    }
-}
-
-#[derive(Debug)]
-pub struct GlobalReplyFuture(oneshot::Receiver<Result<Vec<u8>, ConnectionError>>);
-
-impl GlobalReplyFuture {
-    pub(crate) fn new(rx: oneshot::Receiver<Result<Vec<u8>, ConnectionError>>) -> Self {
-        Self(rx)
-    }
-}
-
-impl Future for GlobalReplyFuture {
-    type Output = Result<Option<Vec<u8>>, ConnectionError>;
-
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        Pin::new(&mut self.as_mut().0)
-            .poll(cx)
-            .map(|x| x.map(|y| y.map(Some)).unwrap_or(Ok(None)))
-    }
+#[macro_export]
+macro_rules! interpret {
+    ($request:ident, $ty:ty, $block:block) => {
+        #[allow(unused_variables)]
+        let $request = match $request.interpret::<$ty>() {
+            Err(x) => x,
+            Ok($request) => {
+                return $block;
+            }
+        };
+    };
 }

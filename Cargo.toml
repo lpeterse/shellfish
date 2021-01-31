@@ -8,38 +8,31 @@ license = "MIT OR Apache-2.0"
 edition = "2018"
 readme = "README.md"
 repository = "https://github.com/lpeterse/shellfish/"
-keywords = ["ssh", "network", "async", "crypto"]
+keywords = ["ssh", "network", "async", "crypto", "tokio"]
 description = ""
-
-[features]
-default = ["rt-tokio"]
-rt-async = ["async-std"]
-rt-tokio = ["tokio"]
 
 [dependencies]
 base64 = "^0.13"
 chacha20 = { version = "^0.6", features = ["legacy"] }
 ed25519-dalek = { version = "^1.0", default-features = false, features = [] }
-futures-timer = "^3.0"
-futures-util = { version = "^0.3", default-features = false, features = [ "io" ] }
 generic-array = "^0.14"
 hmac = "^0.10"
 libc = "^0.2"
 log = "^0.4"
 poly1305 = "^0.6"
-rand = "^0.7"
+rand_core = { version = "^0.5", features = ["getrandom"] }
 sha-1 = "^0.9"
 sha2 = "^0.9"
 x25519-dalek = "^1.1"
 zeroize = "^1.2"
-async-std = { version = "^1.9", optional = true }
-tokio = { version = "^1.0", optional = true, features = [
+tokio = { version = "^1.0", features = [
     "fs",
     "net",
     "rt",
     "rt-multi-thread",
     "time",
-    "io-util"
+    "io-util",
+    "sync"
 ] }
 
 [dev-dependencies]
@@ -49,9 +42,9 @@ env_logger = { version = "*", default-features = false }
 [profile.release]
 lto = true
 panic = "abort"
-codegen-units = 1
-opt-level = "z"
 strip = "symbols"
+opt-level = "z"
+codegen-units = 1
 
 [[example]]
 name = "shellfish-proxy"

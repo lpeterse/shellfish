@@ -24,3 +24,9 @@ impl<A: SshEncode, B: SshEncode> SshEncode for (A, B) {
         e.push(&self.1)
     }
 }
+
+impl SshEncode for Vec<u8> {
+    fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
+        e.push_bytes(&self)
+    }
+}

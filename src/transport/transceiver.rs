@@ -6,13 +6,14 @@ use super::TransportError;
 use crate::util::buffer::Buffer;
 use crate::util::check;
 use crate::util::codec::*;
-use crate::util::runtime::Socket;
+use crate::util::socket::Socket;
+use core::future::poll_fn;
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{ready, Context, Poll};
-use core::future::poll_fn;
+use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Handles the low-level part of the wire-protocol including framing and cipher.
 #[derive(Debug)]
@@ -217,7 +218,7 @@ impl<S: Socket> Transceiver<S> {
     pub fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         while self.tx_buffer.len() > 0 {
             let buf = self.tx_buffer.as_ref();
-            let written = ready!(Socket::poll_write(Pin::new(&mut self.socket), cx, &buf))?;
+            let written = ready!(AsyncWrite::poll_write(Pin::new(&mut self.socket), cx, &buf))?;
             self.tx_buffer.consume(written);
         }
         Poll::Ready(Ok(()))
@@ -310,7 +311,10 @@ impl<S: Socket> Transceiver<S> {
         // Returns with error on unexpected eof or with `Pending` if socket has no more data.
         while self.rx_buffer.len() < len {
             let buf = self.rx_buffer.available_mut();
-            let read = ready!(Socket::poll_read(Pin::new(&mut self.socket), cx, buf))?;
+            let mut buf_ = tokio::io::ReadBuf::new(buf);
+            let sock = Pin::new(&mut self.socket);
+            ready!(AsyncRead::poll_read(sock, cx, &mut buf_))?;
+            let read = buf_.filled().len();
             if read > 0 {
                 // Extend the window of meaningful data by number of bytes read.
                 self.rx_buffer.extend(read);

@@ -1,14 +1,29 @@
 use super::state::*;
 use super::*;
-use crate::util::runtime::Socket;
-use futures_util::io::{AsyncRead, AsyncWrite};
+use crate::util::socket::Socket;
 use std::io::Error;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::Context;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tokio::sync::watch;
 
 #[derive(Debug)]
-pub struct ChannelHandle(Arc<Mutex<ChannelState>>);
+pub enum Gnurp {
+    Opening,
+    Open,
+    Closing,
+    Closed
+}
+
+#[derive(Debug)]
+pub struct ChannelHandle2 {
+    fooba: watch::Receiver<Gnurp>,
+    state: Arc<Mutex<ChannelState>>,
+}
+
+#[derive(Debug)]
+pub struct ChannelHandle(pub Arc<Mutex<ChannelState>>);
 
 impl ChannelHandle {
     pub(crate) fn with_state<F, X>(&self, f: F) -> X
@@ -40,16 +55,17 @@ impl AsyncRead for ChannelHandle {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<std::io::Result<usize>> {
+        buf: &mut ReadBuf,
+    ) -> Poll<std::io::Result<()>> {
         self.with_state(|x| {
-            let read = x.std.rx.read(buf);
+            let read = x.std.rx.read(buf.initialize_unfilled());
             if read > 0 {
+                buf.advance(read);
                 x.outer_task_waker = None;
-                Poll::Ready(Ok(read))
+                Poll::Ready(Ok(()))
             } else if x.reof {
                 x.outer_task_waker = None;
-                Poll::Ready(Ok(0))
+                Poll::Ready(Ok(()))
             } else {
                 x.register_outer_task(cx);
                 Poll::Pending
@@ -98,7 +114,7 @@ impl AsyncWrite for ChannelHandle {
     /// Closing the stream shall be translated to eof (meaning that there won't be any more data).
     /// The internal connection handler will first transmit any pending data and then signal eof.
     /// Close gets sent automatically on drop (after sending pending data and eventually eof).
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
         self.with_state(|x| {
             x.leof = true;
             if x.std.tx.is_empty() && (!x.leof || x.leof_sent) {
@@ -116,23 +132,6 @@ impl Drop for ChannelHandle {
         self.with_state(|x| {
             x.lclose = true;
             x.inner_task_wake = true;
-        })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// drop: Shall set lclose and wake the inner task
-    #[test]
-    fn test_channel_handle_drop_01() {
-        let st = ChannelHandleInner::new(1, 2, 3, 4, 5, 6, false);
-        let ch = st.handle();
-        drop(ch);
-        st.with_state(|x| {
-            assert_eq!(x.lclose, true);
-            assert_eq!(x.inner_task_wake, true);
         })
     }
 }

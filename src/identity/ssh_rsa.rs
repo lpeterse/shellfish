@@ -1,6 +1,6 @@
 use crate::util::codec::*;
 
-pub struct SshRsa {}
+pub struct SshRsa;
 
 impl SshRsa {
     pub const NAME: &'static str = "ssh-rsa";

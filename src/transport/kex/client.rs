@@ -2,8 +2,10 @@ use super::super::keys::*;
 use super::super::*;
 use crate::util::BoxFuture;
 use core::future::Future;
-use futures_timer::Delay;
+//use futures_timer::Delay;
 use std::sync::Arc;
+use tokio::time::{sleep, Sleep, Instant};
+use std::pin::Pin;
 
 /// The client side state machine for key exchange.
 #[derive(Debug)]
@@ -20,7 +22,7 @@ pub struct ClientKex {
     /// Host identity verifier
     host_verifier: Arc<dyn HostVerifier>,
     /// Rekeying timeout (reset after successful kex)
-    next_at: Delay,
+    next_at: Pin<Box<Sleep>>,
     /// Rekeying threshold (updated after successful kex)
     next_at_bytes_sent: u64,
     /// Rekeying threshold (updates after successful kex)
@@ -44,7 +46,7 @@ impl ClientKex {
             host_name: host_name.into(),
             host_port,
             host_verifier: host_verifier.clone(),
-            next_at: Delay::new(config.kex_interval_duration),
+            next_at: Box::pin(sleep(config.kex_interval_duration)),
             next_at_bytes_sent: config.kex_interval_bytes,
             next_at_bytes_received: config.kex_interval_bytes,
             session_id: None,
@@ -121,7 +123,8 @@ impl Kex for ClientKex {
 
     fn init(&mut self, tx: u64, rx: u64) {
         if self.state.is_none() {
-            self.next_at.reset(self.config.kex_interval_duration);
+            let deadline = Instant::now() + self.config.kex_interval_duration;
+            self.next_at.as_mut().reset(deadline);
             self.next_at_bytes_sent = tx + self.config.kex_interval_bytes;
             self.next_at_bytes_received = rx + self.config.kex_interval_bytes;
             self.state = Some(Box::new(State::new()))
@@ -130,7 +133,7 @@ impl Kex for ClientKex {
 
     fn init_if_necessary(&mut self, cx: &mut Context, tx: u64, rx: u64) {
         if self.state.is_none() {
-            let a = Pin::new(&mut self.next_at).poll(cx).is_ready();
+            let a = Future::poll(Pin::new(&mut self.next_at), cx).is_ready();
             let b = tx > self.next_at_bytes_sent;
             let c = rx > self.next_at_bytes_received;
             if a || b || c {

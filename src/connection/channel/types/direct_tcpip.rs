@@ -1,15 +1,13 @@
 mod open;
 
-use super::super::*;
-
 pub use self::open::*;
 
-use futures_util::io::{AsyncRead, AsyncWrite};
+use super::super::*;
+use crate::util::socket::Socket;
 use std::io::Error;
 use std::pin::Pin;
 use std::task::Context;
-
-use crate::util::runtime::Socket;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 #[derive(Debug)]
 pub struct DirectTcpIp(pub(crate) ChannelHandle);
@@ -34,8 +32,8 @@ impl AsyncRead for DirectTcpIp {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
-        buf: &mut [u8],
-    ) -> Poll<Result<usize, Error>> {
+        buf: &mut ReadBuf,
+    ) -> Poll<Result<(), Error>> {
         Pin::new(&mut Pin::into_inner(self).0).poll_read(cx, buf)
     }
 }
@@ -53,7 +51,7 @@ impl AsyncWrite for DirectTcpIp {
         Pin::new(&mut Pin::into_inner(self).0).poll_flush(cx)
     }
 
-    fn poll_close(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
-        Pin::new(&mut Pin::into_inner(self).0).poll_close(cx)
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
+        Pin::new(&mut Pin::into_inner(self).0).poll_shutdown(cx)
     }
 }

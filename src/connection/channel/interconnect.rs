@@ -1,8 +1,9 @@
 use super::ChannelHandle;
-use crate::util::runtime::Socket;
+use crate::util::socket::Socket;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 #[derive(Debug)]
 pub struct Interconnect<S: Socket> {
@@ -35,7 +36,7 @@ impl<S: Socket> Future for Interconnect<S> {
         self_.s1.with_state(|s1| {
             if !*s1_closed {
                 while !s1.std_rx().is_empty() {
-                    match Socket::poll_write(s2.as_mut(), cx, s1.std_rx().as_ref()) {
+                    match AsyncWrite::poll_write(s2.as_mut(), cx, s1.std_rx().as_ref()) {
                         Poll::Pending => break,
                         Poll::Ready(result) => {
                             let written = result?;
@@ -48,7 +49,7 @@ impl<S: Socket> Future for Interconnect<S> {
                     }
                 }
                 if s1.reof {
-                    match Socket::poll_close(s2.as_mut(), cx) {
+                    match AsyncWrite::poll_shutdown(s2.as_mut(), cx) {
                         Poll::Pending => (),
                         Poll::Ready(result) => {
                             result?;
@@ -57,7 +58,7 @@ impl<S: Socket> Future for Interconnect<S> {
                         }
                     }
                 } else {
-                    match Socket::poll_flush(s2.as_mut(), cx) {
+                    match AsyncWrite::poll_flush(s2.as_mut(), cx) {
                         Poll::Pending => (),
                         Poll::Ready(result) => result?,
                     }
@@ -80,10 +81,12 @@ impl<S: Socket> Future for Interconnect<S> {
                 let rws = s1.rws as usize;
                 let buf = s1.std_tx().available_mut();
                 let len = std::cmp::min(buf.len(), rws);
-                match Socket::poll_read(s2.as_mut(), cx, &mut buf[..len]) {
+                let mut buf_ = ReadBuf::new(&mut buf[..len]);
+                match AsyncRead::poll_read(s2.as_mut(), cx, &mut buf_) {
                     Poll::Pending => break,
-                    Poll::Ready(result) => {
-                        let read = result?;
+                    Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
+                    Poll::Ready(Ok(())) => {
+                        let read = buf_.filled().len();
                         s1.inner_task_wake = true;
                         if read > 0 {
                             let _ = s1.std_tx().extend(read);

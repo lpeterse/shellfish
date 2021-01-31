@@ -1,26 +1,16 @@
 use super::*;
 use crate::util::codec::*;
+use tokio::sync::oneshot;
 
 #[derive(Debug)]
 pub struct ChannelOpenRequest {
-    tx: OpenInboundTx,
-    name: String,
-    data: Vec<u8>,
-    chan: ChannelHandle,
+    pub name: String,
+    pub data: Vec<u8>,
+    pub chan: ChannelHandle,
+    pub resp: oneshot::Sender<Result<(), ChannelOpenFailure>>
 }
 
 impl ChannelOpenRequest {
-    pub(crate) fn new(name: String, data: Vec<u8>, chan: ChannelHandle) -> (Self, OpenInboundRx) {
-        let (tx, rx) = oneshot::channel();
-        let s = Self {
-            tx,
-            name,
-            data,
-            chan,
-        };
-        (s, rx)
-    }
-
     pub fn is<D: Channel>(&self) -> bool {
         D::NAME == self.name
     }
@@ -35,13 +25,13 @@ impl ChannelOpenRequest {
 
     pub fn accept<D: Channel>(self) -> Result<D, ConnectionError> {
         if self.is::<D>() {
-            self.tx.send(Ok(()));
+            self.resp.send(Ok(())).unwrap_or(());
             return Ok(D::new(self.chan));
         }
         Err(ConnectionError::ChannelTypeMismatch)
     }
 
     pub fn reject(self, reason: ChannelOpenFailure) {
-        self.tx.send(Err(reason))
+        self.resp.send(Err(reason)).unwrap_or(())
     }
 }

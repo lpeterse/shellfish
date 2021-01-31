@@ -58,13 +58,13 @@ mod tests {
         type SharedSecret = String;
 
         fn new() -> Self::EphemeralSecret {
-            "EPHEMERAL_SECRET".into()
+            "EPHEMERAL_SEConnectionRequestET".into()
         }
         fn public(_: &Self::EphemeralSecret) -> Self::PublicKey {
             "EPHEMERAL_PUBLIC".into()
         }
         fn diffie_hellman(_: Self::EphemeralSecret, _: &Self::PublicKey) -> Self::SharedSecret {
-            "SHARED_SECRET".into()
+            "SHARED_SEConnectionRequestET".into()
         }
         fn public_as_ref(pk: &Self::PublicKey) -> &[u8] {
             pk.as_ref()

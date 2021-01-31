@@ -1,7 +1,10 @@
 use super::super::state::poll_send;
 use super::super::ConnectionConfig;
 use super::super::{MsgChannelOpen, MsgChannelOpenConfirmation, MsgChannelOpenFailure};
+use super::state::ChannelState;
 use super::*;
+use std::sync::Mutex;
+use tokio::sync::oneshot;
 
 use crate::transport::GenericTransport;
 
@@ -10,88 +13,12 @@ use std::task::{ready, Context, Poll};
 #[derive(Debug)]
 pub(crate) struct ChannelList {
     config: Arc<ConnectionConfig>,
-    slots: Vec<Slot>,
+    slots2: Vec<Option<Arc<Mutex<ChannelState>>>>,
     failures: Vec<u32>, // FIXME poll
 }
 
-#[derive(Debug)]
-enum Slot {
-    Free,
-    Open(ChannelHandleInner),
-    OpeningInbound1(Box<OpeningInbound1>),
-    OpeningInbound2(Box<OpeningInbound2>),
-    OpeningOutbound(Box<OpeningOutbound>),
-}
-
-#[derive(Debug)]
-struct OpeningOutbound {
-    pub name: &'static str,
-    pub data: Vec<u8>,
-    pub sent: bool,
-    pub tx: OpenOutboundTx,
-}
-
-#[derive(Debug)]
-struct OpeningInbound1 {
-    pub rid: u32,
-    pub rws: u32,
-    pub rps: u32,
-    pub name: String,
-    pub data: Vec<u8>,
-}
-
-#[derive(Debug)]
-struct OpeningInbound2 {
-    pub rid: u32,
-    pub ch: ChannelHandleInner,
-    pub rx: OpenInboundRx,
-}
-
 impl ChannelList {
-    pub fn new(config: &Arc<ConnectionConfig>) -> Self {
-        Self {
-            config: config.clone(),
-            slots: Vec::with_capacity(1),
-            failures: Vec::with_capacity(0),
-        }
-    }
-
-    pub fn open_inbound(&mut self, msg: MsgChannelOpen) {
-        if let Some(id) = self.alloc() {
-            if let Some(slot) = self.slots.get_mut(id) {
-                let opening = OpeningInbound1 {
-                    rid: msg.sender_channel,
-                    rws: msg.initial_window_size,
-                    rps: msg.maximum_packet_size,
-                    name: msg.name,
-                    data: msg.data,
-                };
-                *slot = Slot::OpeningInbound1(Box::new(opening));
-            }
-        } else {
-            self.failures.push(msg.sender_channel);
-        }
-    }
-
-    pub fn open_outbound(&mut self, name: &'static str, data: Vec<u8>) -> OpenOutboundRx {
-        let (tx, rx) = oneshot::channel();
-        let opening = OpeningOutbound {
-            name,
-            data,
-            sent: false,
-            tx,
-        };
-        let opening = Slot::OpeningOutbound(Box::new(opening));
-        if let Some(id) = self.alloc() {
-            if let Some(slot) = self.slots.get_mut(id) {
-                *slot = opening;
-                return rx;
-            }
-        }
-        self.slots.push(opening);
-        return rx;
-    }
-
+    /*
     pub fn get_open(&mut self, id: u32) -> Result<&mut ChannelHandleInner, ConnectionError> {
         if let Some(Slot::Open(channel)) = self.slots.get_mut(id as usize) {
             return Ok(channel);
@@ -144,13 +71,17 @@ impl ChannelList {
             }
         }
         None
-    }
+    }*/
 
     pub fn poll(
         &mut self,
         cx: &mut Context,
         transport: &mut GenericTransport,
     ) -> Poll<Result<(), ConnectionError>> {
+        Poll::Pending
+    }
+
+    /*
         // Iterate over all channel slots and poll each present channel.
         // Remove channel if the futures is ready (close has been sent _and_ received).
         for (id, slot) in self.slots.iter_mut().enumerate() {
@@ -209,26 +140,13 @@ impl ChannelList {
                 break 'inner;
             }
         }
-        log::warn!("OPEN {} of {}", self.open_count(), self.slots.len());
+        // FIXME
+        //log::warn!("OPEN {} of {}", self.open_count(), self.slots.len());
         Poll::Pending
     }
 
     pub fn queued(&self) -> usize {
         self.failures.len()
-    }
-
-    fn alloc(&mut self) -> Option<usize> {
-        for (id, slot) in self.slots.iter_mut().enumerate() {
-            if let Slot::Free = &slot {
-                return Some(id);
-            }
-        }
-        if self.slots.len() < self.config.channel_max_count as usize {
-            let id = self.slots.len();
-            self.slots.push(Slot::Free);
-            return Some(id);
-        }
-        None
     }
 
     pub fn open_count(&self) -> usize {
@@ -242,7 +160,9 @@ impl ChannelList {
         }
         n
     }
+    */
 
+    /*
     pub fn terminate(&mut self, e: ConnectionError) {
         for slot in self.slots.iter_mut() {
             match std::mem::replace(slot, Slot::Free) {
@@ -254,12 +174,5 @@ impl ChannelList {
             }
         }
     }
+    */
 }
-
-/*
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-}
-*/

@@ -1,6 +1,6 @@
 use super::*;
 use crate::util::codec::*;
-use rand::rngs::OsRng;
+use rand_core::OsRng;
 
 #[derive(Debug)]
 pub struct X25519;
@@ -11,7 +11,7 @@ impl EcdhAlgorithm for X25519 {
     type SharedSecret = x25519_dalek::SharedSecret;
 
     fn new() -> Self::EphemeralSecret {
-        x25519_dalek::EphemeralSecret::new(&mut OsRng::default())
+        x25519_dalek::EphemeralSecret::new(&mut OsRng)
     }
 
     fn public(s: &Self::EphemeralSecret) -> Self::PublicKey {

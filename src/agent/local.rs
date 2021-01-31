@@ -1,3 +1,4 @@
+mod error;
 mod frame;
 mod msg_failure;
 mod msg_identities_answer;
@@ -6,7 +7,6 @@ mod msg_sign_request;
 mod msg_sign_response;
 mod msg_success;
 mod transmitter;
-mod error;
 
 use self::frame::*;
 use self::msg_failure::*;
@@ -15,14 +15,14 @@ use self::msg_identities_request::*;
 use self::msg_sign_request::*;
 use self::msg_sign_response::*;
 use self::transmitter::*;
-use self::error::*;
-use super::*;
-
-use crate::util::codec::*;
-use crate::util::runtime::UnixStream;
-
+use super::AuthAgent;
+use super::AuthAgentError;
+use super::AuthAgentFuture;
+use super::Signature;
+use crate::identity::Identity;
 use std::convert::TryFrom;
 use std::path::{Path, PathBuf};
+use tokio::net::UnixStream;
 
 /// A client for the local `ssh-agent`.
 #[derive(Debug, Clone)]

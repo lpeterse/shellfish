@@ -1,19 +1,21 @@
 use clap::{value_t_or_exit, App, Arg, SubCommand};
 use shellfish::client::*;
+use shellfish::connection::global::KeepAlive;
 use shellfish::connection::*;
-use shellfish::util::runtime::*;
 use shellfish::util::socks5;
 use std::error::Error;
 use std::net::SocketAddr;
+use tokio::net::TcpListener;
+use tokio::net::TcpStream;
+use tokio::spawn;
+use tokio::time::sleep;
 
-#[cfg(feature = "rt-tokio")]
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
+
 fn main() -> Result<(), Box<dyn Error>> {
     tokio::runtime::Runtime::new()?.block_on(main_async())
-}
-
-#[cfg(feature = "rt-async")]
-fn main() -> Result<(), Box<dyn Error>> {
-    async_std::task::block_on(main_async())
 }
 
 async fn main_async() -> Result<(), Box<dyn Error>> {
@@ -82,15 +84,38 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
             let mut pool = ConnectionPool::new(Client::default(), &user, &host, port);
             let listener: TcpListener = TcpListener::bind(&bind).await?;
 
-            loop {
-                let (sock, addr) = listener.accept().await?;
-                let connection = pool.get().await;
-                let _ = spawn(async move {
-                    if let Err(e) = serve(sock, addr, connection).await {
-                        log::error!("{:?}", e);
-                    }
-                });
+            let mut conn = pool.get().await?;
+            log::error!("CONNECTION ESTABLISHED!");
+            sleep(std::time::Duration::from_secs(10)).await;
+
+            for i in 1..1000 {
+                conn.request::<KeepAlive>(&()).await?;
+                if i % 100 == 0 {
+                    log::error!("CONNECTION ALIVE {}", i);
+                }
+                sleep(std::time::Duration::from_millis(10)).await;
             }
+
+            //conn.close();
+            Err(conn.await)?;
+
+            log::error!("CONNECTION DROPPED");
+
+            // let e = conn.error().await;
+            // log::error!("CONNECTION FAILED {}", e);
+
+            sleep(std::time::Duration::from_secs(60)).await;
+
+            // loop {
+            //     let (sock, addr) = listener.accept().await?;
+            //     let connection = pool.get().await;
+            //     let _ = spawn(async move {
+            //         if let Err(e) = serve(sock, addr, connection).await {
+            //             log::error!("{:?}", e);
+            //         }
+            //     });
+            // }
+            Ok(())
         }
         _ => Ok(()),
     }
@@ -102,7 +127,13 @@ async fn serve(sock: TcpStream, addr: SocketAddr, conn: Connection) -> Result<()
     let dp = cr.port();
     let sa = addr.ip();
     let sp = addr.port();
-    let chan = conn.open_direct_tcpip(dh, dp, sa, sp).await??;
+    let rq = DirectTcpIpOpen {
+        dst_host: dh,
+        dst_port: dp,
+        src_addr: sa,
+        src_port: sp,
+    };
+    let chan = conn.open::<DirectTcpIp>(rq).await??;
     let sock = cr.accept(addr).await?;
     chan.interconnect(sock).await?;
     Ok(())
@@ -110,11 +141,7 @@ async fn serve(sock: TcpStream, addr: SocketAddr, conn: Connection) -> Result<()
 
 #[derive(Clone)]
 pub struct ConnectionPool {
-    user: String,
-    host: String,
-    port: u16,
-    client: Client,
-    connection: Option<Connection>,
+    channel: watch::Receiver<Option<Connection>>,
 }
 
 impl ConnectionPool {
@@ -122,46 +149,41 @@ impl ConnectionPool {
     const MAX_DELAY: u64 = 300;
 
     pub fn new(client: Client, user: &str, host: &str, port: u16) -> Self {
-        Self {
-            user: user.into(),
-            host: host.into(),
-            port,
-            client,
-            connection: None,
-        }
-    }
-
-    pub async fn get(&mut self) -> Connection {
-        loop {
-            if let Some(c) = &self.connection {
-                return c.clone();
-            } else {
-                self.connection = None;
-                self.reconnect().await
+        let (s, r) = watch::channel(None);
+        let u = String::from(user);
+        let h = String::from(host);
+        let p = port;
+        spawn(async move {
+            let mut delay = 1;
+            loop {
+                match client.connect(&u, &h, port, |_| Box::new(())).await {
+                    Err(e) => {
+                        log::error!("Connection to {}@{}:{} failed: {}", u, h, p, e)
+                    }
+                    Ok(c) => {
+                        log::info!("Connection to {}@{}:{} established", u, h, p);
+                        if s.send(Some(c.clone())).is_err() {
+                            return;
+                        }
+                        let e = c.await;
+                        log::info!("Connection to {}@{}:{} lost: {}", u, h, p, e);
+                    }
+                };
+                delay = std::cmp::min(delay * 2, Self::MAX_DELAY);
+                delay = std::cmp::max(delay, Self::MIN_DELAY);
+                log::info!("Scheduled reconnect in {} seconds", delay);
+                sleep(std::time::Duration::from_secs(delay)).await
             }
-        }
+        });
+        Self { channel: r }
     }
 
-    async fn reconnect(&mut self) {
-        let u = &self.user;
-        let h = &self.host;
-        let p = self.port;
-        let mut delay = 0;
+    pub async fn get(&mut self) -> Result<Connection, Box<dyn Error>> {
         loop {
-            match self.client.connect(u, h, p, ()).await {
-                Err(e) => {
-                    log::error!("Connection to {}@{}:{} established failed: {}", u, h, p, e)
-                }
-                Ok(c) => {
-                    log::info!("Connection to {}@{}:{} established", u, h, p);
-                    self.connection = Some(c);
-                    return;
-                }
-            };
-            delay = std::cmp::min(delay * 2, Self::MAX_DELAY);
-            delay = std::cmp::max(delay, Self::MIN_DELAY);
-            log::info!("Scheduled reconnect in {} seconds", delay);
-            sleep(std::time::Duration::from_secs(delay)).await
+            if let Some(x) = self.channel.borrow().as_ref() {
+                return Ok(x.clone());
+            }
+            self.channel.changed().await?;
         }
     }
 }

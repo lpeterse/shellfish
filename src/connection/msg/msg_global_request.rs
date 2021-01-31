@@ -2,42 +2,32 @@ use crate::transport::Message;
 use crate::util::codec::*;
 
 #[derive(Debug)]
-pub(crate) struct MsgGlobalRequest {
-    pub name: String,
-    pub data: Vec<u8>,
+pub(crate) struct MsgGlobalRequest<'a> {
+    pub name: &'a str,
+    pub data: &'a [u8],
     pub want_reply: bool,
 }
 
-impl MsgGlobalRequest {
-    pub fn new<N: Into<String>, D: Into<Vec<u8>>>(name: N, data: D, want_reply: bool) -> Self {
-        Self {
-            name: name.into(),
-            data: data.into(),
-            want_reply,
-        }
-    }
-}
-
-impl Message for MsgGlobalRequest {
+impl <'a> Message for MsgGlobalRequest<'a> {
     const NUMBER: u8 = 80;
 }
 
-impl SshEncode for MsgGlobalRequest {
+impl <'a> SshEncode for MsgGlobalRequest<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
-        e.push_str_framed(&self.name)?;
+        e.push_str_framed(self.name)?;
         e.push_u8(self.want_reply as u8)?;
-        e.push_bytes(&self.data)
+        e.push_bytes(self.data)
     }
 }
 
-impl SshDecode for MsgGlobalRequest {
-    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+impl <'a> SshDecodeRef<'a> for MsgGlobalRequest<'a> {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
-            name: d.take_str_framed()?.into(),
+            name: d.take_str_framed()?,
             want_reply: d.take_bool()?,
-            data: d.take_bytes_all()?.into(),
+            data: d.take_bytes_all()?,
         }
         .into()
     }

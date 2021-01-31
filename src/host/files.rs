@@ -3,9 +3,8 @@ mod pattern;
 
 use self::line::*;
 use super::*;
-use crate::util::runtime::AsyncRead;
-use crate::util::runtime::File;
-use futures_util::StreamExt;
+use tokio::io::AsyncRead;
+use tokio::fs::File;
 use std::path::PathBuf;
 
 /// A `known_hosts` file processor and verifier.
@@ -68,23 +67,10 @@ impl KnownHosts {
         file: T,
     ) -> Result<bool, HostVerificationError> {
         let mut found = false;
-        match () {
-            #[cfg(feature = "rt-tokio")]
-            () => {
-                use tokio::io::AsyncBufReadExt;
-                let mut lines = tokio::io::BufReader::new(file).lines();
-                while let Some(line) = lines.next_line().await? {
-                    found |= KnownHostsLine(&line).test(host, id, ca)?;
-                }
-            }
-            #[cfg(feature = "rt-async")]
-            () => {
-                use futures_util::io::AsyncBufReadExt;
-                let mut lines = futures_util::io::BufReader::new(file).lines();
-                while let Some(line) = lines.next().await {
-                    found |= KnownHostsLine(&line?).test(host, id, ca)?;
-                }
-            }
+        use tokio::io::AsyncBufReadExt;
+        let mut lines = tokio::io::BufReader::new(file).lines();
+        while let Some(line) = lines.next_line().await? {
+            found |= KnownHostsLine(&line).test(host, id, ca)?;
         }
         Ok(found)
     }

@@ -1,7 +1,7 @@
 use std::io::Result;
 use std::net::{IpAddr, SocketAddr};
 
-use crate::util::runtime::Socket;
+use crate::util::socket::Socket;
 
 pub async fn serve<S: Socket>(mut sock: S) -> Result<ConnectRequest<S>> {
     let e: std::io::ErrorKind = std::io::ErrorKind::InvalidInput;

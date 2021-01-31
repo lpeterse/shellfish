@@ -27,15 +27,13 @@ pub use self::error::TransportError;
 use crate::agent::*;
 use crate::host::*;
 use crate::util::codec::*;
-use crate::util::socket::*;
 
 use core::future::poll_fn;
-use std::task::{ready, Context, Poll};
 use std::convert::From;
 use std::fmt::Debug;
 use std::option::Option;
-use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{ready, Context, Poll};
 
 pub trait Transport: Debug + Send + Unpin + 'static {
     /// Try to receive the next message.
@@ -63,7 +61,11 @@ pub trait Transport: Debug + Send + Unpin + 'static {
     /// Try to send MSG_DISCONNECT and swallow all errors.
     ///
     /// Message delivery may silently fail on errors or if output buffer is full.
-    fn tx_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason);
+    fn tx_disconnect(
+        &mut self,
+        cx: &mut Context,
+        reason: DisconnectReason,
+    ) -> Poll<Result<(), TransportError>>;
     /// Return the connection's session id.
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
@@ -136,6 +138,7 @@ impl GenericTransport {
     pub async fn flush(&mut self) -> Result<(), TransportError> {
         poll_fn(|cx| self.tx_flush(cx)).await
     }
+
     /// Request a service by name.
     ///
     /// Service requests either succeed or the connection gets terminated with a disconnect message.
@@ -175,7 +178,11 @@ impl Transport for GenericTransport {
     fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         self.0.tx_flush(cx)
     }
-    fn tx_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+    fn tx_disconnect(
+        &mut self,
+        cx: &mut Context,
+        reason: DisconnectReason,
+    ) -> Poll<Result<(), TransportError>> {
         self.0.tx_disconnect(cx, reason)
     }
     fn session_id(&self) -> Result<&SessionId, TransportError> {

@@ -1,5 +1,5 @@
-use rand::rngs::OsRng;
-use rand::RngCore;
+use rand_core::OsRng;
+use rand_core::RngCore;
 
 #[derive(Clone, Copy, PartialEq)]
 pub struct KexCookie(pub [u8; 16]);
@@ -7,7 +7,7 @@ pub struct KexCookie(pub [u8; 16]);
 impl KexCookie {
     pub fn random() -> Self {
         let mut cookie: [u8; 16] = [0; 16];
-        OsRng::default().fill_bytes(&mut cookie);
+        OsRng.fill_bytes(&mut cookie);
         Self(cookie)
     }
 }

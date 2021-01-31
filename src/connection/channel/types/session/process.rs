@@ -1,8 +1,6 @@
 use super::*;
-use crate::core::Role;
-
-use futures_util::io::AsyncRead;
-use futures_util::stream::Stream;
+use crate::util::role::Role;
+use tokio::io::{AsyncRead, ReadBuf};
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
@@ -38,27 +36,27 @@ impl<R: Role> Process<R> {
     //pub fn kill(&mut self, _signal: Signal) {}
 }
 
-impl<R: Role> Stream for Process<R> {
-    type Item = Result<ProcessEvent, ConnectionError>;
+// impl<R: Role> Stream for Process<R> {
+//     type Item = Result<ProcessEvent, ConnectionError>;
 
-    fn poll_next(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Option<Self::Item>> {
-        /*
-        let mut state = ((self.0).state)
-            .0
-            .lock()
-            .map_err(|_| ConnectionError::Unknown)?;
-        state.outer_task = None;
+//     fn poll_next(self: Pin<&mut Self>, _cx: &mut Context) -> Poll<Option<Self::Item>> {
+//         /*
+//         let mut state = ((self.0).state)
+//             .0
+//             .lock()
+//             .map_err(|_| ConnectionError::Unknown)?;
+//         state.outer_task = None;
 
-        if let Some(exit) = state.exit.take() {
-            return Poll::Ready(Some(Ok(ProcessEvent::Exit(exit))));
-        }
-        if let Some(done) = state.inner_done.take() {
-            Err(done)?
-        }*/
+//         if let Some(exit) = state.exit.take() {
+//             return Poll::Ready(Some(Ok(ProcessEvent::Exit(exit))));
+//         }
+//         if let Some(done) = state.inner_done.take() {
+//             Err(done)?
+//         }*/
 
-        Poll::Pending
-    }
-}
+//         Poll::Pending
+//     }
+// }
 
 //pub struct Stdin<'a, R: Role>(&'a mut Process<R>);
 
@@ -68,8 +66,8 @@ impl<'a, R: Role> AsyncRead for Stdout<'a, R> {
     fn poll_read(
         self: Pin<&mut Self>,
         _cx: &mut Context,
-        _buf: &mut [u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
+        _buf: &mut ReadBuf,
+    ) -> Poll<Result<(), std::io::Error>> {
         /*
         if buf.is_empty() {
             return Poll::Ready(Ok(0));
@@ -98,8 +96,8 @@ impl<'a, R: Role> AsyncRead for Stderr<'a, R> {
     fn poll_read(
         self: Pin<&mut Self>,
         _cx: &mut Context,
-        _buf: &mut [u8],
-    ) -> Poll<Result<usize, std::io::Error>> {
+        _buf: &mut ReadBuf,
+    ) -> Poll<Result<(), std::io::Error>> {
         /*
         if buf.is_empty() {
             return Poll::Ready(Ok(0));

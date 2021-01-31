@@ -1,173 +1,180 @@
 mod channel;
 mod config;
 mod error;
-mod future;
-mod global;
 mod handler;
 mod msg;
 mod request;
 mod state;
 
+pub mod global;
+
 pub use self::channel::*;
 pub use self::config::*;
 pub use self::error::*;
-pub use self::global::*;
-pub use self::handler::ConnectionHandler;
+pub use self::handler::*;
 pub use self::msg::ChannelOpenFailure;
-pub use self::request::ConnectionRequest;
 pub use self::state::*;
 
-use self::future::*;
+use self::global::*;
 use self::msg::*;
-use crate::client::Client;
-use crate::transport::{DisconnectReason, GenericTransport, Transport};
+use self::request::*;
+use crate::transport::{DisconnectReason, GenericTransport, Transport, TransportError};
 use crate::util::codec::*;
-use crate::util::oneshot;
-use futures_util::stream::Stream;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::{Arc, Mutex};
-use std::task::{Context, Poll, Waker};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::task::{ready, Context, Poll};
+use tokio::pin;
+use tokio::spawn;
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
 
-/// The `ssh-connection` service offers channel multiplexing for a variety of applications like remote
-/// shell and command execution as well as TCP/IP port forwarding and various other extensions.
+/// The `ssh-connection` service offers channel multiplexing for a variety of applications like
+/// remote shell and command execution as well as TCP/IP port forwarding and various other
+/// extensions.
 ///
 /// Unless client or server request a service on top of this protocol the connection just keeps
-/// itself alive and does nothing. Dropping the connection object will close the connection and
-/// free all resources. It will also terminate all dependant channels (shells and forwardings etc).
+/// itself alive and does nothing.
+///
+/// [Connection] implements [Clone]: All clones are equal and cloning is quite cheap. Dropping the
+/// last clone will close the connection and free all resources. It will also
+/// terminate all dependant channels (shells and forwardings etc). Be aware that the connection
+/// is not closed on drop unless there are no more clones; [Connection::close] it explicitly
+/// if you need to.
 #[derive(Clone, Debug)]
-pub struct Connection(Arc<Mutex<ConnectionState>>);
+pub struct Connection {
+    creqs: mpsc::Sender<ConnectionRequest>,
+    close: Arc<Mutex<oneshot::Receiver<()>>>,
+    error: watch::Receiver<Option<ConnectionError>>,
+}
 
 impl Connection {
-    /// Create a new connection.
+    /// Create a new connection (you may want to use
+    /// [Client::connect()](crate::client::Client::connect) instead).
     ///
-    /// The connection spawns a separate handler thread. This handler thread's lifetime is linked
-    /// the `Connection` object: `Drop`ping the connection will send it a termination signal.
-    pub fn new<H: ConnectionHandler>(
+    /// The connection spawns a separate handler task. The task and the inner connection state only
+    /// lives as long as the connection is alive. All operations on dead connection are supposed to
+    /// return the error which caused the connection to die. The error is preserved as long as there
+    /// are references to the connection.
+    pub fn new<F: FnOnce(&Self) -> Box<dyn ConnectionHandler>>(
         config: &Arc<ConnectionConfig>,
-        handler: H,
         transport: GenericTransport,
+        handle: F,
     ) -> Self {
-        let handler = Box::new(handler);
-        let state = ConnectionState::new(config, handler, transport);
-        let state = Arc::new(Mutex::new(state));
-        let future = ConnectionFuture::new(&state);
-        crate::util::runtime::spawn(future);
-        Self(state)
-    }
-
-    /// Perform a global request (without reply).
-    pub fn request<N: Into<String>, D: Into<Vec<u8>>>(&mut self, name: N, data: D) {
-        self.with_state(|x| x.request(name.into(), data.into()))
-    }
-
-    /// Perform a global request and return future resolving on peer response.
-    pub fn request_want_reply<N: Into<String>, D: Into<Vec<u8>>>(
-        &mut self,
-        name: N,
-        data: D,
-    ) -> GlobalReplyFuture {
-        self.with_state(|x| x.request_want_reply(name.into(), data.into()))
+        let (r1, r2) = mpsc::channel(1);
+        let (e1, e2) = watch::channel(None);
+        let (c1, c2) = oneshot::channel();
+        let self_ = Self {
+            creqs: r1,
+            close: Arc::new(Mutex::new(c2)),
+            error: e2,
+        };
+        let hb = handle(&self_);
+        let cs = ConnectionState::new(config, hb, transport, r2, c1, e1);
+        drop(spawn(cs));
+        self_
     }
 
     /// Request a new channel on top of an established connection.
-    pub fn open<C: Channel>(&self, params: C::Open) -> ChannelOpenFuture<C> {
-        self.with_state(|x| x.open(params))
-    }
-
-    /// Request a new session on top of an established connection.
-    pub fn open_session(&self) -> ChannelOpenFuture<Session<Client>> {
-        self.open(())
-    }
-
-    /// Request a direct-tcpip forwarding on top of an established connection.
-    pub fn open_direct_tcpip<S: Into<String>>(
+    pub async fn open<C: Channel>(
         &self,
-        dst_host: S,
-        dst_port: u16,
-        src_addr: std::net::IpAddr,
-        src_port: u16,
-    ) -> ChannelOpenFuture<DirectTcpIp> {
-        self.open(DirectTcpIpOpen {
-            dst_host: dst_host.into(),
-            dst_port,
-            src_addr,
-            src_port,
-        })
-    }
-
-    /// Perform the given operation on the Mutex-protected connection state.
-    /// Wakeup the connection future task afterwards (if necessary).
-    ///
-    /// NB: This seemingly complicated mechanism's intention is to wakeup the
-    /// other task _after_ the Mutex lock has been released. Mutexes/Futexes are
-    /// cheap unless they are contended. This tries to minimize the contention
-    /// by not waking up the other task as long as we still hold the lock.
-    fn with_state<F, X>(&self, f: F) -> X
-    where
-        F: FnOnce(&mut ConnectionState) -> X,
-    {
-        let (result, waker) = {
-            let mut state = self.0.lock().unwrap();
-            (f(&mut state), state.inner_task_waker())
+        params: C::Open,
+    ) -> Result<Result<C, ChannelOpenFailure>, ConnectionError> {
+        let (reply, reply_) = oneshot::channel();
+        let r = ConnectionRequest::Open {
+            name: C::NAME,
+            data: SshCodec::encode(&params).ok_or(TransportError::InvalidEncoding)?,
+            reply,
         };
-        let _ = waker.map(Waker::wake);
-        result
+        self.creqs
+            .send(r)
+            .await
+            .map_err(|_| self.error_or_dropped())?;
+        reply_
+            .await
+            .map(|x| x.map(C::new))
+            .map_err(|_| self.error_or_dropped())
     }
-}
 
-impl Drop for Connection {
-    fn drop(&mut self) {
-        self.with_state(|x| x.flag_inner_task_for_wakeup())
+    /// Perform a global request (without reply).
+    pub async fn request<T: Global>(
+        &mut self,
+        data: &T::RequestData,
+    ) -> Result<(), ConnectionError> {
+        let request = ConnectionRequest::Global {
+            name: T::NAME,
+            data: SshCodec::encode(data).ok_or(TransportError::InvalidEncoding)?,
+            reply: None,
+        };
+        self.creqs
+            .send(request)
+            .await
+            .map_err(|_| self.error_or_dropped())
     }
-}
 
-/*
-impl Service for Connection {
-    type Config = ConnectionConfig;
-    type Handler = Box<dyn ConnectionHandler>;
-
-    const NAME: &'static str = "ssh-connection";
-
-    fn new(
-        config: &Arc<Self::Config>,
-        handler: Self::Handler,
-        transport: GenericTransport,
-    ) -> Self {
-        Self::new(config, handler, transport)
+    /// Perform a global request and wait for the reply.
+    pub async fn request_want_reply<T: GlobalWantReply>(
+        &mut self,
+        data: &T::RequestData,
+    ) -> Result<Result<T::ResponseData, ()>, ConnectionError> {
+        let (reply, response) = oneshot::channel();
+        let request = ConnectionRequest::Global {
+            name: T::NAME,
+            data: SshCodec::encode(data).ok_or(TransportError::InvalidEncoding)?,
+            reply: Some(reply),
+        };
+        self.creqs
+            .send(request)
+            .await
+            .map_err(|_| self.error_or_dropped())?;
+        match response.await.map_err(|_| self.error_or_dropped())? {
+            Err(()) => Ok(Err(())),
+            Ok(vec) => Ok(Ok(
+                SshCodec::decode(&vec).ok_or(TransportError::InvalidEncoding)?
+            )),
+        }
     }
-}*/
 
-impl Stream for Connection {
-    type Item = ConnectionRequest;
+    /// Close the connection.
+    ///
+    /// This function is intentionally non-async and may be used in implemenations of [Drop].
+    ///
+    /// This tells the handler task to try to send a disconnect message to the peer
+    /// (best effort/won't block for security reasons) and then terminate itself. The disconnect
+    /// has highest priority - the handler task will not do anything else that might block the
+    /// disconnection process.
+    ///
+    /// Hint: Use `.await` on the connection itself in order to await actual disconnection.
+    pub fn close(&self) {
+        self.close.lock().unwrap().close();
+    }
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Option<Self::Item>> {
-        self.with_state(|x| {
-            if let Some(request) = x.next() {
-                return Poll::Ready(Some(request));
-            }
-            if x.result().is_some() {
-                return Poll::Ready(None);
-            }
-            x.register_outer_task(cx);
-            Poll::Pending
-        })
+    /// Returns the error which caused the connection to die (if dead).
+    ///
+    /// Hint: Use `.await` on the connection itself in order to await this error.
+    pub fn error(&self) -> Option<ConnectionError> {
+        self.error.borrow().as_ref().cloned()
+    }
+
+    fn error_or_dropped(&self) -> ConnectionError {
+        self.error().unwrap_or(ConnectionError::Dropped)
     }
 }
 
 impl Future for Connection {
-    type Output = Result<DisconnectReason, ConnectionError>;
+    type Output = ConnectionError;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        self.with_state(|x| {
-            if let Some(result) = x.result() {
-                return Poll::Ready(result);
-            }
-            while let Some(request) = x.next() {
-                drop(request)
-            }
-            x.register_outer_task(cx);
-            Poll::Pending
-        })
+        let self_ = Pin::into_inner(self);
+        if let Some(e) = self_.error() {
+            Poll::Ready(e)
+        } else {
+            let f = self_.error.changed();
+            pin!(f);
+            let _ = ready!(f.poll(cx));
+            Poll::Ready(ConnectionError::Dropped)
+        }
     }
 }

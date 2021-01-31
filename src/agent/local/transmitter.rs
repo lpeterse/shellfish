@@ -1,10 +1,10 @@
 use super::error::LocalAgentError;
 use super::AuthAgentError;
 use super::Frame;
-use crate::util::runtime::Socket;
-use crate::util::runtime::UnixStream;
-use crate::util::codec::*;
 use crate::util::check;
+use crate::util::codec::*;
+use crate::util::socket::Socket;
+use tokio::net::UnixStream;
 
 pub struct Transmitter<S: Socket = UnixStream> {
     socket: S,

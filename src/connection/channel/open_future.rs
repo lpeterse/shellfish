@@ -26,7 +26,7 @@ impl<C: Channel> Future for ChannelOpenFuture<C> {
         let result = if let Some(r) = ready!(Pin::new(&mut self_.rx).poll(cx)) {
             r.map(|x| x.map(<C as Channel>::new))
         } else {
-            Err(ConnectionError::Unknown)
+            Err(ConnectionError::Dropped) // FIXME
         };
         Poll::Ready(result)
     }

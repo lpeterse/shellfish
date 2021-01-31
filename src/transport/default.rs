@@ -1,6 +1,7 @@
 use super::transceiver::*;
-use crate::util::runtime::{Socket, TcpStream};
 use super::*;
+use crate::util::socket::Socket;
+use tokio::net::TcpStream;
 
 /// Implements the transport layer as described in RFC 4253.
 ///
@@ -236,10 +237,15 @@ impl<S: Socket> Transport for DefaultTransport<S> {
         self.trx.tx_flush(cx)
     }
 
-    fn tx_disconnect(&mut self, cx: &mut Context, reason: DisconnectReason) {
+    fn tx_disconnect(
+        &mut self,
+        cx: &mut Context,
+        reason: DisconnectReason,
+    ) -> Poll<Result<(), TransportError>> {
         let msg = MsgDisconnect::new(reason);
-        let _ = self.tx_msg(cx, &msg);
-        let _ = self.tx_flush(cx);
+        ready!(self.tx_msg(cx, &msg))?;
+        ready!(self.tx_flush(cx))?;
+        Poll::Ready(Ok(()))
     }
 
     fn session_id(&self) -> Result<&SessionId, TransportError> {

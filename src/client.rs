@@ -5,11 +5,11 @@ pub use self::config::*;
 pub use self::error::*;
 
 use crate::connection::*;
-use crate::core::*;
 use crate::transport::*;
 use crate::user_auth::*;
-use crate::util::runtime::TcpStream;
+use crate::util::role::Role;
 use std::sync::Arc;
+use tokio::net::TcpStream;
 
 /// The client is a connection factory.
 ///
@@ -40,12 +40,12 @@ impl Client {
     /// sensible defaults. By default, the user name will be extracted from the environment and
     /// a running `ssh-agent` is expected for key or certificate authentication (`SSH_AUTH_SOCK`
     /// environment variable).
-    pub async fn connect<H: ConnectionHandler>(
+    pub async fn connect<F: FnOnce(&Connection) -> Box<dyn ConnectionHandler>>(
         &self,
         user: &str,
         host: &str,
         port: u16,
-        handler: H,
+        handle: F,
     ) -> Result<Connection, ClientError> {
         let e = |e: std::io::Error| TransportError::from(e);
         let socket = TcpStream::connect((host, port)).await.map_err(e)?;
@@ -58,7 +58,7 @@ impl Client {
         let aa = &self.config.auth_agent;
         let t = DefaultTransport::connect(tc, socket, host, port, hv).await?;
         let t = GenericTransport::from(t);
-        Ok(UserAuth::request_connection(t, cc, handler, user, aa).await?)
+        Ok(UserAuth::request_connection(t, cc, handle, user, aa).await?)
     }
 }
 

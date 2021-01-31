@@ -1,8 +1,8 @@
 use super::stream::Stream;
 use super::*;
 
-use crate::util::check;
 use crate::util::buffer::Buffer;
+use crate::util::check;
 
 use std::task::Context;
 use std::task::Waker;
@@ -37,7 +37,72 @@ pub struct ChannelState {
 }
 
 impl ChannelState {
-    pub fn new(lid: u32, lmbs: u32, lmps: u32, rid: u32, rws: u32, rmps: u32, ext: bool) -> Self {
+    pub fn accept2(&mut self) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn reject2(&mut self, reason: ChannelOpenFailure) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_data(&mut self, data: &[u8]) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_extended_data(&mut self, code: u32, data: &[u8]) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_window_adjust(&mut self, increment: u32) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_eof(&mut self) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_close(&mut self) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_request(
+        &mut self,
+        name: &str,
+        data: &[u8],
+        want_reply: bool,
+    ) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_success(&mut self) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    pub fn push_failure(&mut self) -> Result<(), ConnectionError> {
+        panic!()
+    }
+
+    // FIXME
+    pub fn new_outbound(
+        lid: u32,
+        lws: u32,
+        lps: u32,
+        resp: tokio::sync::oneshot::Sender<Result<ChannelHandle, ChannelOpenFailure>>,
+    ) -> Self {
+        panic!()
+        //Self::new_inbound(0, 0, 0, 0, 0, 0, false)
+    }
+
+    pub fn new_inbound(
+        lid: u32,
+        lmbs: u32,
+        lmps: u32,
+        rid: u32,
+        rws: u32,
+        rmps: u32,
+        ext: bool,
+        resp: tokio::sync::oneshot::Receiver<Result<(), ChannelOpenFailure>>,
+    ) -> Self {
         Self {
             max_buffer_size: lmbs,
 

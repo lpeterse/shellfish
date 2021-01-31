@@ -54,3 +54,9 @@ impl<A: SshDecode, B: SshDecode> SshDecode for Result<A, B> {
         }
     }
 }
+
+impl SshDecode for Vec<u8> {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+        d.take_bytes_all().map(Vec::from)
+    }
+}

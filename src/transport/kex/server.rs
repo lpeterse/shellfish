@@ -13,7 +13,7 @@ impl Kex for ServerKex {
     fn init(&mut self, _tx: u64, _rx: u64) {
         unimplemented!()
     }
-    fn init_if_necessary(&mut self, cx: &mut Context, tx: u64, rx: u64) {
+    fn init_if_necessary(&mut self, _cx: &mut Context, _tx: u64, _rx: u64) {
         unimplemented!()
     }
     fn is_active(&self) -> bool {

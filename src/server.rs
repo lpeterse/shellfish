@@ -5,8 +5,8 @@ pub use self::config::*;
 pub use self::error::*;
 
 use crate::agent::*;
-use crate::core::*;
-use crate::util::runtime::TcpListener;
+use crate::util::role::Role;
+use tokio::net::TcpListener;
 use std::sync::Arc;
 
 #[derive(Debug)]

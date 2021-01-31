@@ -1,38 +1,42 @@
+use super::channel::ChannelState;
 use super::channel::*;
+use super::request::*;
 use super::*;
 
-use crate::transport::{DisconnectReason, GenericTransport, TransportError};
-use crate::util::check;
-
-use std::task::{ready, Context, Poll, Waker};
+use crate::transport::{GenericTransport, TransportError};
 use std::collections::VecDeque;
+use std::future::Future;
 use std::sync::Arc;
+use std::task::{ready, Context, Poll};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
 
-/// The connection state is shared between a house-keeping task (inner task) and the user task
-/// (outer tasks). The state is protected by an Arc<Mutex<>> (see wrapper structs).
-///
-/// The inner task sees the state wrapped as a `ConnectionFuture` which only exposes the
-/// `Future::poll` method. The outer tasks see the state wrapped as a `Connection`.
-///
-/// The code is carefully designed in order to reduce the lock contention to a minimum. Most access
-/// operations shall find the Mutex unlocked. std::sync::Mutex is highly portable although there
-/// are even more efficient implementations (parking_lot) especially for the not-contented case.
-/// For now (Feb 2020), we'll sacrifice that potential performance increase in favour of simplicity.
-/// We'll automatically benefit from any improvements in std in the future.
+macro_rules! channel {
+    ($state:ident, $lid:ident) => {
+        $state
+            .channels
+            .get($lid as usize)
+            .and_then(|x| x.as_ref())
+            .ok_or(ConnectionError::ChannelIdInvalid)?
+            .lock()
+            .unwrap()
+    };
+}
+
 pub struct ConnectionState {
     config: Arc<ConnectionConfig>,
     handler: Box<dyn ConnectionHandler>,
     transport: GenericTransport,
-    channels: ChannelList,
-    local_requests: VecDeque<GlobalRequest>,
-    local_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ConnectionError>>>,
-    remote_requests: VecDeque<GlobalRequest>,
-    remote_replies: VecDeque<oneshot::Receiver<Result<Vec<u8>, ConnectionError>>>,
-    inner_task_wake: bool,
-    outer_task_wake: bool,
-    inner_task_waker: Option<Waker>,
-    outer_task_waker: Option<Waker>,
-    result: Option<Result<DisconnectReason, ConnectionError>>,
+    requests_head: Option<ConnectionRequest>,
+    requests_queue: mpsc::Receiver<ConnectionRequest>,
+    requests_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ()>>>,
+    replies_head: Option<Result<Vec<u8>, ()>>,
+    replies_queue: VecDeque<oneshot::Receiver<Vec<u8>>>,
+    channels: Vec<Option<Arc<Mutex<ChannelState>>>>,
+    channels_rejections: VecDeque<u32>,
+    close: oneshot::Sender<()>,
+    error: watch::Sender<Option<ConnectionError>>,
 }
 
 impl ConnectionState {
@@ -44,51 +48,47 @@ impl ConnectionState {
         config: &Arc<ConnectionConfig>,
         handler: Box<dyn ConnectionHandler>,
         transport: GenericTransport,
+        requests: mpsc::Receiver<ConnectionRequest>,
+        close: oneshot::Sender<()>,
+        error: watch::Sender<Option<ConnectionError>>,
     ) -> Self {
         Self {
             config: config.clone(),
             handler,
             transport,
-            channels: ChannelList::new(&config),
-            local_requests: VecDeque::with_capacity(0),
-            local_replies: VecDeque::with_capacity(0),
-            remote_requests: VecDeque::with_capacity(0),
-            remote_replies: VecDeque::with_capacity(0),
-            inner_task_wake: false,
-            outer_task_wake: false,
-            inner_task_waker: None,
-            outer_task_waker: None,
-            result: None,
+            requests_head: None,
+            requests_queue: requests,
+            requests_replies: VecDeque::with_capacity(0),
+            replies_head: None,
+            replies_queue: VecDeque::with_capacity(0),
+            channels: Vec::new(),
+            channels_rejections: VecDeque::new(),
+            close,
+            error,
         }
     }
 
-    /// This operation shall be polled by the inner task. It coordinates all data transmission and
-    /// requests and drives the transport layer mechanisms (like kex).
-    ///
-    /// It always returns `Pending` unless the connection terminates.
-    pub fn poll(&mut self, cx: &mut Context) -> Poll<Result<DisconnectReason, ConnectionError>> {
-        self.register_inner_task(cx);
-        // Check result (ready when connection shall be terminated)
-        if let Poll::Ready(result) = self.poll_result(cx) {
-            return Poll::Ready(result);
+    fn poll(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        if let Poll::Ready(x) = self.poll_close(cx) {
+            x?
         }
-        // Try flushing transport and consume inbound messages
         if let Poll::Ready(x) = self.poll_transport(cx) {
             x?
         }
-        // Try sending pending global replies
-        if let Poll::Ready(x) = self.poll_global_replies(cx) {
+        if let Poll::Ready(x) = self.poll_channels_rejections(cx) {
             x?
         }
-        // Try sending pending global requests
-        if let Poll::Ready(x) = self.poll_global_requests(cx) {
+        if let Poll::Ready(x) = self.poll_replies(cx) {
             x?
         }
-        // Try processing channel events
-        if let Poll::Ready(x) = self.channels.poll(cx, &mut self.transport) {
+        if let Poll::Ready(x) = self.poll_requests(cx) {
             x?
         }
-        // The 3 previous actions shall not actively flush the transport.
+        // FIXME
+        // if let Poll::Ready(x) = self.channels.poll(cx, &mut self.transport) {
+        //     x?
+        // }
+        // The previous actions shall not actively flush the transport.
         // If necessary, the transport will be flushed here after all actions have eventually
         // written their output to the transport. This is benefecial for network performance as it
         // allows multiple messages to be sent in a single TCP segment (even with TCP_NODELAY) and
@@ -97,214 +97,124 @@ impl ConnectionState {
         Poll::Pending
     }
 
-    /// Take the next queued inbound request (if present).
-    ///
-    /// Taking a request flags the inner task for wakeup, but doesn't actually wake it up right away.
-    /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
-    pub fn next(&mut self) -> Option<ConnectionRequest> {
-        if let Some(request) = self.remote_requests.pop_front() {
-            self.flag_inner_task_for_wakeup();
-            return Some(ConnectionRequest::Global(request));
-        }
-        if let Some(request) = self.channels.take_open_request() {
-            self.flag_inner_task_for_wakeup();
-            return Some(ConnectionRequest::ChannelOpen(request));
-        }
-        None
-    }
-
-    /// Get the connection result (if present).
-    ///
-    /// `Some(Ok(_))` means the peer sent a disconnect. This is usually not an error condition.
-    /// `Some(Err(_))` means that the connection terminated/shall terminate for any other reason.
-    pub fn result(&self) -> Option<Result<DisconnectReason, ConnectionError>> {
-        self.result.clone()
-    }
-
-    /// Enqueue a global request (outbound).
-    ///
-    /// This flags the inner task for wakeup, but doesn't actually wake it up right away.
-    /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
-    pub fn request(&mut self, name: String, data: Vec<u8>) {
-        let request = GlobalRequest::new(name, data);
-        self.local_requests.push_back(request);
-        self.flag_inner_task_for_wakeup();
-    }
-
-    /// Enqueue a global request (outbound) and return a future expecting the reply.
-    ///
-    /// The future resolves immediately with a `ConnectionError` in case the connection is dead.
-    ///
-    /// Otherwise, this flags the inner task for wakeup, but doesn't actually wake it up right away.
-    /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
-    pub fn request_want_reply(&mut self, name: String, data: Vec<u8>) -> GlobalReplyFuture {
-        if let Some(ref result) = self.result {
-            let (tx, rx) = oneshot::channel();
-            tx.send(Err(result.clone().into()));
-            return GlobalReplyFuture::new(rx);
-        }
-        let (request, reply) = GlobalRequest::new_want_reply(name, data);
-        self.local_requests.push_back(request);
-        self.flag_inner_task_for_wakeup();
-        reply
-    }
-
-    /// Enqueue a channel open request (outbound) and return a future expecting the reply.
-    ///
-    /// The future resolves immediately with a `ConnectionError` in case the connection is dead.
-    ///
-    /// Otherwise, this flags the inner task for wakeup, but doesn't actually wake it up right away.
-    /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
-    pub fn open<C: Channel>(&mut self, o: C::Open) -> ChannelOpenFuture<C> {
-        if let Some(ref result) = self.result {
-            let (tx, rx) = oneshot::channel();
-            tx.send(Err(result.clone().into()));
-            return ChannelOpenFuture::new(rx);
-        }
-
-        let rx = self
-            .channels
-            .open_outbound(C::NAME, SshCodec::encode(&o).unwrap()); // FIXME FIXME !!!
-        self.flag_inner_task_for_wakeup();
-        ChannelOpenFuture::new(rx)
-    }
-
-    /// Set the result to `Err(TransportError::DisconnectByUs(reason).into())` (if not yet set).
-    ///
-    /// This flags the inner task for wakeup, but doesn't actually wake it up right away.
-    /// Use `inner_task_waker` afterwards to obtain a `Waker` and use it after releasing the lock!
-    pub fn disconnect(&mut self, reason: DisconnectReason) {
-        let e = TransportError::DisconnectByUs(reason).into();
-        let _ = self.result.get_or_insert(Err(e));
-        self.flag_inner_task_for_wakeup();
-    }
-
-    /// Deliver a `ConnectionError` to all dependant users of this this connection (tasks waiting
-    /// on connection requests or channel I/O).
-    ///
-    /// This shall be the last thing to be done by the `ConnectionFuture`.
-    pub fn terminate(&mut self, result: Result<DisconnectReason, ConnectionError>) {
-        let _ = self.result.get_or_insert(result.clone());
-        let e: ConnectionError = result.into();
-        while let Some(mut x) = self.local_requests.pop_front() {
-            x.reply.take().map(|x| x.send(Err(e.clone()))).unwrap_or(())
-        }
-        while let Some(x) = self.local_replies.pop_front() {
-            x.send(Err(e.clone()))
-        }
-        self.channels.terminate(e);
-        self.flag_outer_task_for_wakeup();
-    }
-
-    /// Register the outer task to be notified new `ConnectionRequest`s.
-    pub fn register_outer_task(&mut self, cx: &mut Context) {
-        if let Some(ref waker) = self.outer_task_waker {
-            if waker.will_wake(cx.waker()) {
-                return;
-            }
-        }
-        self.outer_task_waker = Some(cx.waker().clone());
-    }
-
-    /// Get a clone of the inner task's `Waker`.
-    ///
-    /// This returns `None` if the inner task is not registered or has not been flagged for wakeup.
-    pub fn inner_task_waker(&mut self) -> Option<Waker> {
-        if self.inner_task_wake {
-            self.inner_task_wake = false;
-            self.inner_task_waker.clone()
+    fn poll_close(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        if self.close.poll_closed(cx).is_ready() || self.handler.poll(cx).is_ready() {
+            let r = DisconnectReason::BY_APPLICATION;
+            let e = match self.transport.tx_disconnect(cx, r) {
+                Poll::Ready(Err(e)) => e,
+                _ => TransportError::DisconnectByUs(r),
+            };
+            Poll::Ready(Err(e.into()))
         } else {
-            None
+            Poll::Pending
         }
     }
 
-    /// Get a clone of the outer task's `Waker`.
-    ///
-    /// This returns `None` if the outer task is not registered or has not been flagged for wakeup.
-    pub fn outer_task_waker(&mut self) -> Option<Waker> {
-        if self.outer_task_wake {
-            self.outer_task_wake = false;
-            self.outer_task_waker.clone()
-        } else {
-            None
-        }
-    }
-
-    /// Flag the inner task for wakepup (idempotent).
-    pub fn flag_inner_task_for_wakeup(&mut self) {
-        self.inner_task_wake = true;
-    }
-
-    /// Flag the inner task for wakepup (idempotent).
-    pub fn flag_outer_task_for_wakeup(&mut self) {
-        self.outer_task_wake = true;
-    }
-
-    /// Register the inner task to be notified on requests by an outer task.
-    ///
-    /// This may be called on each poll, but a `Waker` is only cloned once under the assumption
-    /// that the `ConnectionFuture` is polled by the same task for the whole lifetime.
-    fn register_inner_task(&mut self, cx: &mut Context) {
-        if self.inner_task_waker.is_none() {
-            self.inner_task_waker = Some(cx.waker().clone());
-        }
-    }
-
-    /// Poll the connection result (ready when connection was terminated).
-    /// Shall not be called again after readyness!
-    ///
-    /// If the result is a `TransportError::DisconnectByUs`, it is attempted to send a corresponding
-    /// MSG_DISCONNECT to the peer (but we don't block if this fails or pends).
-    fn poll_result(&mut self, cx: &mut Context) -> Poll<Result<DisconnectReason, ConnectionError>> {
-        if let Some(ref r) = self.result {
-            if let Err(ConnectionError::TransportError(TransportError::DisconnectByUs(d))) = r {
-                self.transport.tx_disconnect(cx, *d);
-            }
-            return Poll::Ready(r.clone());
-        }
-        Poll::Pending
-    }
-
-    /// Poll the global outbound requests queue and try to send them in order.
-    ///
-    /// Return `Pending` as soon as the first request couldn't be sent on the transport.
-    /// Eachs sucessfully transmitted request's reply gets the enqueued in the reply queue.
-    fn poll_global_requests(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        while let Some(ref request) = self.local_requests.front() {
-            let msg = MsgGlobalRequest::new(
-                request.name.clone(),
-                request.data.clone(),
-                request.reply.is_some(),
-            );
+    fn poll_channels_rejections(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        while let Some(rid) = self.channels_rejections.front() {
+            let msg = MsgChannelOpenFailure::new(*rid, ChannelOpenFailure::RESOURCE_SHORTAGE);
             ready!(poll_send(&mut self.transport, cx, &msg))?;
-            if let Some(ref mut request) = self.local_requests.pop_front() {
-                if let Some(reply) = request.reply.take() {
-                    self.local_replies.push_back(reply);
+            let _ = self.channels_rejections.pop_front();
+        }
+        Poll::Ready(Ok(()))
+    }
+
+    fn poll_replies(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        if let Some(reply) = &self.replies_head {
+            match reply {
+                Ok(data) => {
+                    let msg = MsgRequestSuccess { data: &data };
+                    ready!(poll_send(&mut self.transport, cx, &msg))?;
+                }
+                Err(_) => {
+                    let msg = MsgRequestFailure;
+                    ready!(poll_send(&mut self.transport, cx, &msg))?;
+                }
+            }
+            self.replies_head = None;
+        }
+
+        // Try to send ready replies in original order and remove those sent
+        while let Some(mut x) = self.replies_queue.front_mut() {
+            let reply = ready!(Future::poll(Pin::new(&mut x), cx));
+            let _ = self.replies_queue.pop_front();
+            match reply {
+                Ok(data) => {
+                    let msg = MsgRequestSuccess { data: &data };
+                    if poll_send(&mut self.transport, cx, &msg)?.is_pending() {
+                        self.replies_head = Some(Ok(data));
+                        return Poll::Pending;
+                    }
+                }
+                Err(_) => {
+                    let msg = MsgRequestFailure;
+                    if poll_send(&mut self.transport, cx, &msg)?.is_pending() {
+                        self.replies_head = Some(Err(()));
+                        return Poll::Pending;
+                    }
                 }
             }
         }
-        Poll::Pending
+
+        // Save memory by shrinking vectors to fit
+        self.replies_queue.shrink_to_fit();
+        Poll::Ready(Ok(()))
     }
 
-    /// Poll the global outbound replies queue and try to send them in order.
-    ///
-    /// Return `Pending` as soon as the first reply couldn't be sent on the transport.
-    /// Each successfully transmitted reply gets removed from the reply queue.
-    fn poll_global_replies(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        while let Some(ref mut future) = self.remote_replies.front_mut() {
-            if let Some(data) = ready!(future.peek(cx)) {
-                ready!(poll_send(
-                    &mut self.transport,
-                    cx,
-                    &MsgRequestSuccess::new(&data?)
-                ))?;
+    fn poll_requests(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
+        loop {
+            let cr = if let Some(cr) = self.requests_head.take() {
+                cr
             } else {
-                let msg = MsgRequestFailure;
-                ready!(poll_send(&mut self.transport, cx, &msg))?;
+                ready!(self.requests_queue.poll_recv(cx)).ok_or(ConnectionError::Dropped)?
             };
-            let _ = self.remote_replies.pop_front();
+            match cr {
+                ConnectionRequest::Global { name, data, reply } => {
+                    let msg = MsgGlobalRequest {
+                        name: &name,
+                        data: &data.as_ref(),
+                        want_reply: reply.is_some(),
+                    };
+                    match poll_send(&mut self.transport, cx, &msg) {
+                        Poll::Ready(r) => r?,
+                        Poll::Pending => {
+                            let cr = ConnectionRequest::Global { name, data, reply };
+                            self.requests_head = Some(cr);
+                            return Poll::Pending;
+                        }
+                    }
+                    if let Some(reply) = reply {
+                        self.requests_replies.push_back(reply);
+                    }
+                }
+                ConnectionRequest::Open { name, data, reply } => {
+                    if let Some(lid) = self.alloc_channel_id() {
+                        let lws = self.config.channel_max_buffer_size as u32;
+                        let lps = self.config.channel_max_packet_size as u32;
+                        let msg = MsgChannelOpen {
+                            name: name,
+                            sender_channel: lid,
+                            initial_window_size: lws,
+                            maximum_packet_size: lps,
+                            data: data.clone(),
+                        };
+                        match poll_send(&mut self.transport, cx, &msg) {
+                            Poll::Ready(r) => r?,
+                            Poll::Pending => {
+                                let cr = ConnectionRequest::Open { name, data, reply };
+                                self.requests_head = Some(cr);
+                                return Poll::Pending;
+                            }
+                        }
+                        let cst = ChannelState::new_outbound(lid, lws, lps, reply);
+                        self.channels[lid as usize] = Some(Arc::new(Mutex::new(cst)));
+                    } else {
+                        let e = ChannelOpenFailure::RESOURCE_SHORTAGE;
+                        reply.send(Err(e)).unwrap_or(());
+                    }
+                }
+            }
         }
-        Poll::Pending
     }
 
     /// Poll the transport for incoming messages.
@@ -325,137 +235,127 @@ impl ConnectionState {
         ready!(self.transport.tx_flush(cx))?;
         loop {
             let rx = ready!(self.transport.rx_peek(cx))?;
-            // MSG_CHANNEL_DATA
-            if let Some(msg) = SshCodec::decode(rx) {
-                let _: MsgChannelData = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_DATA ({} bytes)",
-                    msg.recipient_channel,
-                    msg.data.len()
-                );
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_data(msg.data)?;
-                Ok(())
-            }
-            // MSG_CHANNEL_EXTENDED_DATA
-            else if let Some(msg) = SshCodec::decode(rx) {
-                let _: MsgChannelExtendedData = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_EXTENDED_DATA ({} bytes)",
-                    msg.recipient_channel,
-                    msg.data.len()
-                );
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_extended_data(msg.data_type_code, msg.data)?;
-                Ok(())
-            }
-            // MSG_CHANNEL_WINDOW_ADJUST
-            else if let Some(msg) = SshCodec::decode(rx) {
-                let _: MsgChannelWindowAdjust = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST",
-                    msg.recipient_channel
-                );
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_window_adjust(msg.bytes_to_add)?;
-                Ok(())
-            }
-            // MSG_CHANNEL_EOF
-            else if let Some(msg) = SshCodec::decode(rx) {
-                let _: MsgChannelEof = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_EOF",
-                    msg.recipient_channel
-                );
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_eof()?;
-                Ok(())
-            }
-            // MSG_CHANNEL_CLOSE
-            else if let Some(msg) = SshCodec::decode(rx) {
-                let _: MsgChannelClose = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_CLOSE",
-                    msg.recipient_channel
-                );
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_close()?;
-                Ok(())
-            }
             // MSG_CHANNEL_OPEN
-            else if let Some(msg) = SshCodec::decode(rx) {
+            if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelOpen = msg;
                 log::debug!("Received MSG_CHANNEL_OPEN ({})", msg.name);
-                self.check_resource_exhaustion()?;
-                self.channels.open_inbound(msg);
-                self.flag_outer_task_for_wakeup();
+                if let Some(lid) = self.alloc_channel_id() {
+                    let (s, r) = oneshot::channel();
+                    let lws = self.config.channel_max_buffer_size;
+                    let lps = self.config.channel_max_packet_size;
+                    let rid = msg.sender_channel;
+                    let rws = msg.initial_window_size;
+                    let rps = msg.maximum_packet_size;
+                    let cst = ChannelState::new_inbound(lid, lws, lps, rid, rws, rps, false, r);
+                    let cst = Arc::new(Mutex::new(cst));
+                    let req = ChannelOpenRequest {
+                        name: msg.name,
+                        data: msg.data,
+                        chan: ChannelHandle(cst.clone()),
+                        resp: s,
+                    };
+                    self.channels[lid as usize] = Some(cst);
+                    self.handler.on_open_request(req)
+                } else {
+                    self.channels_rejections.push_back(msg.sender_channel);
+                }
                 Ok(())
             }
             // MSG_CHANNEL_OPEN_CONFIRMATION
             else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelOpenConfirmation = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION",
-                    msg.recipient_channel
-                );
-                let channel = ChannelHandleInner::new(
-                    msg.recipient_channel,
-                    self.config.channel_max_buffer_size,
-                    self.config.channel_max_packet_size,
-                    msg.sender_channel,
-                    msg.initial_window_size,
-                    msg.maximum_packet_size,
-                    false,
-                );
-                self.channels.accept(msg.recipient_channel, channel)?;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION", lid);
+                channel!(self, lid).accept2()?;
                 Ok(())
             }
             // MSG_CHANNEL_OPEN_FAILURE
             else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelOpenFailure = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_OPEN_FAILURE",
-                    msg.recipient_channel
-                );
-                self.channels.reject(msg.recipient_channel, msg.reason)?;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_OPEN_FAILURE", lid);
+                channel!(self, lid).reject2(msg.reason)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_DATA
+            else if let Some(msg) = SshCodec::decode(rx) {
+                let _: MsgChannelData = msg;
+                let lid = msg.recipient_channel;
+                let len = msg.data.len();
+                log::debug!("Channel {}: Received MSG_CHANNEL_DATA ({} bytes)", lid, len);
+                channel!(self, lid).push_data(msg.data)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_EXTENDED_DATA
+            else if let Some(msg) = SshCodec::decode(rx) {
+                let _: MsgChannelExtendedData = msg;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_EXTENDED_DATA", lid);
+                channel!(self, lid).push_extended_data(msg.data_type_code, msg.data)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_WINDOW_ADJUST
+            else if let Some(msg) = SshCodec::decode(rx) {
+                let _: MsgChannelWindowAdjust = msg;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST", lid);
+                channel!(self, lid).push_window_adjust(msg.bytes_to_add)?;
+                Ok(())
+            }
+            // MSG_CHANNEL_EOF
+            else if let Some(msg) = SshCodec::decode(rx) {
+                let _: MsgChannelEof = msg;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_EOF", lid);
+                channel!(self, lid).push_eof()?;
+                Ok(())
+            }
+            // MSG_CHANNEL_CLOSE
+            else if let Some(msg) = SshCodec::decode(rx) {
+                let _: MsgChannelClose = msg;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_CLOSE", lid);
+                channel!(self, lid).push_close()?;
                 Ok(())
             }
             // MSG_CHANNEL_REQUEST
             else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelRequest<&[u8]> = msg;
-                let rid = msg.recipient_channel;
-                let req = msg.request.into();
-                log::debug!("Channel {}: Received MSG_CHANNEL_REQUEST: {:?}", rid, req);
-                self.check_resource_exhaustion()?;
-                let channel = self.channels.get_open(rid)?;
-                channel.push_request(req)?;
+                let lid = msg.recipient_channel;
+                let typ = msg.request;
+                log::debug!("Channel {}: Received MSG_CHANNEL_REQUEST: {:?}", lid, typ);
+                channel!(self, lid).push_request(typ, msg.specific, msg.want_reply)?;
                 Ok(())
             }
             // MSG_CHANNEL_SUCCESS
             else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelSuccess = msg;
-                log::debug!(
-                    "Channel {}: Received MSG_CHANNEL_SUCCESS",
-                    msg.recipient_channel
-                );
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_success()?;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_SUCCESS", lid);
+                channel!(self, lid).push_success()?;
                 Ok(())
             }
             // MSG_CHANNEL_FAILURE
             else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgChannelFailure = msg;
-                log::debug!("Received MSG_CHANNEL_FAILURE");
-                let channel = self.channels.get_open(msg.recipient_channel)?;
-                channel.push_failure()?;
+                let lid = msg.recipient_channel;
+                log::debug!("Channel {}: Received MSG_CHANNEL_FAILURE", lid);
+                channel!(self, lid).push_failure()?;
                 Ok(())
             }
             // MSG_GLOBAL_REQUEST
             else if let Some(msg) = SshCodec::decode(rx) {
                 let _: MsgGlobalRequest = msg;
                 log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
-                self.check_resource_exhaustion()?;
-                self.push_request(msg.name, msg.data, msg.want_reply)?;
+                if msg.want_reply {
+                    let (s, r) = oneshot::channel();
+                    self.replies_queue.push_back(r);
+                    let request = GlobalRequestWantReply::new(msg.name.into(), msg.data.into(), s);
+                    self.handler.on_request_want_reply(request);
+                } else {
+                    let request = GlobalRequest::new(msg.name.into(), msg.data.into());
+                    self.handler.on_request(request);
+                }
                 Ok(())
             }
             // MSG_REQUEST_SUCCESS
@@ -481,30 +381,9 @@ impl ConnectionState {
         }
     }
 
-    fn push_request(
-        &mut self,
-        name: String,
-        data: Vec<u8>,
-        want_reply: bool,
-    ) -> Result<(), ConnectionError> {
-        let mut request = GlobalRequest {
-            name,
-            data,
-            reply: None,
-        };
-        if want_reply {
-            let (tx, rx) = oneshot::channel();
-            request.reply = Some(tx);
-            self.remote_replies.push_back(rx);
-        }
-        self.remote_requests.push_back(request);
-        self.flag_outer_task_for_wakeup();
-        Ok(())
-    }
-
     fn push_success(&mut self, data: Vec<u8>) -> Result<(), ConnectionError> {
-        if let Some(tx) = self.local_replies.pop_front() {
-            tx.send(Ok(data));
+        if let Some(sender) = self.requests_replies.pop_front() {
+            let _ = sender.send(Ok(data));
             Ok(())
         } else {
             Err(ConnectionError::GlobalReplyUnexpected)
@@ -512,27 +391,55 @@ impl ConnectionState {
     }
 
     fn push_failure(&mut self) -> Result<(), ConnectionError> {
-        if let Some(tx) = self.local_replies.pop_front() {
-            drop(tx);
+        if let Some(sender) = self.requests_replies.pop_front() {
+            let _ = sender.send(Err(()));
             Ok(())
         } else {
             Err(ConnectionError::GlobalReplyUnexpected)
         }
     }
 
-    fn queued(&self) -> usize {
-        let mut c = self.channels.queued();
-        c += self.remote_replies.len();
-        c += self.remote_requests.len();
-        c
+    fn alloc_channel_id(&mut self) -> Option<u32> {
+        for (id, slot) in self.channels.iter().enumerate() {
+            if slot.is_none() {
+                return Some(id as u32);
+            }
+        }
+        let id = self.channels.len();
+        if id < self.config.channel_max_count as usize {
+            self.channels.push(None);
+            Some(id as u32)
+        } else {
+            None
+        }
     }
 
-    fn check_resource_exhaustion(&self) -> Result<(), ConnectionError> {
-        let exhausted = self.queued() >= self.config.queued_max_count as usize;
-        check(!exhausted).ok_or(ConnectionError::ResourceExhaustion)
+    /// Deliver a `ConnectionError` to all dependant users of this this connection (tasks waiting
+    /// on connection requests or channel I/O).
+    ///
+    /// This shall be the last thing to be done by the `ConnectionFuture`.
+    fn terminate(&mut self, e: ConnectionError) {
+        std::mem::replace(&mut self.handler, Box::new(())).on_error(&e);
+        // FIXME
+        //self.channels.terminate(e.clone());
+        self.error.send(Some(e)).unwrap_or(());
     }
 }
 
+impl Future for ConnectionState {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        let self_ = Pin::into_inner(self);
+        if let Err(e) = ready!(self_.poll(cx)) {
+            self_.terminate(e);
+        }
+        log::error!("CONNECTION DROP");
+        Poll::Ready(())
+    }
+}
+
+// FIXME: Move to transport?
 pub fn poll_send<M: SshEncode>(
     t: &mut GenericTransport,
     cx: &mut Context,

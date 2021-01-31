@@ -10,18 +10,6 @@ pub(crate) struct MsgChannelOpen<S: AsRef<str> = String> {
     pub data: Vec<u8>,
 }
 
-impl<S: AsRef<str>> MsgChannelOpen<S> {
-    pub fn new(name: S, id: u32, ws: u32, ps: u32, data: Vec<u8>) -> Self {
-        Self {
-            name,
-            sender_channel: id,
-            initial_window_size: ws,
-            maximum_packet_size: ps,
-            data,
-        }
-    }
-}
-
 impl<S: AsRef<str>> Message for MsgChannelOpen<S> {
     const NUMBER: u8 = 90;
 }

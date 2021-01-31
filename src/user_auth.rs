@@ -27,10 +27,10 @@ impl UserAuth {
     pub const SSH_CONNECTION: &'static str = "ssh-connection";
 
     /// Request another service with user authentication.
-    pub async fn request_connection<H: ConnectionHandler>(
+    pub async fn request_connection<F: FnOnce(&Connection) -> Box<dyn ConnectionHandler>>(
         transport: GenericTransport,
         config: &Arc<ConnectionConfig>,
-        handler: H,
+        handle: F,
         user: &str,
         agent: &Arc<dyn AuthAgent>,
     ) -> Result<Connection, UserAuthError> {
@@ -41,7 +41,7 @@ impl UserAuth {
         for (id, comment) in identities {
             log::debug!("Trying identity: {} ({})", comment, id.algorithm());
             if Self::try_pubkey(&mut t, &agent, service, user, id).await? {
-                return Ok(Connection::new(config, handler, t));
+                return Ok(Connection::new(config, t, handle));
             }
         }
 

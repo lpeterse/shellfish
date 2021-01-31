@@ -6,7 +6,7 @@ pub mod oneshot;
 pub mod socket;
 pub mod socks5;
 pub mod tcp;
-pub mod runtime;
+pub mod role;
 
 /// Takes a `bool` and converts it `Option<()>` to be used as early return point with `?`.
 #[inline(always)]
@@ -19,5 +19,5 @@ pub fn check(x: bool) -> Option<()> {
     }
 }
 
-pub type BoxFuture<T> = core::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;
 pub type ArcError = std::sync::Arc<dyn std::error::Error + Send + Sync + 'static>;
+pub type BoxFuture<T> = core::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;

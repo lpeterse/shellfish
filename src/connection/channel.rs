@@ -8,6 +8,7 @@ mod state;
 mod stream;
 mod types;
 
+pub use self::state::ChannelState;
 pub use self::handle::ChannelHandle;
 pub use self::handle_inner::ChannelHandleInner;
 pub use self::interconnect::Interconnect;
@@ -26,11 +27,8 @@ use std::task::Poll;
 use std::sync::Arc;
 
 pub trait Channel: Unpin + Sized {
-    type Open: std::fmt::Debug + Clone + SshEncode + SshDecode + Unpin;
-    //    type Request: ChannelRequest + SshEncode;
-
     const NAME: &'static str;
-
+    type Open: std::fmt::Debug + Clone + SshEncode + SshDecode + Unpin;
     fn new(channel: ChannelHandle) -> Self;
 }
 

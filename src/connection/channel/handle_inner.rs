@@ -20,11 +20,6 @@ const SSH_EXTENDED_DATA_STDERR: u32 = 1;
 pub struct ChannelHandleInner(Arc<Mutex<ChannelState>>);
 
 impl ChannelHandleInner {
-    pub fn new(lid: u32, lmws: u32, lmps: u32, rid: u32, rws: u32, rmps: u32, ext: bool) -> Self {
-        let x = ChannelState::new(lid, lmws, lmps, rid, rws, rmps, ext);
-        Self(Arc::new(Mutex::new(x)))
-    }
-
     pub fn handle(&self) -> ChannelHandle {
         (&self.0).into()
     }
