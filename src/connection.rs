@@ -1,4 +1,3 @@
-mod channel;
 mod config;
 mod error;
 mod handler;
@@ -6,26 +5,22 @@ mod msg;
 mod request;
 mod state;
 
+pub mod channel;
 pub mod global;
 
-pub use self::channel::*;
-pub use self::config::*;
-pub use self::error::*;
-pub use self::handler::*;
-pub use self::msg::ChannelOpenFailure;
-pub use self::state::*;
+pub use self::config::ConnectionConfig;
+pub use self::error::ConnectionError;
+pub use self::handler::ConnectionHandler;
 
-use self::global::*;
-use self::msg::*;
-use self::request::*;
-use crate::transport::{DisconnectReason, GenericTransport, Transport, TransportError};
+use self::channel::Channel;
+use self::channel::ChannelOpenFailure;
+use self::global::{Global, GlobalWantReply};
+use self::request::ConnectionRequest;
+use self::state::ConnectionState;
+use crate::transport::{GenericTransport, TransportError};
 use crate::util::codec::*;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::task::{ready, Context, Poll};
-use tokio::pin;
 use tokio::spawn;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -82,27 +77,23 @@ impl Connection {
         &self,
         params: C::Open,
     ) -> Result<Result<C, ChannelOpenFailure>, ConnectionError> {
-        let (reply, reply_) = oneshot::channel();
-        let r = ConnectionRequest::Open {
+        let (s, r) = oneshot::channel();
+        let req = ConnectionRequest::Open {
             name: C::NAME,
             data: SshCodec::encode(&params).ok_or(TransportError::InvalidEncoding)?,
-            reply,
+            reply: s,
         };
         self.creqs
-            .send(r)
+            .send(req)
             .await
             .map_err(|_| self.error_or_dropped())?;
-        reply_
-            .await
+        r.await
             .map(|x| x.map(C::new))
             .map_err(|_| self.error_or_dropped())
     }
 
     /// Perform a global request (without reply).
-    pub async fn request<T: Global>(
-        &mut self,
-        data: &T::RequestData,
-    ) -> Result<(), ConnectionError> {
+    pub async fn request<T: Global>(&self, data: &T::RequestData) -> Result<(), ConnectionError> {
         let request = ConnectionRequest::Global {
             name: T::NAME,
             data: SshCodec::encode(data).ok_or(TransportError::InvalidEncoding)?,
@@ -116,7 +107,7 @@ impl Connection {
 
     /// Perform a global request and wait for the reply.
     pub async fn request_want_reply<T: GlobalWantReply>(
-        &mut self,
+        &self,
         data: &T::RequestData,
     ) -> Result<Result<T::ResponseData, ()>, ConnectionError> {
         let (reply, response) = oneshot::channel();
@@ -146,9 +137,20 @@ impl Connection {
     /// has highest priority - the handler task will not do anything else that might block the
     /// disconnection process.
     ///
-    /// Hint: Use `.await` on the connection itself in order to await actual disconnection.
+    /// Hint: Use [closed](Self::closed) in order to await actual disconnection.
     pub fn close(&self) {
         self.close.lock().unwrap().close();
+    }
+
+    pub async fn closed(&mut self) -> ConnectionError {
+        loop {
+            if let Some(e) = self.error() {
+                return e;
+            }
+            if self.error.changed().await.is_err() {
+                return ConnectionError::Dropped;
+            }
+        }
     }
 
     /// Returns the error which caused the connection to die (if dead).
@@ -160,21 +162,5 @@ impl Connection {
 
     fn error_or_dropped(&self) -> ConnectionError {
         self.error().unwrap_or(ConnectionError::Dropped)
-    }
-}
-
-impl Future for Connection {
-    type Output = ConnectionError;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
-        let self_ = Pin::into_inner(self);
-        if let Some(e) = self_.error() {
-            Poll::Ready(e)
-        } else {
-            let f = self_.error.changed();
-            pin!(f);
-            let _ = ready!(f.poll(cx));
-            Poll::Ready(ConnectionError::Dropped)
-        }
     }
 }

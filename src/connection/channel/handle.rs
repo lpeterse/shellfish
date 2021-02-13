@@ -1,53 +1,42 @@
+use super::interconnect::Interconnect;
 use super::state::*;
 use super::*;
 use crate::util::socket::Socket;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::pin::Pin;
+use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
 use std::task::Context;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
-use tokio::sync::watch;
 
-#[derive(Debug)]
-pub enum Gnurp {
-    Opening,
-    Open,
-    Closing,
-    Closed
-}
-
-#[derive(Debug)]
-pub struct ChannelHandle2 {
-    fooba: watch::Receiver<Gnurp>,
-    state: Arc<Mutex<ChannelState>>,
-}
-
-#[derive(Debug)]
-pub struct ChannelHandle(pub Arc<Mutex<ChannelState>>);
-
-impl ChannelHandle {
-    pub(crate) fn with_state<F, X>(&self, f: F) -> X
-    where
-        F: FnOnce(&mut ChannelState) -> X,
-    {
-        let (result, waker) = {
-            let mut state = self.0.lock().unwrap();
-            (f(&mut state), state.inner_task_waker())
-        };
-        if let Some(waker) = waker {
+macro_rules! wake {
+    ($state:ident) => {
+        let mut state: MutexGuard<ChannelState> = $state;
+        let w = state.inner_task_waker.take();
+        drop(state);
+        if let Some(waker) = w {
             waker.wake()
         }
-        result
+    };
+}
+
+macro_rules! pend {
+    ($state:ident, $cx:ident, $ev:expr) => {
+        $state.outer_task_flags |= $ev;
+        $state.outer_task_waker = Some($cx.waker().clone())
+    };
+}
+
+#[derive(Debug)]
+pub struct ChannelHandle(Arc<Mutex<ChannelState>>);
+
+impl ChannelHandle {
+    pub(crate) fn new(state: Arc<Mutex<ChannelState>>) -> Self {
+        Self(state)
     }
 
     pub fn interconnect<S: Socket>(self, socket: S) -> Interconnect<S> {
         Interconnect::new(self, socket)
-    }
-}
-
-impl From<&Arc<Mutex<ChannelState>>> for ChannelHandle {
-    fn from(x: &Arc<Mutex<ChannelState>>) -> Self {
-        Self(x.clone())
     }
 }
 
@@ -57,20 +46,32 @@ impl AsyncRead for ChannelHandle {
         cx: &mut Context,
         buf: &mut ReadBuf,
     ) -> Poll<std::io::Result<()>> {
-        self.with_state(|x| {
-            let read = x.std.rx.read(buf.initialize_unfilled());
-            if read > 0 {
-                buf.advance(read);
-                x.outer_task_waker = None;
+        let mut channel = self.0.lock().unwrap();
+        if channel.stdin.is_empty() {
+            if channel.eof_rcvd {
+                // The channel has been terminated gracefully.
                 Poll::Ready(Ok(()))
-            } else if x.reof {
-                x.outer_task_waker = None;
-                Poll::Ready(Ok(()))
+            } else if channel.close_rcvd {
+                // The channel has been terminated without EOF.
+                Poll::Ready(Err(Error::new(ErrorKind::UnexpectedEof, "")))
             } else {
-                x.register_outer_task(cx);
+                // The channel is open: Wait for more data, EOF or close by remote.
+                pend!(channel, cx, EV_READABLE | EV_EOF_RCVD | EV_CLOSE_RCVD);
                 Poll::Pending
             }
-        })
+        } else {
+            // The number of bytes to read is limited by bytes available and supplied buffer size.
+            let n = std::cmp::min(channel.stdin.len(), buf.remaining());
+            let b = buf.initialize_unfilled_to(n);
+            let m = channel.stdin.read(b);
+            assert!(n == m);
+            buf.advance(n);
+            // The inner task only needs to be woken if window adjust is recommended.
+            if channel.recommended_window_adjust().is_some() {
+                wake!(channel);
+            }
+            Poll::Ready(Ok(()))
+        }
     }
 }
 
@@ -80,58 +81,76 @@ impl AsyncWrite for ChannelHandle {
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
-        if buf.is_empty() {
-            return Poll::Ready(Ok(0));
-        }
-        self.with_state(|x| {
-            let l1 = x.max_buffer_size as usize - x.std.tx.len();
-            let l2 = buf.len();
-            let len = std::cmp::min(l1, l2);
-            if len == 0 {
-                x.register_outer_task(cx);
-                Poll::Pending
-            } else {
-                x.std.tx.write_all(&buf[..len]);
-                x.inner_task_wake = true;
-                Poll::Ready(Ok(len))
+        let mut channel = self.0.lock().unwrap();
+        if channel.eof{
+            Poll::Ready(Err(Error::new(ErrorKind::Other, "write after shutdown")))
+        } else if channel.close_rcvd {
+            Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "closed by remote")))
+        } else if channel.rws > 0 && channel.stdout.len() < channel.mbs {
+            let n = buf.len();
+            let n = std::cmp::min(n, channel.mbs - channel.stdout.len());
+            let n = std::cmp::min(n, channel.rws as usize);
+            channel.stdout.write_all(&buf[..n]);
+            channel.rws -= n as u32;
+            if n < buf.len() {
+                // Wake inner task only if less bytes written than requested.
+                // Inner task is required to try sending even without explicit flush in this case.
+                // Inner task shall intentionally not be woken for every small chunk written.
+                wake!(channel);
             }
-        })
+            Poll::Ready(Ok(n))
+        } else {
+            pend!(channel, cx, EV_WRITABLE | EV_CLOSE_RCVD);
+            Poll::Pending
+        }
     }
 
     /// Flushing just waits until all data has been sent.
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
-        self.with_state(|x| {
-            if x.std.tx.is_empty() && (!x.leof || x.leof_sent) {
-                Poll::Ready(Ok(()))
-            } else {
-                x.inner_task_wake = true;
-                x.register_outer_task(cx);
-                Poll::Pending
-            }
-        })
+        let mut channel = self.0.lock().unwrap();
+        if channel.stdout.is_empty() {
+            // All pending data has been transmitted.
+            Poll::Ready(Ok(()))
+        } else if channel.close_rcvd {
+            // The remote side closed the channel before we could send all data.
+            Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "closed by remote")))
+        } else {
+            // Wake us when either all data has been transmitted or remote closed the channel.
+            pend!(channel, cx, EV_FLUSHED | EV_CLOSE_RCVD);
+            Poll::Pending
+        }
     }
 
-    /// Closing the stream shall be translated to eof (meaning that there won't be any more data).
+    /// Shutdown causes sending an `SSH_MSG_CHANNEL_EOF` (meaning that there won't be any more
+    /// data).
+    ///
     /// The internal connection handler will first transmit any pending data and then signal eof.
-    /// Close gets sent automatically on drop (after sending pending data and eventually eof).
+    /// `SSH_MSG_CHANNEL_CLOSE` is sent automatically on [drop].
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Error>> {
-        self.with_state(|x| {
-            x.leof = true;
-            if x.std.tx.is_empty() && (!x.leof || x.leof_sent) {
-                Poll::Ready(Ok(()))
-            } else {
-                x.register_outer_task(cx);
-                Poll::Pending
-            }
-        })
+        let mut channel = self.0.lock().unwrap();
+        channel.eof = true;
+        if channel.eof_sent {
+            // This implies complete transmission of any pending data.
+            Poll::Ready(Ok(()))
+        } else if channel.close_rcvd {
+            // The remote side closed the channel before we could send EOF.
+            Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "closed by remote")))
+        } else {
+            // Wake us when either EOF has been sent or remote closed the channel.
+            pend!(channel, cx, EV_EOF_SENT | EV_CLOSE_RCVD);
+            Poll::Pending
+        }
     }
 }
 
+/// Dropping a [ChannelHandle] initiates the channel close procedure. Pending data will be
+/// transmitted before sending an `SSH_MSG_CHANNEL_CLOSE`. The channel gets freed after
+/// `SSH_MSG_CHANNEL_CLOSE` has been sent _and_ received. Of course, the [drop] call itself does
+/// not block and return immediately.
 impl Drop for ChannelHandle {
     fn drop(&mut self) {
-        self.with_state(|x| {
-            x.lclose = true;
-            x.inner_task_wake = true;
-        })
+        let mut channel = self.0.lock().unwrap();
+        channel.close = true;
+        wake!(channel);
     }
 }

@@ -1,7 +1,3 @@
-#![feature(ready_macro)]
-#![feature(future_poll_fn)]
-#![feature(drain_filter)]
-
 pub mod agent;
 pub mod client;
 pub mod connection;

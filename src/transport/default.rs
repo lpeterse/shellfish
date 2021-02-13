@@ -174,8 +174,8 @@ impl<S: Socket> DefaultTransport<S> {
         match cond {
             // If `readable` is false it is guaranteed that the socket is blocked on IO and it is
             // safe to return `Pending` (see above).
-            Condition::Readable if readable => Poll::Ready(Ok(())),
-            Condition::Readable => Poll::Pending,
+            Condition::Readable => Poll::Ready(Ok(())),
+            //Condition::Readable => Poll::Pending,
             // The transport is writable unless kex is critical for sending. The situation that
             // the transport is readable (non-transport message) but sending is critical, may occur
             // after we sent KEX_INIT and the other side is still sending regular data.
@@ -211,9 +211,12 @@ impl<S: Socket> DefaultTransport<S> {
 }
 
 impl<S: Socket> Transport for DefaultTransport<S> {
-    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>> {
+    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
         ready!(self.poll(cx, Condition::Readable))?;
-        self.trx.rx_peek(cx)
+        match self.trx.rx_peek(cx)? {
+            Poll::Pending => Poll::Ready(Ok(None)),
+            Poll::Ready(x) => Poll::Ready(Ok(Some(x))),
+        }
     }
 
     fn rx_consume(&mut self) -> Result<(), TransportError> {

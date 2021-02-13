@@ -1,4 +1,7 @@
-use super::*;
+use super::super::ConnectionError;
+use super::Channel;
+use super::handle::ChannelHandle;
+use super::open_failure::ChannelOpenFailure;
 use crate::util::codec::*;
 use tokio::sync::oneshot;
 
@@ -7,7 +10,7 @@ pub struct ChannelOpenRequest {
     pub name: String,
     pub data: Vec<u8>,
     pub chan: ChannelHandle,
-    pub resp: oneshot::Sender<Result<(), ChannelOpenFailure>>
+    pub resp: oneshot::Sender<Result<(), ChannelOpenFailure>>,
 }
 
 impl ChannelOpenRequest {

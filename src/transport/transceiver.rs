@@ -3,16 +3,17 @@ use super::CrLf;
 use super::Identification;
 use super::TransportConfig;
 use super::TransportError;
+use crate::ready;
 use crate::util::buffer::Buffer;
 use crate::util::check;
 use crate::util::codec::*;
 use crate::util::socket::Socket;
-use core::future::poll_fn;
+use crate::util::poll_fn;
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Handles the low-level part of the wire-protocol including framing and cipher.

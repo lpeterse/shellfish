@@ -1,7 +1,8 @@
 mod open;
 
-pub use self::open::*;
+pub use self::open::DirectTcpIpOpen;
 
+use super::super::interconnect::Interconnect;
 use super::super::*;
 use crate::util::socket::Socket;
 use std::io::Error;

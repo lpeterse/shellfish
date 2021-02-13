@@ -1,5 +1,5 @@
 use super::channel::ChannelHandle;
-use super::msg::ChannelOpenFailure;
+use super::channel::ChannelOpenFailure;
 use tokio::sync::oneshot;
 
 #[derive(Debug)]

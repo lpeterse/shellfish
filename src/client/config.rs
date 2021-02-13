@@ -6,7 +6,7 @@ use crate::util::socket::*;
 
 use std::sync::Arc;
 
-/// The client configuration containing user name, agent, transport, connection properties etc.
+/// The client configuration containing agent, transport, connection properties etc.
 #[derive(Clone, Debug)]
 pub struct ClientConfig {
     pub(crate) socket: Arc<SocketConfig>,

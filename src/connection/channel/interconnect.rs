@@ -33,6 +33,7 @@ impl<S: Socket> Future for Interconnect<S> {
         let s2_closed: &mut bool = &mut self_.s2_closed;
         let mut s2: Pin<&mut S> = Pin::new(&mut self_.s2);
 
+        /*
         self_.s1.with_state(|s1| {
             if !*s1_closed {
                 while !s1.std_rx().is_empty() {
@@ -42,7 +43,7 @@ impl<S: Socket> Future for Interconnect<S> {
                             let written = result?;
                             if written > 0 {
                                 s1.std_rx().consume(written);
-                                s1.inner_task_wake = true;
+                                //s1.inner_task_woken = true; FIXME
                                 continue;
                             }
                         }
@@ -87,7 +88,7 @@ impl<S: Socket> Future for Interconnect<S> {
                     Poll::Ready(Err(e)) => return Poll::Ready(Err(e.into())),
                     Poll::Ready(Ok(())) => {
                         let read = buf_.filled().len();
-                        s1.inner_task_wake = true;
+                        //s1.inner_task_woken = true; FIXME
                         if read > 0 {
                             let _ = s1.std_tx().extend(read);
                         } else {
@@ -103,9 +104,10 @@ impl<S: Socket> Future for Interconnect<S> {
             if *s1_closed && *s2_closed {
                 Poll::Ready(Ok(()))
             } else {
-                s1.register_outer_task(cx);
+                //s1.register_outer_task(cx); FIXME
                 Poll::Pending
             }
-        })
+        })*/
+        panic!()
     }
 }

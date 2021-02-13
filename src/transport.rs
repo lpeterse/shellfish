@@ -24,24 +24,24 @@ pub use self::config::TransportConfig;
 pub use self::default::DefaultTransport;
 pub use self::error::TransportError;
 
+use crate::ready;
 use crate::agent::*;
 use crate::host::*;
 use crate::util::codec::*;
+use crate::util::poll_fn;
 
-use core::future::poll_fn;
 use std::convert::From;
 use std::fmt::Debug;
 use std::option::Option;
 use std::sync::Arc;
-use std::task::{ready, Context, Poll};
+use std::task::{Context, Poll};
 
 pub trait Transport: Debug + Send + Unpin + 'static {
     /// Try to receive the next message.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if no message is available for now.
-    ///
-    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>>;
+    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>>;
     /// Consumed the current rx buffer (only after `rx_peek`).
     ///
     /// The message shall have been decoded and processed before being cosumed.
@@ -80,7 +80,7 @@ pub trait Transport: Debug + Send + Unpin + 'static {
 ///
 /// Serveral convenient async methods for sending and receiving are supplied. They are easy to work
 /// with, but do not offer features like direct buffer access which is required for highest
-/// performance. In such a case the re-exposed the low-level [Transport] methods need to be used.
+/// performance. In such a case the re-exposed low-level [Transport] methods need to be used.
 #[derive(Debug)]
 pub struct GenericTransport(Box<dyn Transport>);
 
@@ -117,7 +117,10 @@ impl GenericTransport {
     /// occurs.
     pub async fn receive<M: SshDecode>(&mut self) -> Result<M, TransportError> {
         poll_fn(|cx| {
-            let rx = ready!(self.rx_peek(cx))?;
+            let rx = match self.rx_peek(cx)? {
+                Poll::Ready(Some(rx)) => rx,
+                _ => return Poll::Pending,
+            };
             let msg = SshCodec::decode(rx).ok_or(TransportError::InvalidEncoding)?;
             self.rx_consume()?;
             Poll::Ready(Ok(msg))
@@ -156,15 +159,30 @@ impl GenericTransport {
         log::debug!("Received MSG_SERVICE_ACCEPT");
         Ok(self)
     }
+
+    pub fn poll_send<M: SshEncode>(
+        &mut self,
+        cx: &mut Context,
+        msg: &M,
+    ) -> Poll<Result<(), TransportError>> {
+        let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
+        let buf = ready!(self.0.tx_alloc(cx, size))?;
+        SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
+        self.0.tx_commit()?;
+        Poll::Ready(Ok(()))
+    }
 }
 
 impl Transport for GenericTransport {
-    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<&[u8], TransportError>> {
+    #[inline]
+    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
         self.0.rx_peek(cx)
     }
+    #[inline]
     fn rx_consume(&mut self) -> Result<(), TransportError> {
         self.0.rx_consume()
     }
+    #[inline]
     fn tx_alloc(
         &mut self,
         cx: &mut Context,
@@ -172,12 +190,15 @@ impl Transport for GenericTransport {
     ) -> Poll<Result<&mut [u8], TransportError>> {
         self.0.tx_alloc(cx, len)
     }
+    #[inline]
     fn tx_commit(&mut self) -> Result<(), TransportError> {
         self.0.tx_commit()
     }
+    #[inline]
     fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         self.0.tx_flush(cx)
     }
+    #[inline]
     fn tx_disconnect(
         &mut self,
         cx: &mut Context,
@@ -185,6 +206,7 @@ impl Transport for GenericTransport {
     ) -> Poll<Result<(), TransportError>> {
         self.0.tx_disconnect(cx, reason)
     }
+    #[inline]
     fn session_id(&self) -> Result<&SessionId, TransportError> {
         self.0.session_id()
     }

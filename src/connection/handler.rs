@@ -1,6 +1,6 @@
-use super::global::{HostKeys, GlobalRequest, GlobalRequestWantReply};
+use super::channel::ChannelOpenRequest;
+use super::global::{GlobalRequest, GlobalRequestWantReply, HostKeys};
 use super::ConnectionError;
-use super::channel::*;
 use crate::interpret;
 use std::task::{Context, Poll};
 

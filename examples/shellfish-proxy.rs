@@ -1,7 +1,7 @@
 use clap::{value_t_or_exit, App, Arg, SubCommand};
 use shellfish::client::*;
-use shellfish::connection::global::KeepAlive;
 use shellfish::connection::*;
+use shellfish::connection::channel::*;
 use shellfish::util::socks5;
 use std::error::Error;
 use std::net::SocketAddr;
@@ -9,9 +9,6 @@ use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::spawn;
 use tokio::time::sleep;
-
-use tokio::sync::mpsc;
-use tokio::sync::oneshot;
 use tokio::sync::watch;
 
 fn main() -> Result<(), Box<dyn Error>> {
@@ -81,41 +78,23 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
             let port = value_t_or_exit!(config, "port", u16);
             let bind = value_t_or_exit!(config, "bind", String);
 
-            let mut pool = ConnectionPool::new(Client::default(), &user, &host, port);
+            let pool = ConnectionPool::new(Client::default(), &user, &host, port);
             let listener: TcpListener = TcpListener::bind(&bind).await?;
 
-            let mut conn = pool.get().await?;
-            log::error!("CONNECTION ESTABLISHED!");
-            sleep(std::time::Duration::from_secs(10)).await;
-
-            for i in 1..1000 {
-                conn.request::<KeepAlive>(&()).await?;
-                if i % 100 == 0 {
-                    log::error!("CONNECTION ALIVE {}", i);
-                }
-                sleep(std::time::Duration::from_millis(10)).await;
+            loop {
+                let (sock, addr) = listener.accept().await?;
+                let mut pool_ = pool.clone();
+                let _ = spawn(async move {
+                    match pool_.get().await {
+                        Err(e) => log::error!("{:?}", e),
+                        Ok(cn) => {
+                            if let Err(e) = serve(sock, addr, cn).await {
+                                log::error!("{:?}", e);
+                            }
+                        }
+                    }
+                });
             }
-
-            //conn.close();
-            Err(conn.await)?;
-
-            log::error!("CONNECTION DROPPED");
-
-            // let e = conn.error().await;
-            // log::error!("CONNECTION FAILED {}", e);
-
-            sleep(std::time::Duration::from_secs(60)).await;
-
-            // loop {
-            //     let (sock, addr) = listener.accept().await?;
-            //     let connection = pool.get().await;
-            //     let _ = spawn(async move {
-            //         if let Err(e) = serve(sock, addr, connection).await {
-            //             log::error!("{:?}", e);
-            //         }
-            //     });
-            // }
-            Ok(())
         }
         _ => Ok(()),
     }
@@ -134,6 +113,7 @@ async fn serve(sock: TcpStream, addr: SocketAddr, conn: Connection) -> Result<()
         src_port: sp,
     };
     let chan = conn.open::<DirectTcpIp>(rq).await??;
+    log::error!("CHANNEL OPENNNNNNN");
     let sock = cr.accept(addr).await?;
     chan.interconnect(sock).await?;
     Ok(())
@@ -160,12 +140,12 @@ impl ConnectionPool {
                     Err(e) => {
                         log::error!("Connection to {}@{}:{} failed: {}", u, h, p, e)
                     }
-                    Ok(c) => {
+                    Ok(mut c) => {
                         log::info!("Connection to {}@{}:{} established", u, h, p);
                         if s.send(Some(c.clone())).is_err() {
                             return;
                         }
-                        let e = c.await;
+                        let e = c.closed().await;
                         log::info!("Connection to {}@{}:{} lost: {}", u, h, p, e);
                     }
                 };
@@ -178,7 +158,7 @@ impl ConnectionPool {
         Self { channel: r }
     }
 
-    pub async fn get(&mut self) -> Result<Connection, Box<dyn Error>> {
+    pub async fn get(&mut self) -> Result<Connection, Box<dyn Error + Send + Sync>> {
         loop {
             if let Some(x) = self.channel.borrow().as_ref() {
                 return Ok(x.clone());

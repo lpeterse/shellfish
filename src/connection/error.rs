@@ -1,12 +1,14 @@
-use super::*;
 use crate::transport::TransportError;
+use super::channel::ChannelOpenFailure;
 
 #[derive(Clone, Debug)]
 pub enum ConnectionError {
-    IoError(Arc<std::io::Error>),
+    IoError(std::sync::Arc<std::io::Error>),
     TransportError(TransportError),
     ChannelOpenFailure(ChannelOpenFailure),
     ChannelOpenUnexpected,
+    ChannelOpenConfirmationUnexpected,
+    ChannelOpenFailureUnexpected,
     ChannelWindowAdjustUnexpected,
     ChannelWindowAdjustOverflow,
     ChannelIdInvalid,
@@ -29,7 +31,7 @@ pub enum ConnectionError {
 
 impl From<std::io::Error> for ConnectionError {
     fn from(e: std::io::Error) -> Self {
-        Self::IoError(Arc::new(e))
+        Self::IoError(std::sync::Arc::new(e))
     }
 }
 
