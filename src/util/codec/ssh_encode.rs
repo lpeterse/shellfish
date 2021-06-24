@@ -18,6 +18,12 @@ impl SshEncode for String {
     }
 }
 
+impl SshEncode for &str {
+    fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
+        e.push_str_framed(&self)
+    }
+}
+
 impl<A: SshEncode, B: SshEncode> SshEncode for (A, B) {
     fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
         e.push(&self.0)?;

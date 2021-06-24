@@ -1,24 +1,24 @@
-use super::channel::ChannelOpenRequest;
-use super::global::{GlobalRequest, GlobalRequestWantReply, HostKeys};
+use super::channel::direct_tcpip::DirectTcpIpRequest;
+use super::channel::session::SessionRequest;
+use super::global::{GlobalRequest, GlobalRequestWantReply};
 use super::ConnectionError;
-use crate::interpret;
 use std::task::{Context, Poll};
 
 pub trait ConnectionHandler: Send + Sync + 'static {
     fn on_request(&mut self, request: GlobalRequest) {
         log::error!("HANDLER ON_REQUEST: {:?}", request);
-        interpret!(request, HostKeys, {
-            log::error!("HANDLER ON_REQUEST: {:?}", request);
-        });
-        interpret!(request, (), {});
     }
 
     fn on_request_want_reply(&mut self, request: GlobalRequestWantReply) {
         log::error!("HANDLER ON_REQUEST_WANT_REPLY {:?}", request);
     }
 
-    fn on_open_request(&mut self, request: ChannelOpenRequest) {
-        log::error!("HANDLER ON_OPEN_REQUEST {:?}", request)
+    fn on_direct_tcpip_request(&mut self, request: DirectTcpIpRequest) {
+        log::error!("HANDLER ON_DIRECT_TCPIP_REQUEST {:?}", request)
+    }
+
+    fn on_session_request(&mut self, request: SessionRequest) {
+        log::error!("HANDLER ON_SESSION_REQUEST {:?}", request)
     }
 
     fn on_error(self: Box<Self>, e: &ConnectionError) {

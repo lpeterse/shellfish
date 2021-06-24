@@ -32,7 +32,7 @@ impl<'a> KnownHostsPattern<'a> {
             let mut m: [u8; 28] = [0; 28];
             let klen = base64::decode_config_slice(key, base64::STANDARD, &mut k).ok()?;
             let mlen = base64::decode_config_slice(mac, base64::STANDARD, &mut m).ok()?;
-            let mut hmac = Hmac::<Sha1>::new_varkey(k.get(..klen)?).ok()?;
+            let mut hmac = Hmac::<Sha1>::new_from_slice(k.get(..klen)?).ok()?;
             hmac.update(name.as_ref());
             hmac.verify(&m[..mlen]).ok()
         } else {

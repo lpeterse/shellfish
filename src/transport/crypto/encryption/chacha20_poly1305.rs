@@ -1,7 +1,7 @@
 use super::super::super::keys::*;
 use super::*;
 use crate::util::check;
-use chacha20::cipher::stream::{NewStreamCipher, SyncStreamCipher};
+use chacha20::cipher::{NewCipher, StreamCipher};
 use chacha20::ChaCha20Legacy;
 use generic_array::GenericArray;
 use poly1305::universal_hash::NewUniversalHash;

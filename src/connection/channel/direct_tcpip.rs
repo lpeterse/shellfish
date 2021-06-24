@@ -1,17 +1,24 @@
-use super::interconnect::Interconnect;
-use super::state::*;
-use super::*;
-use crate::util::socket::Socket;
-use std::io::{Error, ErrorKind};
+mod open;
+mod request;
+mod state;
+
+pub use self::open::DirectTcpIpParams;
+pub use self::request::*;
+pub use self::state::*;
+
+use super::Channel;
+use super::OpenFailure;
+use std::io::Error;
+use std::io::ErrorKind;
 use std::pin::Pin;
 use std::sync::MutexGuard;
 use std::sync::{Arc, Mutex};
-use std::task::Context;
+use std::task::{Context, Poll};
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 macro_rules! wake {
     ($state:ident) => {
-        let mut state: MutexGuard<ChannelState> = $state;
+        let mut state: MutexGuard<DirectTcpIpState> = $state;
         let w = state.inner_task_waker.take();
         drop(state);
         if let Some(waker) = w {
@@ -28,19 +35,20 @@ macro_rules! pend {
 }
 
 #[derive(Debug)]
-pub struct ChannelHandle(Arc<Mutex<ChannelState>>);
+pub struct DirectTcpIp(pub(crate) Arc<Mutex<DirectTcpIpState>>);
 
-impl ChannelHandle {
-    pub(crate) fn new(state: Arc<Mutex<ChannelState>>) -> Self {
-        Self(state)
-    }
-
-    pub fn interconnect<S: Socket>(self, socket: S) -> Interconnect<S> {
-        Interconnect::new(self, socket)
+impl DirectTcpIp {
+    pub async fn interconnect<T: AsyncRead + AsyncWrite>(self, stream: T) -> std::io::Result<()> {
+        log::error!("interconnect not implemented");
+        Ok(())
     }
 }
 
-impl AsyncRead for ChannelHandle {
+impl Channel for DirectTcpIp {
+    const NAME: &'static str = "direct-tcpip";
+}
+
+impl AsyncRead for DirectTcpIp {
     fn poll_read(
         self: Pin<&mut Self>,
         cx: &mut Context,
@@ -75,14 +83,14 @@ impl AsyncRead for ChannelHandle {
     }
 }
 
-impl AsyncWrite for ChannelHandle {
+impl AsyncWrite for DirectTcpIp {
     fn poll_write(
         self: Pin<&mut Self>,
         cx: &mut Context,
         buf: &[u8],
     ) -> Poll<Result<usize, Error>> {
         let mut channel = self.0.lock().unwrap();
-        if channel.eof{
+        if channel.eof {
             Poll::Ready(Err(Error::new(ErrorKind::Other, "write after shutdown")))
         } else if channel.close_rcvd {
             Poll::Ready(Err(Error::new(ErrorKind::BrokenPipe, "closed by remote")))
@@ -117,6 +125,7 @@ impl AsyncWrite for ChannelHandle {
         } else {
             // Wake us when either all data has been transmitted or remote closed the channel.
             pend!(channel, cx, EV_FLUSHED | EV_CLOSE_RCVD);
+            wake!(channel);
             Poll::Pending
         }
     }
@@ -138,6 +147,7 @@ impl AsyncWrite for ChannelHandle {
         } else {
             // Wake us when either EOF has been sent or remote closed the channel.
             pend!(channel, cx, EV_EOF_SENT | EV_CLOSE_RCVD);
+            wake!(channel);
             Poll::Pending
         }
     }
@@ -147,7 +157,7 @@ impl AsyncWrite for ChannelHandle {
 /// transmitted before sending an `SSH_MSG_CHANNEL_CLOSE`. The channel gets freed after
 /// `SSH_MSG_CHANNEL_CLOSE` has been sent _and_ received. Of course, the [drop] call itself does
 /// not block and return immediately.
-impl Drop for ChannelHandle {
+impl Drop for DirectTcpIp {
     fn drop(&mut self) {
         let mut channel = self.0.lock().unwrap();
         channel.close = true;

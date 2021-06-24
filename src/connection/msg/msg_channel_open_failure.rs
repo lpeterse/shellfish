@@ -1,17 +1,17 @@
 use crate::transport::Message;
 use crate::util::codec::*;
-use super::super::channel::ChannelOpenFailure;
+use super::super::channel::OpenFailure;
 
 #[derive(Clone, Debug)]
-pub(crate) struct MsgChannelOpenFailure {
+pub(crate) struct MsgOpenFailure {
     pub recipient_channel: u32,
-    pub reason: ChannelOpenFailure,
+    pub reason: OpenFailure,
     pub description: String,
     pub language: String,
 }
 
-impl MsgChannelOpenFailure {
-    pub fn new(recipient_channel: u32, reason: ChannelOpenFailure) -> Self {
+impl MsgOpenFailure {
+    pub fn new(recipient_channel: u32, reason: OpenFailure) -> Self {
         Self {
             recipient_channel,
             reason,
@@ -21,11 +21,11 @@ impl MsgChannelOpenFailure {
     }
 }
 
-impl<'a> Message for MsgChannelOpenFailure {
+impl<'a> Message for MsgOpenFailure {
     const NUMBER: u8 = 92;
 }
 
-impl SshEncode for MsgChannelOpenFailure {
+impl SshEncode for MsgOpenFailure {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER as u8)?;
         e.push_u32be(self.recipient_channel)?;
@@ -35,12 +35,12 @@ impl SshEncode for MsgChannelOpenFailure {
     }
 }
 
-impl<'a> SshDecodeRef<'a> for MsgChannelOpenFailure {
+impl<'a> SshDecodeRef<'a> for MsgOpenFailure {
     fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(Self::NUMBER)?;
         Some(Self {
             recipient_channel: d.take_u32be()?,
-            reason: d.take_u32be().map(ChannelOpenFailure)?,
+            reason: d.take_u32be().map(OpenFailure)?,
             description: d.take_str_framed()?.into(),
             language: d.take_str_framed()?.into(),
         })
@@ -54,46 +54,46 @@ mod tests {
     #[test]
     fn test_debug_reason_01() {
         assert_eq!(
-            format!("{:?}", ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED),
-            "ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED"
+            format!("{:?}", OpenFailure::ADMINISTRATIVELY_PROHIBITED),
+            "OpenFailure::ADMINISTRATIVELY_PROHIBITED"
         );
         assert_eq!(
-            format!("{:?}", ChannelOpenFailure::OPEN_CONNECT_FAILED),
-            "ChannelOpenFailure::OPEN_CONNECT_FAILED"
+            format!("{:?}", OpenFailure::OPEN_CONNECT_FAILED),
+            "OpenFailure::OPEN_CONNECT_FAILED"
         );
         assert_eq!(
-            format!("{:?}", ChannelOpenFailure::UNKNOWN_CHANNEL_TYPE),
-            "ChannelOpenFailure::UNKNOWN_CHANNEL_TYPE"
+            format!("{:?}", OpenFailure::UNKNOWN_CHANNEL_TYPE),
+            "OpenFailure::UNKNOWN_CHANNEL_TYPE"
         );
         assert_eq!(
-            format!("{:?}", ChannelOpenFailure::RESOURCE_SHORTAGE),
-            "ChannelOpenFailure::RESOURCE_SHORTAGE"
+            format!("{:?}", OpenFailure::RESOURCE_SHORTAGE),
+            "OpenFailure::RESOURCE_SHORTAGE"
         );
         assert_eq!(
-            format!("{:?}", ChannelOpenFailure(5)),
-            "ChannelOpenFailure(5)"
+            format!("{:?}", OpenFailure(5)),
+            "OpenFailure(5)"
         );
     }
 
     #[test]
     fn test_debug_01() {
-        let msg = MsgChannelOpenFailure {
+        let msg = MsgOpenFailure {
             recipient_channel: 23,
-            reason: ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED,
+            reason: OpenFailure::ADMINISTRATIVELY_PROHIBITED,
             description: "desc".into(),
             language: "lang".into(),
         };
         assert_eq!(
-            "MsgChannelOpenFailure { recipient_channel: 23, reason: ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED, description: \"desc\", language: \"lang\" }",
+            "MsgOpenFailure { recipient_channel: 23, reason: OpenFailure::ADMINISTRATIVELY_PROHIBITED, description: \"desc\", language: \"lang\" }",
             format!("{:?}", msg)
         );
     }
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgChannelOpenFailure {
+        let msg = MsgOpenFailure {
             recipient_channel: 23,
-            reason: ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED,
+            reason: OpenFailure::ADMINISTRATIVELY_PROHIBITED,
             description: "desc".into(),
             language: "lang".into(),
         };
@@ -112,9 +112,9 @@ mod tests {
             92, 0, 0, 0, 23, 0, 0, 0, 1, 0, 0, 0, 4, 100, 101, 115, 99, 0, 0, 0, 4, 108, 97, 110,
             103,
         ];
-        let msg: MsgChannelOpenFailure = SshCodec::decode(&buf[..]).unwrap();
+        let msg: MsgOpenFailure = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.recipient_channel, 23);
-        assert_eq!(msg.reason, ChannelOpenFailure::ADMINISTRATIVELY_PROHIBITED);
+        assert_eq!(msg.reason, OpenFailure::ADMINISTRATIVELY_PROHIBITED);
         assert_eq!(msg.description, "desc");
         assert_eq!(msg.language, "lang");
     }

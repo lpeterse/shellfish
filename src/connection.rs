@@ -12,8 +12,11 @@ pub use self::config::ConnectionConfig;
 pub use self::error::ConnectionError;
 pub use self::handler::ConnectionHandler;
 
-use self::channel::Channel;
-use self::channel::ChannelOpenFailure;
+use self::channel::DirectTcpIp;
+use self::channel::DirectTcpIpParams;
+use self::channel::OpenFailure;
+use self::channel::Session;
+use self::error::ConnectionErrorWatch;
 use self::global::{Global, GlobalWantReply};
 use self::request::ConnectionRequest;
 use self::state::ConnectionState;
@@ -42,7 +45,7 @@ use tokio::sync::watch;
 pub struct Connection {
     creqs: mpsc::Sender<ConnectionRequest>,
     close: Arc<Mutex<oneshot::Receiver<()>>>,
-    error: watch::Receiver<Option<ConnectionError>>,
+    error: ConnectionErrorWatch,
 }
 
 impl Connection {
@@ -59,27 +62,37 @@ impl Connection {
         handle: F,
     ) -> Self {
         let (r1, r2) = mpsc::channel(1);
-        let (e1, e2) = watch::channel(None);
         let (c1, c2) = oneshot::channel();
+        let (e1, e2) = watch::channel(None);
         let self_ = Self {
             creqs: r1,
             close: Arc::new(Mutex::new(c2)),
-            error: e2,
+            error: e2.clone(),
         };
         let hb = handle(&self_);
-        let cs = ConnectionState::new(config, hb, transport, r2, c1, e1);
+        let cs = ConnectionState::new(config, hb, transport, r2, c1, e1, e2);
         drop(spawn(cs));
         self_
     }
 
-    /// Request a new channel on top of an established connection.
-    pub async fn open<C: Channel>(
-        &self,
-        params: C::Open,
-    ) -> Result<Result<C, ChannelOpenFailure>, ConnectionError> {
+    /// Open a new `session` channel.
+    pub async fn open_session(&self) -> Result<Result<Session, OpenFailure>, ConnectionError> {
         let (s, r) = oneshot::channel();
-        let req = ConnectionRequest::Open {
-            name: C::NAME,
+        let req = ConnectionRequest::OpenSession { reply: s };
+        self.creqs
+            .send(req)
+            .await
+            .map_err(|_| self.error_or_dropped())?;
+        r.await.map_err(|_| self.error_or_dropped())
+    }
+
+    /// Open a new `direct-tcpip` channel.
+    pub async fn open_direct_tcpip(
+        &self,
+        params: DirectTcpIpParams,
+    ) -> Result<Result<DirectTcpIp, OpenFailure>, ConnectionError> {
+        let (s, r) = oneshot::channel();
+        let req = ConnectionRequest::OpenDirectTcpIp {
             data: SshCodec::encode(&params).ok_or(TransportError::InvalidEncoding)?,
             reply: s,
         };
@@ -87,9 +100,7 @@ impl Connection {
             .send(req)
             .await
             .map_err(|_| self.error_or_dropped())?;
-        r.await
-            .map(|x| x.map(C::new))
-            .map_err(|_| self.error_or_dropped())
+        r.await.map_err(|_| self.error_or_dropped())
     }
 
     /// Perform a global request (without reply).
@@ -128,6 +139,28 @@ impl Connection {
         }
     }
 
+    /// Check whether the connection terminated with an error.
+    ///
+    /// This does not actively check whether the peer is still reachable nor does it guarantee
+    /// that subsequent operations on the connection would succeed.
+    pub fn check(&self) -> Result<(), ConnectionError> {
+        if let Some(e) = self.error.borrow().as_ref() {
+            Err(e.as_ref().clone())
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Check the connection by sending a global keep-alive request and awaiting its reply.
+    ///
+    /// Returns the error that terminated the connection in case the roundtrip does not succeed.
+    pub async fn check_with_keepalive(&self) -> Result<(), ConnectionError> {
+        // Ignore whether the peer actually accepts or rejects the request.
+        // Both alternatives imply a healthy connection.
+        let _ = self.request_want_reply::<global::KeepAlive>(&()).await?;
+        Ok(())
+    }
+
     /// Close the connection.
     ///
     /// This function is intentionally non-async and may be used in implemenations of [Drop].
@@ -138,26 +171,24 @@ impl Connection {
     /// disconnection process.
     ///
     /// Hint: Use [closed](Self::closed) in order to await actual disconnection.
-    pub fn close(&self) {
+    pub fn close(&mut self) {
         self.close.lock().unwrap().close();
     }
 
-    pub async fn closed(&mut self) -> ConnectionError {
+    /// Wait for the connection being closed (does not actively close it!).
+    pub async fn closed(&mut self) {
         loop {
-            if let Some(e) = self.error() {
-                return e;
+            if self.error.borrow().is_some() {
+                return;
             }
             if self.error.changed().await.is_err() {
-                return ConnectionError::Dropped;
+                return;
             }
         }
     }
 
-    /// Returns the error which caused the connection to die (if dead).
-    ///
-    /// Hint: Use `.await` on the connection itself in order to await this error.
-    pub fn error(&self) -> Option<ConnectionError> {
-        self.error.borrow().as_ref().cloned()
+    fn error(&self) -> Option<ConnectionError> {
+        self.error.borrow().as_deref().map(|x| x.clone())
     }
 
     fn error_or_dropped(&self) -> ConnectionError {

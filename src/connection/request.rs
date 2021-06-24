@@ -1,5 +1,6 @@
-use super::channel::ChannelHandle;
-use super::channel::ChannelOpenFailure;
+use super::channel::DirectTcpIp;
+use super::channel::OpenFailure;
+use super::channel::Session;
 use tokio::sync::oneshot;
 
 #[derive(Debug)]
@@ -9,9 +10,11 @@ pub enum ConnectionRequest {
         data: Vec<u8>,
         reply: Option<oneshot::Sender<Result<Vec<u8>, ()>>>,
     },
-    Open {
-        name: &'static str,
-        data: Vec<u8>,
-        reply: oneshot::Sender<Result<ChannelHandle, ChannelOpenFailure>>,
+    OpenSession {
+        reply: oneshot::Sender<Result<Session, OpenFailure>>,
+    },
+    OpenDirectTcpIp {
+        data: Vec<u8>, // FIXME
+        reply: oneshot::Sender<Result<DirectTcpIp, OpenFailure>>,
     },
 }

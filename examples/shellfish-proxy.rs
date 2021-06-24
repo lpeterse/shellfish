@@ -1,15 +1,15 @@
-use clap::{value_t_or_exit, App, Arg, SubCommand};
+use clap::{value_t_or_exit, App, AppSettings, Arg, SubCommand};
 use shellfish::client::*;
-use shellfish::connection::*;
 use shellfish::connection::channel::*;
+use shellfish::connection::*;
 use shellfish::util::socks5;
 use std::error::Error;
 use std::net::SocketAddr;
 use tokio::net::TcpListener;
 use tokio::net::TcpStream;
 use tokio::spawn;
-use tokio::time::sleep;
 use tokio::sync::watch;
+use tokio::time::sleep;
 
 fn main() -> Result<(), Box<dyn Error>> {
     tokio::runtime::Runtime::new()?.block_on(main_async())
@@ -18,14 +18,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 async fn main_async() -> Result<(), Box<dyn Error>> {
     // Parse command line arguments
     let config = App::new(env!("CARGO_PKG_NAME"))
+        .setting(AppSettings::ArgRequiredElseHelp)
         .version(env!("CARGO_PKG_VERSION"))
         .author(env!("CARGO_PKG_AUTHORS"))
         .arg(
-            Arg::with_name("log")
-                .help("Log level")
-                .long("log")
-                .takes_value(true)
-                .default_value("info"),
+            Arg::with_name("verbosity")
+                .help("Verbosity")
+                .short("v")
+                .multiple(true),
         )
         .subcommand(
             SubCommand::with_name("socks5")
@@ -68,8 +68,17 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
         .get_matches();
 
     // Setup logger
-    let filters = value_t_or_exit!(config, "log", String);
-    env_logger::Builder::new().parse_filters(&filters).init();
+    let log_level = match config.occurrences_of("verbosity") {
+        0 => log::LevelFilter::Warn,
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
+    println!("{:?}", log_level);
+    env_logger::Builder::new()
+        .parse_default_env()
+        .filter_level(log_level)
+        .init();
 
     match config.subcommand() {
         ("socks5", Some(config)) => {
@@ -80,6 +89,7 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
 
             let pool = ConnectionPool::new(Client::default(), &user, &host, port);
             let listener: TcpListener = TcpListener::bind(&bind).await?;
+            log::info!("Started listening on {}", bind);
 
             loop {
                 let (sock, addr) = listener.accept().await?;
@@ -106,14 +116,13 @@ async fn serve(sock: TcpStream, addr: SocketAddr, conn: Connection) -> Result<()
     let dp = cr.port();
     let sa = addr.ip();
     let sp = addr.port();
-    let rq = DirectTcpIpOpen {
+    let rq = DirectTcpIpParams {
         dst_host: dh,
         dst_port: dp,
         src_addr: sa,
         src_port: sp,
     };
-    let chan = conn.open::<DirectTcpIp>(rq).await??;
-    log::error!("CHANNEL OPENNNNNNN");
+    let chan = conn.open_direct_tcpip(rq).await??;
     let sock = cr.accept(addr).await?;
     chan.interconnect(sock).await?;
     Ok(())
@@ -145,7 +154,8 @@ impl ConnectionPool {
                         if s.send(Some(c.clone())).is_err() {
                             return;
                         }
-                        let e = c.closed().await;
+                        c.closed().await;
+                        let e = c.check().unwrap_err();
                         log::info!("Connection to {}@{}:{} lost: {}", u, h, p, e);
                     }
                 };

@@ -11,6 +11,7 @@ pub(crate) mod keys;
 pub(crate) mod msg;
 pub(crate) mod session;
 pub(crate) mod transceiver;
+pub(crate) mod test;
 
 pub(crate) use self::crypto::*;
 pub(crate) use self::disconnect::*;
@@ -22,6 +23,7 @@ pub(crate) use self::session::*;
 
 pub use self::config::TransportConfig;
 pub use self::default::DefaultTransport;
+pub use self::test::TestTransport;
 pub use self::error::TransportError;
 
 use crate::ready;

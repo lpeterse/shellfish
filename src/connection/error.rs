@@ -1,14 +1,18 @@
 use crate::transport::TransportError;
-use super::channel::ChannelOpenFailure;
+use super::channel::OpenFailure;
+use tokio::sync::watch;
+use std::sync::Arc;
+
+pub type ConnectionErrorWatch = watch::Receiver<Option<Arc<ConnectionError>>>;
 
 #[derive(Clone, Debug)]
 pub enum ConnectionError {
     IoError(std::sync::Arc<std::io::Error>),
     TransportError(TransportError),
-    ChannelOpenFailure(ChannelOpenFailure),
+    OpenFailure(OpenFailure),
     ChannelOpenUnexpected,
     ChannelOpenConfirmationUnexpected,
-    ChannelOpenFailureUnexpected,
+    OpenFailureUnexpected,
     ChannelWindowAdjustUnexpected,
     ChannelWindowAdjustOverflow,
     ChannelIdInvalid,
@@ -17,6 +21,7 @@ pub enum ConnectionError {
     ChannelCloseUnexpected,
     ChannelExtendedDataUnexpected,
     ChannelRequestFailure,
+    ChannelRequestUnexpected,
     ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
     ChannelWindowSizeExceeded,
@@ -24,6 +29,7 @@ pub enum ConnectionError {
     ChannelMaxPacketSizeExceeded,
     ChannelBufferSizeExceeded,
     ChannelTypeMismatch,
+    ChannelPtyRejected,
     GlobalReplyUnexpected,
     ResourceExhaustion,
     Dropped,
@@ -41,9 +47,9 @@ impl From<TransportError> for ConnectionError {
     }
 }
 
-impl From<ChannelOpenFailure> for ConnectionError {
-    fn from(e: ChannelOpenFailure) -> Self {
-        Self::ChannelOpenFailure(e)
+impl From<OpenFailure> for ConnectionError {
+    fn from(e: OpenFailure) -> Self {
+        Self::OpenFailure(e)
     }
 }
 
