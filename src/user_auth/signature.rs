@@ -2,8 +2,8 @@ use super::method::*;
 use super::msg::*;
 use crate::identity::*;
 use crate::transport::Message;
-use crate::transport::Secret;
 use crate::util::codec::*;
+use crate::util::secret::*;
 
 /// string    session identifier
 /// byte      SSH_MSG_USERAUTH_REQUEST
@@ -32,4 +32,3 @@ impl<'a> SshEncode for SignatureData<'a> {
         e.push(self.identity)
     }
 }
-

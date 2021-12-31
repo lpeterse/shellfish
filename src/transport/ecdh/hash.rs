@@ -1,5 +1,5 @@
 use super::super::msg::MsgKexInit;
-use super::super::secret::Secret;
+use crate::util::secret::Secret;
 use crate::identity::*;
 use crate::transport::id::*;
 use crate::util::codec::*;

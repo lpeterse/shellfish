@@ -9,7 +9,6 @@ pub(crate) mod id;
 pub(crate) mod kex;
 pub(crate) mod keys;
 pub(crate) mod msg;
-pub(crate) mod secret;
 pub(crate) mod transceiver;
 
 pub(crate) use self::crypto::*;
@@ -18,7 +17,6 @@ pub(crate) use self::ecdh::*;
 pub(crate) use self::id::*;
 pub(crate) use self::kex::*;
 pub(crate) use self::msg::*;
-pub(crate) use self::secret::*;
 
 pub use self::config::TransportConfig;
 pub use self::default::DefaultTransport;
@@ -29,6 +27,7 @@ use crate::host::*;
 use crate::ready;
 use crate::util::codec::*;
 use crate::util::poll_fn;
+use crate::util::secret::Secret;
 
 use std::convert::From;
 use std::fmt::Debug;

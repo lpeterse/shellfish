@@ -3,7 +3,7 @@ mod x25519;
 
 pub use self::hash::*;
 pub use self::x25519::*;
-use super::secret::Secret;
+use crate::util::secret::Secret;
 
 pub trait EcdhAlgorithm {
     type PublicKey;

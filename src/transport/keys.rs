@@ -1,4 +1,4 @@
-use super::secret::Secret;
+use crate::util::secret::Secret;
 use crate::util::codec::*;
 use sha2::{Digest, Sha256};
 use zeroize::*;
