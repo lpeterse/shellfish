@@ -62,7 +62,7 @@ impl UserAuth {
             service_name: service,
             identity: &identity,
         };
-        let data = SshCodec::encode(&data).ok_or(TransportError::InvalidEncoding)?;
+        let data = SshCodec::encode(&data)?;
         let signature = agent.signature(&identity, &data, 0).await?;
         if signature.is_none() {
             return Ok(false);

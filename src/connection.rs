@@ -1,26 +1,24 @@
+mod channel;
 mod config;
 mod error;
+mod global;
 mod handler;
 mod msg;
 mod request;
 mod state;
 
-pub mod channel;
-pub mod global;
-
+pub use self::channel::direct_tcpip::{DirectTcpIp, DirectTcpIpParams, DirectTcpIpRequest};
+pub use self::channel::{OpenFailure, RequestFailure};
 pub use self::config::ConnectionConfig;
 pub use self::error::ConnectionError;
+pub use self::global::{Global, GlobalRequest, GlobalRequestWantReply, GlobalWantReply};
 pub use self::handler::ConnectionHandler;
+pub use self::channel::session::{SessionClient, Process};
 
-use self::channel::DirectTcpIp;
-use self::channel::DirectTcpIpParams;
-use self::channel::OpenFailure;
-use self::channel::Session;
 use self::error::ConnectionErrorWatch;
-use self::global::{Global, GlobalWantReply};
-use self::request::ConnectionRequest;
+use self::request::Request;
 use self::state::ConnectionState;
-use crate::transport::{GenericTransport, TransportError};
+use crate::transport::GenericTransport;
 use crate::util::codec::*;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -39,13 +37,13 @@ use tokio::sync::watch;
 /// [Connection] implements [Clone]: All clones are equal and cloning is quite cheap. Dropping the
 /// last clone will close the connection and free all resources. It will also
 /// terminate all dependant channels (shells and forwardings etc). Be aware that the connection
-/// is not closed on drop unless there are no more clones; [Connection::close] it explicitly
+/// is not closed on drop unless there are no more clones; [Close](Connection::close) it explicitly
 /// if you need to.
 #[derive(Clone, Debug)]
 pub struct Connection {
-    creqs: mpsc::Sender<ConnectionRequest>,
-    close: Arc<Mutex<oneshot::Receiver<()>>>,
-    error: ConnectionErrorWatch,
+    creqs_tx: mpsc::Sender<Request>,
+    close_rx: Arc<Mutex<oneshot::Receiver<()>>>,
+    error_rx: ConnectionErrorWatch,
 }
 
 impl Connection {
@@ -65,9 +63,9 @@ impl Connection {
         let (c1, c2) = oneshot::channel();
         let (e1, e2) = watch::channel(None);
         let self_ = Self {
-            creqs: r1,
-            close: Arc::new(Mutex::new(c2)),
-            error: e2.clone(),
+            creqs_tx: r1,
+            close_rx: Arc::new(Mutex::new(c2)),
+            error_rx: e2.clone(),
         };
         let hb = handle(&self_);
         let cs = ConnectionState::new(config, hb, transport, r2, c1, e1, e2);
@@ -76,41 +74,36 @@ impl Connection {
     }
 
     /// Open a new `session` channel.
-    pub async fn open_session(&self) -> Result<Result<Session, OpenFailure>, ConnectionError> {
-        let (s, r) = oneshot::channel();
-        let req = ConnectionRequest::OpenSession { reply: s };
-        self.creqs
-            .send(req)
-            .await
-            .map_err(|_| self.error_or_dropped())?;
-        r.await.map_err(|_| self.error_or_dropped())
+    pub async fn open_session(
+        &self,
+    ) -> Result<Result<SessionClient, OpenFailure>, ConnectionError> {
+        let (req, res) = Request::open_session();
+        let e1 = |_| self.error_or_dropped();
+        let e2 = |_| self.error_or_dropped();
+        self.creqs_tx.send(req).await.map_err(e1)?;
+        res.await.map_err(e2)
     }
 
     /// Open a new `direct-tcpip` channel.
     pub async fn open_direct_tcpip(
         &self,
-        params: DirectTcpIpParams,
+        params: &DirectTcpIpParams,
     ) -> Result<Result<DirectTcpIp, OpenFailure>, ConnectionError> {
-        let (s, r) = oneshot::channel();
-        let req = ConnectionRequest::OpenDirectTcpIp {
-            data: SshCodec::encode(&params).ok_or(TransportError::InvalidEncoding)?,
-            reply: s,
-        };
-        self.creqs
-            .send(req)
-            .await
-            .map_err(|_| self.error_or_dropped())?;
-        r.await.map_err(|_| self.error_or_dropped())
+        let (req, res) = Request::open_direct_tcpip(params.clone());
+        let e1 = |_| self.error_or_dropped();
+        let e2 = |_| self.error_or_dropped();
+        self.creqs_tx.send(req).await.map_err(e1)?;
+        res.await.map_err(e2)
     }
 
     /// Perform a global request (without reply).
     pub async fn request<T: Global>(&self, data: &T::RequestData) -> Result<(), ConnectionError> {
-        let request = ConnectionRequest::Global {
+        let request = Request::Global {
             name: T::NAME,
-            data: SshCodec::encode(data).ok_or(TransportError::InvalidEncoding)?,
+            data: SshCodec::encode(data)?,
             reply: None,
         };
-        self.creqs
+        self.creqs_tx
             .send(request)
             .await
             .map_err(|_| self.error_or_dropped())
@@ -122,20 +115,18 @@ impl Connection {
         data: &T::RequestData,
     ) -> Result<Result<T::ResponseData, ()>, ConnectionError> {
         let (reply, response) = oneshot::channel();
-        let request = ConnectionRequest::Global {
+        let request = Request::Global {
             name: T::NAME,
-            data: SshCodec::encode(data).ok_or(TransportError::InvalidEncoding)?,
+            data: SshCodec::encode(data)?,
             reply: Some(reply),
         };
-        self.creqs
+        self.creqs_tx
             .send(request)
             .await
             .map_err(|_| self.error_or_dropped())?;
         match response.await.map_err(|_| self.error_or_dropped())? {
             Err(()) => Ok(Err(())),
-            Ok(vec) => Ok(Ok(
-                SshCodec::decode(&vec).ok_or(TransportError::InvalidEncoding)?
-            )),
+            Ok(vec) => Ok(Ok(SshCodec::decode(&vec)?)),
         }
     }
 
@@ -144,7 +135,7 @@ impl Connection {
     /// This does not actively check whether the peer is still reachable nor does it guarantee
     /// that subsequent operations on the connection would succeed.
     pub fn check(&self) -> Result<(), ConnectionError> {
-        if let Some(e) = self.error.borrow().as_ref() {
+        if let Some(e) = self.error_rx.borrow().as_ref() {
             Err(e.as_ref().clone())
         } else {
             Ok(())
@@ -172,23 +163,23 @@ impl Connection {
     ///
     /// Hint: Use [closed](Self::closed) in order to await actual disconnection.
     pub fn close(&mut self) {
-        self.close.lock().unwrap().close();
+        self.close_rx.lock().unwrap().close();
     }
 
     /// Wait for the connection being closed (does not actively close it!).
     pub async fn closed(&mut self) {
         loop {
-            if self.error.borrow().is_some() {
+            if self.error_rx.borrow().is_some() {
                 return;
             }
-            if self.error.changed().await.is_err() {
+            if self.error_rx.changed().await.is_err() {
                 return;
             }
         }
     }
 
     fn error(&self) -> Option<ConnectionError> {
-        self.error.borrow().as_deref().map(|x| x.clone())
+        self.error_rx.borrow().as_deref().map(|x| x.clone())
     }
 
     fn error_or_dropped(&self) -> ConnectionError {

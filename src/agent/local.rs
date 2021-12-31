@@ -1,4 +1,3 @@
-mod error;
 mod frame;
 mod msg_failure;
 mod msg_identities_answer;

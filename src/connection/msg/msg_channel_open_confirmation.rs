@@ -1,6 +1,7 @@
 use crate::transport::Message;
 use crate::util::codec::*;
 
+#[derive(Debug)]
 pub(crate) struct MsgChannelOpenConfirmation<'a> {
     pub recipient_channel: u32,
     pub sender_channel: u32,

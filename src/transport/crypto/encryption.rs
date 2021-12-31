@@ -29,8 +29,16 @@ pub struct CipherConfig {
     pub ke: KeyStream,
 }
 
-pub type EncryptionConfig = CipherConfig;
-pub type DecryptionConfig = CipherConfig;
+impl CipherConfig {
+    pub fn new(
+        ea: &'static str,
+        ca: &'static str,
+        ma: Option<&'static str>,
+        ke: KeyStream,
+    ) -> Self {
+        Self { ea, ca, ma, ke }
+    }
+}
 
 #[derive(Debug)]
 pub enum CipherContext {
@@ -43,7 +51,7 @@ impl CipherContext {
         Self::Plain(PlainContext::new())
     }
 
-    pub fn update(&mut self, mut config: CipherConfig) -> Option<()> {
+    pub fn update(&mut self, mut config: Box<CipherConfig>) -> Result<(), TransportError> {
         match (config.ea, config.ca, config.ma) {
             (Chacha20Poly1305AtOpensshDotCom::NAME, NoCompression::NAME, None) => {
                 match self {
@@ -55,9 +63,9 @@ impl CipherContext {
                     }
                 }
             }
-            _ => return None,
+            _ => return Err(TransportError::NoCommonEncryptionAlgorithm),
         }
-        Some(())
+        Ok(())
     }
 
     pub fn encrypt(&self, pc: u64, buf: &mut [u8]) -> Result<(), TransportError> {

@@ -130,12 +130,11 @@ mod tests {
 
     #[test]
     fn new() {
-        let dir = KeyDirection::ClientToServer;
         let algo = KeyAlgorithm::Sha256;
-        let k = [0u8; 32];
-        let h = SessionId::new([0u8; 32]);
-        let sid = SessionId::new([0u8; 32]);
-        let ks = KeyStream::new(dir, algo, k, h, sid);
+        let k = Secret::new(&[0u8; 32]);
+        let h = Secret::new(&[0u8; 32]);
+        let sid = Secret::new(&[0u8; 32]);
+        let ks = KeyStream::new_c2s(algo, &k, &h, &sid);
         let ctx = Chacha20Poly1305Context::new(&ks);
 
         assert_eq!(
@@ -157,20 +156,18 @@ mod tests {
     #[test]
     fn update() {
         // Initial context
-        let dir = KeyDirection::ClientToServer;
         let algo = KeyAlgorithm::Sha256;
-        let k = [0u8; 32];
-        let h = SessionId::new([0u8; 32]);
-        let sid = SessionId::new([0u8; 32]);
-        let ks = KeyStream::new(dir, algo, k, h, sid);
+        let k = Secret::new(&[0u8; 32]);
+        let h = Secret::new(&[0u8; 32]);
+        let sid = Secret::new(&[0u8; 32]);
+        let ks = KeyStream::new_c2s(algo, &k, &h, &sid);
         let mut ctx = Chacha20Poly1305Context::new(&ks);
         // Updated context
-        let dir = KeyDirection::ClientToServer;
         let algo = KeyAlgorithm::Sha256;
-        let k = [1u8; 32]; // <- sic!
-        let h = SessionId::new([0u8; 32]);
-        let sid = SessionId::new([0u8; 32]);
-        let ks = KeyStream::new(dir, algo, k, h, sid);
+        let k = Secret::new(&[1u8; 32]); // <- sic!
+        let h = Secret::new(&[0u8; 32]);
+        let sid = Secret::new(&[0u8; 32]);
+        let ks = KeyStream::new_c2s(algo, &k, &h, &sid);
 
         ctx.update(&ks);
 

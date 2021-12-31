@@ -78,8 +78,8 @@ impl SshEd25519Cert {
     }
 
     pub fn is_valid_ca_signature(&self) -> bool {
-        if let Some(size) = SshCodec::size(&self.signature) {
-            if let Some(data) = SshCodec::encode(self) {
+        if let Ok(size) = SshCodec::size(&self.signature) {
+            if let Ok(data) = SshCodec::encode(self) {
                 if let Some(data) = data.get(..data.len() - size) {
                     return self.signature.verify(&self.authority, data).is_ok();
                 }

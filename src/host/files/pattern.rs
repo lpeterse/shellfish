@@ -1,6 +1,5 @@
 use crate::util::check;
 use crate::util::glob::Glob;
-use hmac::crypto_mac::NewMac;
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
 
@@ -34,7 +33,7 @@ impl<'a> KnownHostsPattern<'a> {
             let mlen = base64::decode_config_slice(mac, base64::STANDARD, &mut m).ok()?;
             let mut hmac = Hmac::<Sha1>::new_from_slice(k.get(..klen)?).ok()?;
             hmac.update(name.as_ref());
-            hmac.verify(&m[..mlen]).ok()
+            hmac.verify_slice(&m[..mlen]).ok()
         } else {
             None
         }

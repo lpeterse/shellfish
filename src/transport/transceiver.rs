@@ -7,8 +7,8 @@ use crate::ready;
 use crate::util::buffer::Buffer;
 use crate::util::check;
 use crate::util::codec::*;
-use crate::util::socket::Socket;
 use crate::util::poll_fn;
+use crate::util::socket::Socket;
 use std::convert::TryFrom;
 use std::io::{Error, ErrorKind};
 use std::pin::Pin;
@@ -129,10 +129,25 @@ impl<S: Socket> Transceiver<S> {
         Poll::Ready(Ok(msg))
     }
 
+    /// Get the next message in the rx buffer (if any).
+    ///
+    /// This does not poll the socket! This may only be used to re-gain a reference on the slice
+    /// previously returned by [Self::rx_peek] (necessary if ownership cannot be maintained).
+    pub fn rx_next(&mut self) -> Option<&[u8]> {
+        check(self.rx_paclen > 0)?;
+        check(self.rx_msglen > 0)?;
+
+        let msg = &self.rx_buffer.as_ref()[5..self.rx_msglen];
+        Some(msg)
+    }
+
     /// Consume and remove a message from the rx buffer.
     ///
     /// Must be called exactly once for each processed inbound message.
     pub fn rx_consume(&mut self) -> Result<(), TransportError> {
+        assert!(self.rx_paclen > 0);
+        assert!(self.rx_msglen > 0);
+
         self.rx_packets += 1;
         self.rx_bytes += self.rx_paclen as u64;
         self.rx_buffer.consume(self.rx_paclen);
@@ -182,7 +197,7 @@ impl<S: Socket> Transceiver<S> {
         // Remember the buffer as allocated by assigning `tx_paclen`
         self.tx_paclen = buflen;
         // Write packet length and number of padding bytes
-        let e = || TransportError::InvalidEncoding;
+        let e = || SshCodecError::EncodingFailed;
         let mut enc = RefEncoder::new(buffer);
         enc.push_usize(paclen).ok_or_else(e)?;
         enc.push_u8(padlen as u8).ok_or_else(e)?;
@@ -218,6 +233,7 @@ impl<S: Socket> Transceiver<S> {
     /// Parts of data may have been transmitted when this functions returns `Pending`.
     pub fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         while self.tx_buffer.len() > 0 {
+            log::debug!("Flushing {} bytes", self.tx_buffer.len());
             let buf = self.tx_buffer.as_ref();
             let written = ready!(AsyncWrite::poll_write(Pin::new(&mut self.socket), cx, &buf))?;
             self.tx_buffer.consume(written);
@@ -227,7 +243,7 @@ impl<S: Socket> Transceiver<S> {
 
     /// Send the local identification string.
     pub async fn tx_id(&mut self, id: &Identification<&'static str>) -> Result<(), TransportError> {
-        let data = SshCodec::encode(&CrLf(id)).ok_or(TransportError::InvalidEncoding)?;
+        let data = SshCodec::encode(&CrLf(id))?;
         self.socket.write_all(data.as_ref()).await?;
         self.socket.flush().await?;
         Ok(())
@@ -251,7 +267,7 @@ impl<S: Socket> Transceiver<S> {
             match buf.get(len - 1) {
                 // If slice has line-terminator and starts with SSH-* it must be a version string
                 Some(b'\n') if buf.starts_with(Identification::<String>::PREFIX) => {
-                    let id: CrLf<_> = SshCodec::decode(&buf[..len]).ok_or(ERR)?;
+                    let id: CrLf<_> = SshCodec::decode(&buf[..len]).map_err(|_| ERR)?;
                     self.rx_buffer.consume(len);
                     return Ok(id.0);
                 }

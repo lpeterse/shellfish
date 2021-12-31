@@ -34,13 +34,13 @@ impl From<Identification<&'static str>> for Identification {
     }
 }
 
-impl<T: AsRef<[u8]>> SshEncode for Identification<T> {
+impl<T: AsRef<str>> SshEncode for Identification<T> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_bytes(&Self::PREFIX)?;
-        e.push_bytes(&self.version.as_ref())?;
+        e.push_bytes(&self.version.as_ref().as_bytes())?;
         if !self.comment.as_ref().is_empty() {
             e.push_u8(' ' as u8)?;
-            e.push_bytes(&self.comment.as_ref())?;
+            e.push_bytes(&self.comment.as_ref().as_bytes())?;
         }
         Some(())
     }
@@ -108,7 +108,10 @@ mod tests {
     #[test]
     fn test_encode_01() {
         let id: Identification<String> = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(b"SSH-2.0-ssh_0.1.0 ultra", &SshCodec::encode(&id).unwrap()[..]);
+        assert_eq!(
+            b"SSH-2.0-ssh_0.1.0 ultra",
+            &SshCodec::encode(&id).unwrap()[..]
+        );
     }
 
     /// Test the branch where the input is longer than MAX_LEN.
@@ -119,21 +122,18 @@ mod tests {
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-        assert_eq!(
-            None,
-            SshCodec::decode::<Identification<String>>(input.as_ref())
-        );
+        assert!(SshCodec::decode::<Identification<String>>(input.as_ref()).is_err());
     }
 
     #[test]
     fn test_decode_02() {
         let id = Identification::new("ssh_0.1.0".into(), "".into());
-        assert_eq!(Some(id), SshCodec::decode(b"SSH-2.0-ssh_0.1.0"));
+        assert_eq!(Ok(id), SshCodec::decode(b"SSH-2.0-ssh_0.1.0"));
     }
 
     #[test]
     fn test_decode_03() {
         let id = Identification::new("ssh_0.1.0".into(), "ultra".into());
-        assert_eq!(Some(id), SshCodec::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
+        assert_eq!(Ok(id), SshCodec::decode(b"SSH-2.0-ssh_0.1.0 ultra"));
     }
 }

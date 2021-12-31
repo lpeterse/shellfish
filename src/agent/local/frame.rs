@@ -4,7 +4,7 @@ pub struct Frame<'a, T>(pub &'a T);
 
 impl<'a, T: SshEncode> SshEncode for Frame<'a, T> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_usize(SshCodec::size(self.0)?)?;
+        e.push_usize(SshCodec::size(self.0).ok()?)?;
         e.push(self.0)
     }
 }

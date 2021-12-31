@@ -1,6 +1,7 @@
 use super::super::config::TransportConfig;
 use super::super::cookie::KexCookie;
 use super::super::crypto::*;
+use super::super::error::TransportError;
 use super::super::kex::intersection;
 use super::Message;
 use crate::identity::*;
@@ -60,6 +61,24 @@ impl MsgKexInit<&'static str> {
         let ea = intersection(&config.encryption_algorithms, &ENCRYPTION_ALGORITHMS[..]);
         let ca = intersection(&config.compression_algorithms, &COMPRESSION_ALGORITHMS[..]);
         MsgKexInit::new(cookie, ka, ha, ea, ma, ca)
+    }
+
+    /// Restrict host key algorithms to those fulfilling the given predicate.
+    pub fn restrict_hka<F: FnMut(&str) -> bool>(
+        mut self,
+        mut f: F,
+    ) -> Result<Self, TransportError> {
+        self.server_host_key_algorithms = self
+            .server_host_key_algorithms
+            .iter()
+            .map(|a| *a)
+            .filter(|a| f(*a))
+            .collect();
+        if self.server_host_key_algorithms.is_empty() {
+            Err(TransportError::NoCommonServerHostKeyAlgorithm)
+        } else {
+            Ok(self)
+        }
     }
 }
 

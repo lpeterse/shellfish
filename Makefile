@@ -22,7 +22,10 @@ deps:
 
 example:
 	cargo build --release --target "x86_64-unknown-linux-musl" --example shellfish-proxy
-	RUST_LOG=debug ./target/x86_64-unknown-linux-musl/release/examples/shellfish-proxy socks5 localhost
+	./target/x86_64-unknown-linux-musl/release/examples/shellfish-proxy -v -v socks5 localhost
 
 example-dev:
-	RUST_LOG=debug cargo run --example shellfish-proxy -- -v socks5 localhost
+	cargo run --release --example shellfish-proxy -- -v -v socks5 localhost
+
+example-server:
+	RUST_LOG=debug cargo run --release --example shellfish-server

@@ -7,7 +7,6 @@ pub use self::error::*;
 use crate::connection::*;
 use crate::transport::*;
 use crate::user_auth::*;
-use crate::util::role::Role;
 use std::sync::Arc;
 use tokio::net::TcpStream;
 
@@ -36,9 +35,7 @@ impl Client {
 
     /// Create a new connection to the given host.
     ///
-    /// The user name and authentication methods are contained in the configuration and set to
-    /// sensible defaults. By default, the user name will be extracted from the environment and
-    /// a running `ssh-agent` is expected for key or certificate authentication (`SSH_AUTH_SOCK`
+    /// A running `ssh-agent` is expected for key or certificate authentication (`SSH_AUTH_SOCK`
     /// environment variable).
     pub async fn connect<F: FnOnce(&Connection) -> Box<dyn ConnectionHandler>>(
         &self,
@@ -69,5 +66,3 @@ impl Default for Client {
         }
     }
 }
-
-impl Role for Client {}

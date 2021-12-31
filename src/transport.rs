@@ -9,9 +9,8 @@ pub(crate) mod id;
 pub(crate) mod kex;
 pub(crate) mod keys;
 pub(crate) mod msg;
-pub(crate) mod session;
+pub(crate) mod secret;
 pub(crate) mod transceiver;
-pub(crate) mod test;
 
 pub(crate) use self::crypto::*;
 pub(crate) use self::disconnect::*;
@@ -19,16 +18,15 @@ pub(crate) use self::ecdh::*;
 pub(crate) use self::id::*;
 pub(crate) use self::kex::*;
 pub(crate) use self::msg::*;
-pub(crate) use self::session::*;
+pub(crate) use self::secret::*;
 
 pub use self::config::TransportConfig;
 pub use self::default::DefaultTransport;
-pub use self::test::TestTransport;
 pub use self::error::TransportError;
 
-use crate::ready;
 use crate::agent::*;
 use crate::host::*;
+use crate::ready;
 use crate::util::codec::*;
 use crate::util::poll_fn;
 
@@ -44,22 +42,27 @@ pub trait Transport: Debug + Send + Unpin + 'static {
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if no message is available for now.
     fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>>;
-    /// Consumed the current rx buffer (only after `rx_peek`).
+
+    /// Consume the current rx buffer (only after `rx_peek`).
     ///
     /// The message shall have been decoded and processed before being cosumed.
     fn rx_consume(&mut self) -> Result<(), TransportError>;
+
     /// Try to allocate buffer space for the next message to send.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if the output buffer is too full and must be flushed first.
     fn tx_alloc(&mut self, cx: &mut Context, len: usize)
         -> Poll<Result<&mut [u8], TransportError>>;
+
     /// Commits the current tx buffer as ready for sending (only after `tx_alloc`).
     ///
     /// A message shall have been written to the tx buffer.
     fn tx_commit(&mut self) -> Result<(), TransportError>;
+
     /// Try to flush all pending operations and output buffers.
     fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>>;
+
     /// Try to send MSG_DISCONNECT and swallow all errors.
     ///
     /// Message delivery may silently fail on errors or if output buffer is full.
@@ -68,11 +71,12 @@ pub trait Transport: Debug + Send + Unpin + 'static {
         cx: &mut Context,
         reason: DisconnectReason,
     ) -> Poll<Result<(), TransportError>>;
+
     /// Return the connection's session id.
     ///
     /// The session id is a result of the initial key exchange. It is static for the whole
     /// lifetime of the connection.
-    fn session_id(&self) -> Result<&SessionId, TransportError>;
+    fn session_id(&self) -> Result<&Secret, TransportError>;
 }
 
 /// A box wrapper around all types that implement [Transport] with extra async methods.
@@ -96,6 +100,7 @@ impl GenericTransport {
     pub fn from<T: Transport>(transport: T) -> Self {
         Self(Box::new(transport))
     }
+
     /// Send a message.
     ///
     /// You may only send non-transport message or the behavior is undefined.
@@ -104,14 +109,15 @@ impl GenericTransport {
     /// queued messages to be transmitted (but use it wisely).
     pub async fn send<M: SshEncode>(&mut self, msg: &M) -> Result<(), TransportError> {
         poll_fn(|cx| {
-            let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
+            let size = SshCodec::size(msg)?;
             let buf = ready!(self.tx_alloc(cx, size))?;
-            SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
+            SshCodec::encode_into(msg, buf)?;
             self.tx_commit()?;
             Poll::Ready(Ok(()))
         })
         .await
     }
+
     /// Receive a message.
     ///
     /// You will only receive non-transport messages (others are dispatched internally).
@@ -119,16 +125,17 @@ impl GenericTransport {
     /// occurs.
     pub async fn receive<M: SshDecode>(&mut self) -> Result<M, TransportError> {
         poll_fn(|cx| {
-            let rx = match self.rx_peek(cx)? {
-                Poll::Ready(Some(rx)) => rx,
-                _ => return Poll::Pending,
-            };
-            let msg = SshCodec::decode(rx).ok_or(TransportError::InvalidEncoding)?;
-            self.rx_consume()?;
-            Poll::Ready(Ok(msg))
+            if let Some(buf) = ready!(self.rx_peek(cx))? {
+                let msg = SshCodec::decode(buf)?;
+                self.rx_consume()?;
+                Poll::Ready(Ok(msg))
+            } else {
+                Poll::Pending
+            }
         })
         .await
     }
+
     /// Flush all output buffers.
     ///
     /// When the function returns without an error it is guaranteed that all messages that have
@@ -155,10 +162,10 @@ impl GenericTransport {
     pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
         let msg = MsgServiceRequest(service_name);
         self.send(&msg).await?;
-        log::debug!("Sent MSG_SERVICE_REQUEST");
+        log::debug!("Tx MSG_SERVICE_REQUEST");
         self.flush().await?;
         self.receive::<MsgServiceAccept>().await?;
-        log::debug!("Received MSG_SERVICE_ACCEPT");
+        log::debug!("Rx MSG_SERVICE_ACCEPT");
         Ok(self)
     }
 
@@ -167,11 +174,18 @@ impl GenericTransport {
         cx: &mut Context,
         msg: &M,
     ) -> Poll<Result<(), TransportError>> {
-        let size = SshCodec::size(msg).ok_or(TransportError::InvalidEncoding)?;
+        let size = SshCodec::size(msg)?;
         let buf = ready!(self.0.tx_alloc(cx, size))?;
-        SshCodec::encode_into(msg, buf).ok_or(TransportError::InvalidEncoding)?;
+        SshCodec::encode_into(msg, buf)?;
         self.0.tx_commit()?;
         Poll::Ready(Ok(()))
+    }
+
+    pub fn poll_send_unimplemented(
+        &mut self,
+        _cx: &mut Context,
+    ) -> Poll<Result<(), TransportError>> {
+        panic!("FIXME")
     }
 }
 
@@ -180,10 +194,12 @@ impl Transport for GenericTransport {
     fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
         self.0.rx_peek(cx)
     }
+
     #[inline]
     fn rx_consume(&mut self) -> Result<(), TransportError> {
         self.0.rx_consume()
     }
+
     #[inline]
     fn tx_alloc(
         &mut self,
@@ -192,14 +208,17 @@ impl Transport for GenericTransport {
     ) -> Poll<Result<&mut [u8], TransportError>> {
         self.0.tx_alloc(cx, len)
     }
+
     #[inline]
     fn tx_commit(&mut self) -> Result<(), TransportError> {
         self.0.tx_commit()
     }
+
     #[inline]
     fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         self.0.tx_flush(cx)
     }
+
     #[inline]
     fn tx_disconnect(
         &mut self,
@@ -208,8 +227,9 @@ impl Transport for GenericTransport {
     ) -> Poll<Result<(), TransportError>> {
         self.0.tx_disconnect(cx, reason)
     }
+
     #[inline]
-    fn session_id(&self) -> Result<&SessionId, TransportError> {
+    fn session_id(&self) -> Result<&Secret, TransportError> {
         self.0.session_id()
     }
 }

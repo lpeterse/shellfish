@@ -1,6 +1,5 @@
 use clap::{value_t_or_exit, App, AppSettings, Arg, SubCommand};
 use shellfish::client::*;
-use shellfish::connection::channel::*;
 use shellfish::connection::*;
 use shellfish::util::socks5;
 use std::error::Error;
@@ -122,9 +121,9 @@ async fn serve(sock: TcpStream, addr: SocketAddr, conn: Connection) -> Result<()
         src_addr: sa,
         src_port: sp,
     };
-    let chan = conn.open_direct_tcpip(rq).await??;
-    let sock = cr.accept(addr).await?;
-    chan.interconnect(sock).await?;
+    let mut chan = conn.open_direct_tcpip(&rq).await??;
+    let mut sock = cr.accept(addr).await?;
+    tokio::io::copy_bidirectional(&mut sock, &mut chan).await?;
     Ok(())
 }
 

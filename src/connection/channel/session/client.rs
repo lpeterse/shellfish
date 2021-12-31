@@ -1,13 +1,18 @@
-use super::super::super::error::ConnectionErrorWatch;
+use super::super::super::error::*;
+use super::super::Channel;
 use super::*;
-use crate::util::check;
+use crate::connection::channel::RequestFailure;
+use crate::connection::{channel::ChannelState, ConnectionConfig, OpenFailure};
+use std::sync::Arc;
+use tokio::sync::oneshot;
+use tokio::sync::watch;
 
 macro_rules! map_err {
     ($x:ident, $res:expr) => {
         match $res {
             Ok(x) => Ok(x),
             Err(_) => Err($x
-                .error
+                .err_rx
                 .borrow()
                 .as_deref()
                 .map(|x| x.clone())
@@ -21,96 +26,76 @@ macro_rules! map_err {
 /// It may or may not have a tty, and may or may not involve X11
 /// forwarding.  Multiple sessions can be active simultaneously.
 #[derive(Debug)]
-pub struct Session {
-    pub(crate) req_tx: oneshot::Sender<SessionReq>,
-    pub(crate) error: ConnectionErrorWatch,
+pub struct SessionClient {
+    req_tx: R1,
+    err_rx: ConnectionErrorWatch,
 }
 
-impl Session {
+impl SessionClient {
+    pub(crate) fn new(req_tx: R1, err_rx: ConnectionErrorWatch) -> Self {
+        Self { req_tx, err_rx }
+    }
+
+    pub(crate) fn open(
+        config: &ConnectionConfig,
+        lid: u32,
+        error_rx: watch::Receiver<Option<Arc<ConnectionError>>>,
+        reply_tx: oneshot::Sender<Result<SessionClient, OpenFailure>>,
+    ) -> Box<dyn ChannelState> {
+        let lbs = config.channel_max_buffer_size;
+        let lps = config.channel_max_packet_size;
+        let cst = ClientState1::new(lid, lbs, lps, error_rx, reply_tx);
+        Box::new(cst)
+    }
+
     /// Pass an environment variable.
-    pub async fn env(&mut self, name: String, value: String) -> Result<(), ConnectionError> {
-        let (req_tx, req_rx) = oneshot::channel();
-        let (res_tx, res_rx) = oneshot::channel();
-        let req_tx = std::mem::replace(&mut self.req_tx, req_tx);
-        let req = SessionReq::Env {
-            env: (name, value),
-            res: res_tx,
-            nxt: req_rx,
-        };
-        map_err!(self, req_tx.send(req))?;
-        map_err!(self, res_rx.await)
+    pub async fn env(
+        &mut self,
+        name: &str,
+        value: &str,
+        want_reply: bool,
+    ) -> Result<Result<(), RequestFailure>, ConnectionError> {
+        let param = SessionReq2::Env((name.into(), value.into()));
+        let response = self.req_tx.req_unit(param, want_reply);
+        map_err!(self, response.await)
     }
 
     /// Request a pseudo-terminal.
-    pub async fn pty(&mut self, pty: PtySpecification) -> Result<(), ConnectionError> {
-        let (req_tx, req_rx) = oneshot::channel();
-        let (res_tx, res_rx) = oneshot::channel();
-        let req_tx = std::mem::replace(&mut self.req_tx, req_tx);
-        let req = SessionReq::Pty {
-            pty,
-            res: res_tx,
-            nxt: req_rx,
-        };
-        map_err!(self, req_tx.send(req))?;
-        let b = map_err!(self, res_rx.await)?;
-        check(b).ok_or(ConnectionError::ChannelPtyRejected)
+    pub async fn pty(
+        &mut self,
+        pty: &PtySpecification,
+        want_reply: bool,
+    ) -> Result<Result<(), RequestFailure>, ConnectionError> {
+        let param = SessionReq2::Pty(pty.clone());
+        let response = self.req_tx.req_unit(param, want_reply);
+        map_err!(self, response.await)
     }
 
     /// Execute a remote shell.
-    pub async fn shell(self) -> Result<Process, ConnectionError> {
-        let (res_tx, res_rx) = oneshot::channel();
-        let req = SessionReq::Run {
-            res: res_tx,
-            run: SessionRun::Shell,
-        };
-        map_err!(self, self.req_tx.send(req))?;
-        map_err!(self, res_rx.await)
+    pub async fn shell(self) -> Result<Result<Process, RequestFailure<Self>>, ConnectionError> {
+        let mut s = self;
+        let param = SessionReq2::Shell;
+        let response = s.req_tx.req_proc(param);
+        Ok(map_err!(s, response.await)?.map_err(|_| RequestFailure(s)))
     }
 
     /// Execute a command.
-    pub async fn exec(self, command: String) -> Result<Process, ConnectionError> {
-        let (res_tx, res_rx) = oneshot::channel();
-        let req = SessionReq::Run {
-            res: res_tx,
-            run: SessionRun::Exec(command),
-        };
-        map_err!(self, self.req_tx.send(req))?;
-        map_err!(self, res_rx.await)
+    pub async fn exec(self, command: &str) -> Result<Result<Process, RequestFailure<Self>>, ConnectionError> {
+        let mut s = self;
+        let param = SessionReq2::Exec(command.into());
+        let response = s.req_tx.req_proc(param);
+        Ok(map_err!(s, response.await)?.map_err(|_| RequestFailure(s)))
     }
 
     /// Execute a subsystem.
-    pub async fn subsystem(self, subsystem: String) -> Result<Process, ConnectionError> {
-        let (res_tx, res_rx) = oneshot::channel();
-        let req = SessionReq::Run {
-            res: res_tx,
-            run: SessionRun::Subsystem(subsystem),
-        };
-        map_err!(self, self.req_tx.send(req))?;
-        map_err!(self, res_rx.await)
+    pub async fn subsystem(self, subsystem: &str) -> Result<Result<Process, RequestFailure<Self>>, ConnectionError> {
+        let mut s = self;
+        let param = SessionReq2::Subsystem(subsystem.into());
+        let response = s.req_tx.req_proc(param);
+        Ok(map_err!(s, response.await)?.map_err(|_| RequestFailure(s)))
     }
 }
 
-#[derive(Debug)]
-pub(crate) enum SessionReq {
-    Env {
-        env: (String, String),
-        res: oneshot::Sender<()>,
-        nxt: oneshot::Receiver<SessionReq>,
-    },
-    Pty {
-        pty: PtySpecification,
-        res: oneshot::Sender<bool>,
-        nxt: oneshot::Receiver<SessionReq>,
-    },
-    Run {
-        run: SessionRun,
-        res: oneshot::Sender<Process>,
-    },
-}
-
-#[derive(Debug)]
-pub enum SessionRun {
-    Shell,
-    Exec(String),
-    Subsystem(String),
+impl Channel for SessionClient {
+    const NAME: &'static str = "session";
 }

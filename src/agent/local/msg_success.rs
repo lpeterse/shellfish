@@ -1,5 +1,5 @@
-use crate::util::codec::*;
 use crate::transport::Message;
+use crate::util::codec::*;
 
 #[derive(Debug, PartialEq)]
 pub struct MsgSuccess;
@@ -27,23 +27,22 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let mut buf = [0;1];
+        let mut buf = [0; 1];
         let mut enc = RefEncoder::new(buf.as_mut());
-        assert_eq!(SshEncode::encode(& MsgSuccess {}, &mut enc), Some(()));
+        assert_eq!(SshEncode::encode(&MsgSuccess {}, &mut enc), Some(()));
         assert_eq!([6], buf);
     }
 
     #[test]
     fn test_decode_01() {
         let buf = [6];
-        let res = Some(MsgSuccess {});
+        let res = Ok(MsgSuccess {});
         assert_eq!(res, SshCodec::decode(buf.as_ref()));
     }
 
     #[test]
     fn test_decode_02() {
         let buf = [0];
-        let res: Option<MsgSuccess> = None;
-        assert_eq!(res, SshCodec::decode(buf.as_ref()));
+        assert_eq!(SshCodec::decode::<MsgSuccess>(buf.as_ref()).is_ok(), false);
     }
 }

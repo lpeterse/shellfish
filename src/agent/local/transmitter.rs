@@ -1,4 +1,3 @@
-use super::error::LocalAgentError;
 use super::AuthAgentError;
 use super::Frame;
 use crate::util::check;
@@ -14,9 +13,7 @@ impl<S: Socket> Transmitter<S> {
     const MAX_FRAME_LEN: usize = 35000;
 
     pub async fn send<Msg: SshEncode>(&mut self, msg: &Msg) -> Result<(), AuthAgentError> {
-        let vec = SshCodec::encode(&Frame(msg))
-            .ok_or(LocalAgentError::EncodingError)
-            .map_err(AuthAgentError::new)?;
+        let vec = SshCodec::encode(&Frame(msg)).map_err(AuthAgentError::new)?;
         self.socket.write_all(&vec).await?;
         Ok(())
     }
@@ -26,14 +23,12 @@ impl<S: Socket> Transmitter<S> {
         self.socket.read_exact(&mut len[..]).await?;
         let len = u32::from_be_bytes(len) as usize;
         check(len <= Self::MAX_FRAME_LEN)
-            .ok_or(LocalAgentError::FrameLengthError)
+            .ok_or(SshCodecError::DecodingFailed)
             .map_err(AuthAgentError::new)?;
         let mut vec = Vec::with_capacity(len);
         vec.resize(len, 0);
         self.socket.read_exact(&mut vec[..]).await?;
-        SshCodec::decode(&vec)
-            .ok_or(LocalAgentError::EncodingError)
-            .map_err(AuthAgentError::new)
+        SshCodec::decode(&vec).map_err(AuthAgentError::new)
     }
 }
 

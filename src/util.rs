@@ -2,16 +2,14 @@ pub mod buffer;
 pub mod cidr;
 pub mod codec;
 pub mod glob;
-pub mod oneshot;
 pub mod socket;
 pub mod socks5;
 pub mod tcp;
-pub mod role;
 
 use std::fmt;
-use std::pin::Pin;
 use std::future::Future;
-use std::task::{Poll, Context};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 
 pub type ArcError = std::sync::Arc<dyn std::error::Error + Send + Sync + 'static>;
 pub type BoxFuture<T> = core::pin::Pin<Box<dyn std::future::Future<Output = T> + Send>>;

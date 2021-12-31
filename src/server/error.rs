@@ -5,8 +5,7 @@ use std::error::Error;
 
 #[derive(Debug)]
 pub enum ServerError {
-    BindError(std::io::Error),
-    AcceptError(std::io::Error),
+    SocketError(std::io::Error),
     TransportError(TransportError),
     UserAuthError(UserAuthError),
 }

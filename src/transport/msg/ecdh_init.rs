@@ -1,40 +1,33 @@
-use super::super::ecdh::EcdhAlgorithm;
 use super::Message;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MsgKexEcdhInit<A: EcdhAlgorithm> {
-    pub dh_public: A::PublicKey,
+pub struct MsgKexEcdhInit {
+    pub dh_public: Vec<u8>,
 }
 
-impl<A: EcdhAlgorithm> MsgKexEcdhInit<A> {
-    pub fn new(dh_public: A::PublicKey) -> Self {
+impl MsgKexEcdhInit {
+    pub fn new(dh_public: Vec<u8>) -> Self {
         Self { dh_public }
     }
 }
 
-impl<A: EcdhAlgorithm> Message for MsgKexEcdhInit<A> {
+impl Message for MsgKexEcdhInit {
     const NUMBER: u8 = 30;
 }
 
-impl<A: EcdhAlgorithm> SshEncode for MsgKexEcdhInit<A>
-where
-    A::PublicKey: SshEncode,
-{
+impl SshEncode for MsgKexEcdhInit {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
-        e.push(&self.dh_public)
+        e.push_bytes_framed(&self.dh_public)
     }
 }
 
-impl<A: EcdhAlgorithm> SshDecode for MsgKexEcdhInit<A>
-where
-    A::PublicKey: SshDecode,
-{
+impl SshDecode for MsgKexEcdhInit {
     fn decode<'a, D: SshDecoder<'a>>(c: &mut D) -> Option<Self> {
         c.expect_u8(<Self as Message>::NUMBER)?;
         Some(Self {
-            dh_public: SshDecodeRef::decode(c)?,
+            dh_public: c.take_bytes_framed()?.into(),
         })
     }
 }
@@ -43,37 +36,21 @@ where
 mod tests {
     use super::*;
 
-    impl EcdhAlgorithm for () {
-        type PublicKey = ();
-        type EphemeralSecret = ();
-        type SharedSecret = ();
-
-        fn new() -> Self::EphemeralSecret {
-            ()
-        }
-        fn public(_: &Self::EphemeralSecret) -> Self::PublicKey {
-            ()
-        }
-        fn diffie_hellman(_: Self::EphemeralSecret, _: &Self::PublicKey) -> Self::SharedSecret {
-            ()
-        }
-        fn public_as_ref(_: &Self::PublicKey) -> &[u8] {
-            &[]
-        }
-        fn secret_as_ref(_: &Self::SharedSecret) -> &[u8] {
-            &[]
-        }
-    }
-
     #[test]
     fn test_encode_01() {
-        let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(&[30][..], &SshCodec::encode(&msg).unwrap()[..]);
+        let msg = MsgKexEcdhInit {
+            dh_public: vec![1, 2, 3],
+        };
+        let bytes = [30, 0, 0, 0, 3, 1, 2, 3];
+        assert_eq!(&bytes, &SshCodec::encode(&msg).unwrap()[..]);
     }
 
     #[test]
     fn test_decode_01() {
-        let msg = MsgKexEcdhInit::<()> { dh_public: () };
-        assert_eq!(&Some(msg), &SshCodec::decode(&[30][..]));
+        let msg = MsgKexEcdhInit {
+            dh_public: vec![1, 2, 3],
+        };
+        let bytes = [30, 0, 0, 0, 3, 1, 2, 3];
+        assert_eq!(&Ok(msg), &SshCodec::decode(&bytes));
     }
 }

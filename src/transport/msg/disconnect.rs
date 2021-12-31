@@ -59,7 +59,7 @@ mod tests {
     #[test]
     fn test_decode_01() {
         assert_eq!(
-            &Some(MsgDisconnect::new(DisconnectReason::MAC_ERROR)),
+            &Ok(MsgDisconnect::new(DisconnectReason::MAC_ERROR)),
             &SshCodec::decode(&[1, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0, 0, 0][..])
         );
     }

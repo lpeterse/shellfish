@@ -18,11 +18,11 @@ impl Identity {
     }
 
     pub fn as_ssh_ed25519(&self) -> Option<SshEd25519PublicKey> {
-        SshCodec::decode(&self.0)
+        SshCodec::decode(&self.0).ok()
     }
 
     pub fn as_ssh_ed25519_cert(&self) -> Option<SshEd25519Cert> {
-        SshCodec::decode(&self.0)
+        SshCodec::decode(&self.0).ok()
     }
 
     pub fn as_cert(&self) -> Option<Box<dyn Cert>> {

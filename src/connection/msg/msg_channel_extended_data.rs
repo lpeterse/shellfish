@@ -8,16 +8,6 @@ pub(crate) struct MsgChannelExtendedData<'a> {
     pub data: &'a [u8],
 }
 
-impl<'a> MsgChannelExtendedData<'a> {
-    pub fn new(recipient_channel: u32, data_type_code: u32, data: &'a [u8]) -> Self {
-        Self {
-            recipient_channel,
-            data_type_code,
-            data,
-        }
-    }
-}
-
 impl<'a> Message for MsgChannelExtendedData<'a> {
     const NUMBER: u8 = 95;
 }

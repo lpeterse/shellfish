@@ -15,12 +15,12 @@ impl SshEncode for CertOption {
         match self {
             Self::ForceCommand(cmd) => {
                 e.push_str_framed(FORCE_COMMAND)?;
-                e.push_usize(SshCodec::size(cmd)?)?;
+                e.push_usize(SshCodec::size(cmd).ok()?)?;
                 e.push_str_framed(cmd)?;
             }
             Self::SourceAddress(addr) => {
                 e.push_str_framed(SOURCE_ADDRESS)?;
-                e.push_usize(SshCodec::size(addr)?)?;
+                e.push_usize(SshCodec::size(addr).ok()?)?;
                 e.push_str_framed(addr)?;
             }
             Self::Other(name, data) => {
@@ -37,8 +37,8 @@ impl SshDecode for CertOption {
         let name = d.take_str_framed()?;
         let data = d.take_bytes_framed()?;
         Some(match &name {
-            &FORCE_COMMAND => Self::ForceCommand(SshCodec::decode(data)?),
-            &SOURCE_ADDRESS => Self::SourceAddress(SshCodec::decode(data)?),
+            &FORCE_COMMAND => Self::ForceCommand(SshCodec::decode(data).ok()?),
+            &SOURCE_ADDRESS => Self::SourceAddress(SshCodec::decode(data).ok()?),
             _ => Self::Other(name.into(), data.into()),
         })
     }

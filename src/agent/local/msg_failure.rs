@@ -36,14 +36,13 @@ mod tests {
     #[test]
     fn test_decode_01() {
         let buf = [5];
-        let res = Some(MsgFailure {});
+        let res = Ok(MsgFailure {});
         assert_eq!(res, SshCodec::decode(buf.as_ref()));
     }
 
     #[test]
     fn test_decode_02() {
         let buf = [0];
-        let res: Option<MsgFailure> = None;
-        assert_eq!(res, SshCodec::decode(buf.as_ref()));
+        assert_eq!(SshCodec::decode::<MsgFailure>(buf.as_ref()).is_ok(), false);
     }
 }

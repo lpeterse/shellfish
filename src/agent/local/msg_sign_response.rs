@@ -52,7 +52,7 @@ mod tests {
             signature: Signature::new("ssh-ed25519".into(), vec![3; 64]),
         };
         assert_eq!(
-            Some(msg),
+            Ok(msg),
             SshCodec::decode(
                 &[
                     14, 0, 0, 0, 83, 0, 0, 0, 11, 115, 115, 104, 45, 101, 100, 50, 53, 53, 49, 57,

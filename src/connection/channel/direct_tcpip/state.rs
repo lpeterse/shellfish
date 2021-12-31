@@ -1,135 +1,84 @@
+use super::super::super::super::connection::msg::*;
+use super::super::super::channel::{Channel, ChannelState, OpenFailure, PollResult};
 use super::super::super::error::ConnectionError;
-use super::super::super::msg::*;
-use super::super::open_failure::OpenFailure;
-use super::super::state::ChannelState;
 use super::DirectTcpIp;
-
-use crate::ready;
 use crate::transport::GenericTransport;
 use crate::util::buffer::Buffer;
 use crate::util::check;
-use std::future::Future;
-use std::mem::replace;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::MutexGuard;
 use std::task::Context;
 use std::task::Poll;
 use std::task::Waker;
-use tokio::sync::oneshot;
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
-pub const EV_FLUSHED: u8 = 1;
-pub const EV_READABLE: u8 = 2;
-pub const EV_WRITABLE: u8 = 4;
-pub const EV_EOF_SENT: u8 = 8;
-pub const EV_EOF_RCVD: u8 = 16;
-pub const EV_CLOSE_RCVD: u8 = 64;
-pub const EV_ANY: u8 = 255;
+const EV_ERROR: u8 = 1;
+const EV_FLUSHED: u8 = 2;
+const EV_READABLE: u8 = 4;
+const EV_WRITABLE: u8 = 8;
+const EV_EOF_SENT: u8 = 16;
+const EV_EOF_RCVD: u8 = 32;
+const EV_CLOSE_SENT: u8 = 64;
+const EV_CLOSE_RCVD: u8 = 128;
 
-#[derive(Debug)]
-pub enum Status {
-    OpeningAwaitConfirm(oneshot::Sender<Result<DirectTcpIp, OpenFailure>>),
-    OpeningAwaitDecision(oneshot::Receiver<Result<(), OpenFailure>>),
-    OpeningAwaitTransmission(Result<(), OpenFailure>),
-    Open,
-    Closed,
-    Error(Arc<ConnectionError>),
+macro_rules! pend {
+    ($state:ident, $cx:ident, $ev:expr) => {
+        $state.outer_task_flags |= $ev | EV_ERROR;
+        $state.outer_task_waker = Some($cx.waker().clone())
+    };
 }
 
-#[derive(Debug)]
-pub struct DirectTcpIpState {
-    pub mbs: usize,
-
-    pub lid: u32,
-    pub lws: u32,
-    pub lmps: u32,
-
-    pub rid: u32,
-    pub rws: u32,
-    pub rmps: u32,
-
-    pub eof: bool,
-    pub eof_sent: bool,
-    pub eof_rcvd: bool,
-
-    pub close: bool,
-    pub close_sent: bool,
-    pub close_rcvd: bool,
-
-    pub stdin: Buffer,
-    pub stdout: Buffer,
-
-    pub inner_task_waker: Option<Waker>,
-    pub outer_task_waker: Option<Waker>,
-    pub outer_task_flags: u8,
-
-    pub status: Status,
+macro_rules! wake_inner {
+    ($state:ident) => {{
+        log::trace!("waker_inner 1");
+        let mut state: MutexGuard<StateInner> = $state;
+        let w = state.inner_task_waker.take();
+        drop(state);
+        let _ = w.map(Waker::wake);
+    }};
 }
 
-impl DirectTcpIpState {
-    pub fn new_outbound(
-        lid: u32,
-        lws: u32,
-        lps: u32,
-        resp: oneshot::Sender<Result<DirectTcpIp, OpenFailure>>,
-    ) -> Self {
-        Self {
-            mbs: lws as usize,
-
-            lid,
-            lws,
-            lmps: lps,
-
-            rid: 0,
-            rws: 0,
-            rmps: 0,
-
-            eof: false,
-            eof_sent: false,
-            eof_rcvd: false,
-
-            close: false,
-            close_sent: false,
-            close_rcvd: false,
-
-            stdin: Buffer::new(0),
-            stdout: Buffer::new(0),
-
-            inner_task_waker: None,
-            outer_task_waker: None,
-            outer_task_flags: 0,
-
-            status: Status::OpeningAwaitConfirm(resp),
+macro_rules! wake_outer {
+    ($state:ident, $ev:expr) => {{
+        let mut state: MutexGuard<StateInner> = $state;
+        if state.outer_task_flags & $ev != 0 {
+            let w = state.outer_task_waker.take();
+            drop(state);
+            let _ = w.map(Waker::wake);
+        } else {
+            drop(state);
         }
-    }
+    }};
+}
 
-    pub fn new_inbound(
-        lid: u32,
-        mbs: u32,
-        lmps: u32,
-        rid: u32,
-        rws: u32,
-        rmps: u32,
-        resp: oneshot::Receiver<Result<(), OpenFailure>>,
-    ) -> Self {
-        Self {
-            mbs: mbs as usize,
+#[derive(Debug, Clone)]
+pub(crate) struct State(pub Arc<Mutex<StateInner>>);
+
+impl State {
+    pub(crate) fn new(lid: u32, lbs: u32, lps: u32, rid: u32, rws: u32, rps: u32) -> Self {
+        Self(Arc::new(Mutex::new(StateInner {
+            lbs: lbs as usize,
 
             lid,
-            lws: mbs,
-            lmps,
+            lws: lbs,
+            lps,
 
             rid,
             rws,
-            rmps,
+            rps,
 
-            eof: false,
+            eof_send: false,
             eof_sent: false,
             eof_rcvd: false,
 
-            close: false,
+            close_send: false,
             close_sent: false,
             close_rcvd: false,
+
+            error: false,
 
             stdin: Buffer::new(0),
             stdout: Buffer::new(0),
@@ -137,240 +86,325 @@ impl DirectTcpIpState {
             inner_task_waker: None,
             outer_task_waker: None,
             outer_task_flags: 0,
+        })))
+    }
 
-            status: Status::OpeningAwaitDecision(resp),
+    pub(crate) fn set_open_confirmation(&self, rid: u32, rws: u32, rps: u32) {
+        let mut x = self.0.lock().unwrap();
+        x.rid = rid;
+        x.rws = rws;
+        x.rps = rps;
+    }
+
+    pub(crate) fn msg_open(&self, data: Vec<u8>) -> MsgChannelOpen<&'static str> {
+        let x = self.0.lock().unwrap();
+        MsgChannelOpen {
+            name: DirectTcpIp::NAME,
+            sender_channel: x.lid,
+            initial_window_size: x.lws,
+            maximum_packet_size: x.lps,
+            data,
         }
     }
 
-    pub fn push_open_confirmation(
-        &mut self,
-        rid: u32,
-        rws: u32,
-        rps: u32,
-        handle: DirectTcpIp,
-    ) -> Result<(), ConnectionError> {
-        if let Status::OpeningAwaitConfirm(x) = replace(&mut self.status, Status::Open) {
-            self.rid = rid;
-            self.rws = rws;
-            self.rmps = rps;
-            self.close = x.send(Ok(handle)).is_err();
-            Ok(())
-        } else {
-            Err(ConnectionError::ChannelOpenConfirmationUnexpected)?
+    pub(crate) fn msg_open_confirmation(&self) -> MsgChannelOpenConfirmation {
+        let x = self.0.lock().unwrap();
+        MsgChannelOpenConfirmation {
+            recipient_channel: x.rid,
+            sender_channel: x.lid,
+            initial_window_size: x.lws,
+            maximum_packet_size: x.lps,
+            specific: b"",
         }
     }
 
-    pub fn push_open_failure(&mut self, reason: OpenFailure) -> Result<(), ConnectionError> {
-        if let Status::OpeningAwaitConfirm(x) = replace(&mut self.status, Status::Closed) {
-            let _ = x.send(Err(reason));
-            Ok(())
-        } else {
-            Err(ConnectionError::OpenFailureUnexpected)?
-        }
+    pub(crate) fn msg_open_failure(&self, e: OpenFailure) -> MsgChannelOpenFailure {
+        let x = self.0.lock().unwrap();
+        MsgChannelOpenFailure::new(x.rid, e)
     }
+}
 
-    pub fn push_data(&mut self, data: &[u8]) -> Result<(), ConnectionError> {
-        let len = data.len() as u32;
-        check(!self.eof && !self.close).ok_or(ConnectionError::ChannelDataUnexpected)?;
-        check(len <= self.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
-        check(len <= self.lmps).ok_or(ConnectionError::ChannelMaxPacketSizeExceeded)?;
-        self.lws -= len;
-        self.stdin.write_all(data);
-        Ok(())
+// =================================================================================================
+// METHODS FOR OUTER TASK
+// =================================================================================================
+
+impl State {
+    /// Set the close flag and wake the inner task
+    pub(crate) fn close(&self) {
+        let mut x = self.0.lock().unwrap();
+        x.close_send = true;
+        wake_inner!(x)
     }
+}
 
-    pub fn push_extended_data(&mut self, code: u32, data: &[u8]) -> Result<(), ConnectionError> {
-        /*
-        match self.ext {
-            Some(ref mut ext) if code == SSH_EXTENDED_DATA_STDERR && !self.eof && !self.close => {
-                let len = data.len() as u32;
-                check(len <= self.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
-                check(len <= self.lmps).ok_or(ConnectionError::ChannelMaxPacketSizeExceeded)?;
-                self.lws -= len;
-                ext.rx.write_all(data);
-                Ok(())
-            }
-            _ => Err(ConnectionError::ChannelExtendedDataUnexpected),
-        }*/
-        panic!()
-    }
-
-    pub fn push_window_adjust(&mut self, n: u32) -> Result<(), ConnectionError> {
-        check(!self.close).ok_or(ConnectionError::ChannelWindowAdjustUnexpected)?;
-        if (n as u64 + self.rws as u64) > (u32::MAX as u64) {
-            return Err(ConnectionError::ChannelWindowAdjustOverflow);
-        }
-        self.rws += n;
-        Ok(())
-    }
-
-    pub fn push_request(
-        &mut self,
-        _name: &str,
-        _data: &[u8],
-        _want_reply: bool,
-    ) -> Result<(), ConnectionError> {
-        panic!()
-    }
-
-    pub fn push_success(&mut self) -> Result<(), ConnectionError> {
-        panic!()
-    }
-
-    pub fn push_failure(&mut self) -> Result<(), ConnectionError> {
-        panic!()
-    }
-
-    pub fn push_eof(&mut self) -> Result<(), ConnectionError> {
-        check(!self.eof && !self.close).ok_or(ConnectionError::ChannelEofUnexpected)?;
-        self.eof_rcvd = true;
-        Ok(())
-    }
-
-    pub fn push_close(&mut self) -> Result<(), ConnectionError> {
-        check(!self.close).ok_or(ConnectionError::ChannelCloseUnexpected)?;
-        self.close = true;
-        self.close_rcvd = true;
-        Ok(())
-    }
-
-    pub fn poll_with_transport(
-        &mut self,
+impl AsyncRead for State {
+    fn poll_read(
+        self: Pin<&mut Self>,
         cx: &mut Context,
-        t: &mut GenericTransport,
-    ) -> Poll<Result<(), ConnectionError>> {
-        loop {
-            match &mut self.status {
-                Status::OpeningAwaitDecision(ref mut x) => {
-                    let e = Err(OpenFailure::ADMINISTRATIVELY_PROHIBITED);
-                    let r = match Future::poll(Pin::new(x), cx) {
-                        Poll::Pending => return Poll::Ready(Ok(())),
-                        Poll::Ready(r) => r.unwrap_or(e),
-                    };
-                    self.status = Status::OpeningAwaitTransmission(r);
-                    continue;
-                }
-                Status::OpeningAwaitTransmission(Ok(())) => {
-                    let msg = MsgChannelOpenConfirmation {
-                        recipient_channel: self.rid,
-                        sender_channel: self.lid,
-                        initial_window_size: self.lws,
-                        maximum_packet_size: self.lmps,
-                        specific: b"",
-                    };
-                    ready!(t.poll_send(cx, &msg))?;
-                    self.status = Status::Open;
-                    continue;
-                }
-                Status::OpeningAwaitTransmission(Err(r)) => {
-                    let msg = MsgOpenFailure::new(self.rid, *r);
-                    ready!(t.poll_send(cx, &msg))?;
-                    self.status = Status::Closed;
-                    continue;
-                }
-                Status::Open if self.inner_task_waker.is_none() => {
-                    // Send data as long as data is available or the remote window size
-                    while !self.stdout.is_empty() {
-                        let len = std::cmp::min(self.rmps as usize, self.stdout.len());
-                        let dat = &self.stdout.as_ref()[..len];
-                        let msg = MsgChannelData::new(self.rid, dat);
-                        ready!(t.poll_send(cx, &msg))?;
-                        log::debug!("#{}: Sent MSG_CHANNEL_DATA ({})", self.lid, len);
-                        self.stdout.consume(len);
-                    }
-                    // Send eof if flag set and eof not yet sent.
-                    if self.eof && !self.eof_sent {
-                        let msg = MsgChannelEof::new(self.rid);
-                        ready!(t.poll_send(cx, &msg))?;
-                        log::debug!("#{}: Sent MSG_CHANNEL_EOF", self.lid);
-                        self.eof_sent = true;
-                    }
-                    // Send close if flag set and close not yet sent.
-                    if self.close && !self.close_sent {
-                        let msg = MsgChannelClose::new(self.rid);
-                        ready!(t.poll_send(cx, &msg))?;
-                        log::debug!("#{}: Sent MSG_CHANNEL_CLOSE", self.lid);
-                        self.close_sent = true;
-                    }
-                    // Send window adjust message when threshold is reached.
-                    if let Some(n) = self.recommended_window_adjust() {
-                        let msg = MsgChannelWindowAdjust::new(self.rid, n);
-                        ready!(t.poll_send(cx, &msg))?;
-                        log::debug!("#{}: Sent MSG_CHANNEL_WINDOW_ADJUST ({})", self.lid, n);
-                        self.lws += n;
-                    }
-                    self.inner_task_waker = Some(cx.waker().clone());
-                    break;
-                }
-                _ => break,
+        buf: &mut ReadBuf,
+    ) -> Poll<io::Result<()>> {
+        let mut state = self.0.lock().unwrap();
+        if state.error {
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::ConnectionAborted, "")))
+        } else if state.stdin.is_empty() {
+            if state.eof_rcvd {
+                // The channel has been terminated gracefully.
+                Poll::Ready(Ok(()))
+            } else if state.close_rcvd {
+                // The channel has been terminated without EOF.
+                Poll::Ready(Err(io::Error::new(io::ErrorKind::UnexpectedEof, "")))
+            } else {
+                // The channel is open: Wait for more data, EOF or close by remote.
+                pend!(state, cx, EV_READABLE | EV_EOF_RCVD | EV_CLOSE_RCVD);
+                Poll::Pending
             }
-        }
-        Poll::Ready(Ok(()))
-    }
-
-    pub fn recommended_window_adjust(&mut self) -> Option<u32> {
-        let threshold = self.mbs / 2;
-        if (self.lws as usize) < threshold {
-            let buffered = self.stdin.len();
-            if buffered < threshold {
-                let adjustment = self.mbs - std::cmp::max(self.lws as usize, buffered);
-                return Some(adjustment as u32);
-            }
-        }
-        None
-    }
-
-    pub fn take_outer_waker(&mut self, flags: u8) -> Option<Waker> {
-        if self.outer_task_flags & flags != 0 {
-            self.outer_task_flags = 0;
-            self.outer_task_waker.take()
         } else {
-            None
+            // The number of bytes to read is limited by bytes available and supplied buffer size.
+            let n = std::cmp::min(state.stdin.len(), buf.remaining());
+            let b = buf.initialize_unfilled_to(n);
+            let m = state.stdin.read(b);
+            assert!(n == m);
+            buf.advance(n);
+            // The inner task only needs to be woken if window adjust is recommended.
+            if state.recommended_window_adjust().is_some() {
+                wake_inner!(state);
+            }
+            Poll::Ready(Ok(()))
         }
     }
 }
 
-impl ChannelState for Arc<Mutex<DirectTcpIpState>> {
-    fn on_open_confirmation(
-        self: Box<Self>,
-        rid: u32,
-        rws: u32,
-        rps: u32,
-    ) -> Result<Box<dyn ChannelState>, ConnectionError> {
-        let st = self.as_ref().clone();
-        let mut ch = self.lock().unwrap();
-        if let Status::OpeningAwaitConfirm(x) = replace(&mut ch.status, Status::Open) {
-            ch.rid = rid;
-            ch.rws = rws;
-            ch.rmps = rps;
-            ch.close = x.send(Ok(DirectTcpIp(st))).is_err();
-            drop(ch);
-            Ok(self)
+impl AsyncWrite for State {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context,
+        buf: &[u8],
+    ) -> Poll<Result<usize, io::Error>> {
+        let mut state = self.0.lock().unwrap();
+        if state.error {
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::ConnectionAborted, "")))
+        } else if state.eof_send || state.close_rcvd {
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "")))
+        } else if state.rws > 0 && state.stdout.len() < state.lbs {
+            let n = buf.len();
+            let n = std::cmp::min(n, state.lbs - state.stdout.len());
+            let n = std::cmp::min(n, state.rws as usize);
+            state.stdout.write_all(&buf[..n]);
+            state.rws -= n as u32;
+            wake_inner!(state);
+            Poll::Ready(Ok(n))
         } else {
-            Err(ConnectionError::ChannelOpenConfirmationUnexpected)?
+            pend!(state, cx, EV_WRITABLE | EV_CLOSE_RCVD);
+            Poll::Pending
         }
     }
 
-    fn on_open_failure(self: Box<Self>, e: OpenFailure) -> Result<(), ConnectionError> {
-        let mut ch = self.lock().unwrap();
-        if let Status::OpeningAwaitConfirm(x) = replace(&mut ch.status, Status::Closed) {
-            let _ = x.send(Err(e));
-            Ok(())
+    /// Flushing just waits until all data has been sent.
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        let mut state = self.0.lock().unwrap();
+        if state.error {
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::ConnectionAborted, "")))
+        } else if state.stdout.is_empty() {
+            // All pending data has been transmitted.
+            Poll::Ready(Ok(()))
+        } else if state.close_rcvd {
+            // The remote side closed the channel before we could send all data.
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "")))
         } else {
-            Err(ConnectionError::OpenFailureUnexpected)?
+            // Wake us when either all data has been transmitted or remote closed the channel.
+            pend!(state, cx, EV_FLUSHED | EV_CLOSE_RCVD);
+            wake_inner!(state);
+            Poll::Pending
         }
     }
 
-    fn on_error(self: Box<Self>, e: &Arc<ConnectionError>) {
-        drop(e);
-        todo!()
+    /// Shutdown causes sending an `SSH_MSG_CHANNEL_EOF` (meaning that there won't be any more
+    /// data).
+    ///
+    /// The internal connection handler will first transmit any pending data and then signal eof.
+    /// `SSH_MSG_CHANNEL_CLOSE` is sent automatically on [drop].
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), io::Error>> {
+        let mut state = self.0.lock().unwrap();
+        state.eof_send = true;
+        if state.error {
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::ConnectionAborted, "")))
+        } else if state.eof_sent {
+            // This implies complete transmission of any pending data.
+            Poll::Ready(Ok(()))
+        } else if state.close_rcvd {
+            // The remote side closed the channel before we could send EOF.
+            Poll::Ready(Err(io::Error::new(io::ErrorKind::BrokenPipe, "")))
+        } else {
+            // Wake us when either EOF has been sent or remote closed the channel.
+            pend!(state, cx, EV_EOF_SENT | EV_CLOSE_RCVD);
+            wake_inner!(state);
+            Poll::Pending
+        }
+    }
+}
+
+// =================================================================================================
+// METHODS FOR INNER TASK
+// =================================================================================================
+
+impl ChannelState for State {
+    fn on_data(&mut self, data: &[u8]) -> Result<(), ConnectionError> {
+        let mut state = self.0.lock().unwrap();
+        let len = data.len() as u32;
+        check(!state.eof_rcvd).ok_or(ConnectionError::ChannelDataUnexpected)?;
+        check(!state.close_rcvd).ok_or(ConnectionError::ChannelDataUnexpected)?;
+        check(len <= state.lws).ok_or(ConnectionError::ChannelWindowSizeExceeded)?;
+        check(len <= state.lps).ok_or(ConnectionError::ChannelPacketSizeExceeded)?;
+        state.lws -= len;
+        state.stdin.write_all(data);
+        wake_outer!(state, EV_READABLE);
+        Ok(())
+    }
+
+    fn on_window_adjust(&mut self, n: u32) -> Result<(), ConnectionError> {
+        let mut state = self.0.lock().unwrap();
+        check(!state.close_rcvd).ok_or(ConnectionError::ChannelWindowAdjustUnexpected)?;
+        if (n as u64 + state.rws as u64) > (u32::MAX as u64) {
+            return Err(ConnectionError::ChannelWindowAdjustOverflow);
+        }
+        state.rws += n;
+        wake_outer!(state, EV_WRITABLE);
+        Ok(())
+    }
+
+    fn on_eof(&mut self) -> Result<(), ConnectionError> {
+        let mut state = self.0.lock().unwrap();
+        check(!state.eof_rcvd).ok_or(ConnectionError::ChannelEofUnexpected)?;
+        check(!state.close_rcvd).ok_or(ConnectionError::ChannelEofUnexpected)?;
+        state.eof_rcvd = true;
+        wake_outer!(state, EV_EOF_RCVD);
+        Ok(())
+    }
+
+    fn on_close(&mut self) -> Result<(), ConnectionError> {
+        let mut state = self.0.lock().unwrap();
+        check(!state.close_rcvd).ok_or(ConnectionError::ChannelCloseUnexpected)?;
+        state.close_send = true;
+        state.close_rcvd = true;
+        wake_outer!(state, EV_CLOSE_RCVD);
+        Ok(())
+    }
+
+    fn on_error(self: Box<Self>, _: &Arc<ConnectionError>) {
+        let mut state = self.0.lock().unwrap();
+        state.error = true;
+        wake_outer!(state, EV_ERROR);
     }
 
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
         t: &mut GenericTransport,
-    ) -> Poll<Result<bool, ConnectionError>> {
-        todo!()
+    ) -> Poll<Result<PollResult, ConnectionError>> {
+        let mut state = self.0.lock().unwrap();
+        let mut evs = 0;
+        let mut pending = false;
+        // Perform all the checks only in case the `inner_task_waker` is none which
+        // implies it has either not been initialized or taken away by the outer thread
+        // which means there is work to do
+        if state.inner_task_waker.is_none() {
+            // Send data as long as data is available and the remote window size allows
+            check(state.rps > 0).ok_or(ConnectionError::ChannelPacketSizeInvalid)?;
+            while !pending && !state.stdout.is_empty() {
+                let len = state.stdout.len();
+                let len = std::cmp::min(len, state.rps as usize);
+                let dat = &state.stdout.as_ref()[..len];
+                let msg = MsgChannelData::new(state.rid, dat);
+                match t.poll_send(cx, &msg)? {
+                    Poll::Pending => pending = true,
+                    Poll::Ready(()) => {
+                        log::trace!(">> {:?}", msg);
+                        state.stdout.consume(len);
+                        evs |= EV_WRITABLE;
+                    }
+                }
+            }
+            if state.stdout.is_empty() {
+                evs |= EV_FLUSHED;
+            }
+            // Send eof if flag set and eof not yet sent
+            if !pending && state.eof_send && !state.eof_sent {
+                let msg = MsgChannelEof::new(state.rid);
+                pending |= t.poll_send(cx, &msg)?.is_pending();
+                state.eof_sent = true;
+                evs |= EV_EOF_SENT;
+            }
+            // Send close if flag set and close not yet sent
+            if !pending && state.close_send && !state.close_sent {
+                let msg = MsgChannelClose::new(state.rid);
+                pending |= t.poll_send(cx, &msg)?.is_pending();
+                state.close_sent = true;
+                evs |= EV_CLOSE_SENT;
+            }
+            // Send window adjust message when threshold is reached
+            if !pending {
+                if let Some(n) = state.recommended_window_adjust() {
+                    let msg = MsgChannelWindowAdjust::new(state.rid, n);
+                    pending |= t.poll_send(cx, &msg)?.is_pending();
+                    state.lws += n;
+                }
+            }
+            // Register the inner task for wakeup
+            state.inner_task_waker = Some(cx.waker().clone());
+        }
+        // The channel is considered completely closed only after a close
+        // message has been received and one has been sent
+        let closed = state.close_rcvd && state.close_sent;
+        wake_outer!(state, evs);
+        if pending {
+            Poll::Pending
+        } else if closed {
+            Poll::Ready(Ok(PollResult::Closed))
+        } else {
+            Poll::Ready(Ok(PollResult::Noop))
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct StateInner {
+    lbs: usize,
+    lid: u32,
+    lws: u32,
+    lps: u32,
+
+    rid: u32,
+    rws: u32,
+    rps: u32,
+
+    eof_send: bool,
+    eof_sent: bool,
+    eof_rcvd: bool,
+
+    close_send: bool,
+    close_sent: bool,
+    close_rcvd: bool,
+
+    error: bool,
+
+    stdin: Buffer,
+    stdout: Buffer,
+
+    inner_task_waker: Option<Waker>,
+    outer_task_waker: Option<Waker>,
+    outer_task_flags: u8,
+}
+
+impl StateInner {
+    pub fn recommended_window_adjust(&mut self) -> Option<u32> {
+        let threshold = self.lbs / 2;
+        if (self.lws as usize) < threshold {
+            let buffered = self.stdin.len();
+            if buffered < threshold {
+                let adjustment = self.lbs - std::cmp::max(self.lws as usize, buffered);
+                return Some(adjustment as u32);
+            }
+        }
+        None
     }
 }

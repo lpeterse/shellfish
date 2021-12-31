@@ -1,4 +1,4 @@
-use super::session::SessionId;
+use super::secret::Secret;
 use crate::util::codec::*;
 use sha2::{Digest, Sha256};
 use zeroize::*;
@@ -12,42 +12,29 @@ use zeroize::*;
 pub struct KeyStream {
     dir: KeyDirection,
     algo: KeyAlgorithm,
-    k: [u8; 32],
-    h: SessionId,
-    sid: SessionId,
-}
-
-/// A finite list of supported hash algorithms.
-///
-/// Extend this list and the methods in [KeyStream] if necessary.
-#[derive(Clone, Copy, Debug)]
-pub enum KeyAlgorithm {
-    Sha256,
-}
-
-/// The direction is either "client -> server" or "server -> client".
-/// 
-/// The direction information is included when creating keys and results in totally distinct keys.
-#[derive(Clone, Copy, Debug)]
-pub enum KeyDirection {
-    ClientToServer,
-    ServerToClient,
+    k: Secret,
+    h: Secret,
+    sid: Secret,
 }
 
 impl KeyStream {
-    pub fn new(
-        dir: KeyDirection,
-        algo: KeyAlgorithm,
-        k: [u8; 32],
-        h: SessionId,
-        sid: SessionId,
-    ) -> Self {
+    pub fn new_c2s(algo: KeyAlgorithm, k: &Secret, h: &Secret, sid: &Secret) -> Self {
         Self {
-            dir,
+            dir: KeyDirection::ClientToServer,
             algo,
-            k,
-            h,
-            sid,
+            k: k.clone(),
+            h: h.clone(),
+            sid: sid.clone(),
+        }
+    }
+
+    pub fn new_s2c(algo: KeyAlgorithm, k: &Secret, h: &Secret, sid: &Secret) -> Self {
+        Self {
+            dir: KeyDirection::ServerToClient,
+            algo,
+            k: k.clone(),
+            h: h.clone(),
+            sid: sid.clone(),
         }
     }
 
@@ -69,12 +56,12 @@ impl KeyStream {
         let mut sha2 = Sha256::new();
         // RFC: "Here K is encoded as mpint and "A" as byte and session_id as raw
         //       data.  "A" means the single character A, ASCII 65."
-        let _ = sha2.push_mpint(&self.k);
+        let _ = sha2.push_mpint(self.k.as_ref());
         sha2.update(self.h.as_ref());
         sha2.update([idx as u8]);
         sha2.update(self.sid.as_ref());
         let mut k1_ = sha2.finalize_reset();
-        let _ = sha2.push_mpint(&self.k);
+        let _ = sha2.push_mpint(self.k.as_ref());
         sha2.update(self.h.as_ref());
         sha2.update(&k1_);
         let mut k2_ = sha2.finalize_reset();
@@ -85,12 +72,21 @@ impl KeyStream {
     }
 }
 
-impl Drop for KeyStream {
-    fn drop(&mut self) {
-        self.k.zeroize();
-        self.h.zeroize();
-        self.sid.zeroize();
-    }
+/// A finite list of supported hash algorithms.
+///
+/// Extend this list and the methods in [KeyStream] if necessary.
+#[derive(Clone, Copy, Debug)]
+pub enum KeyAlgorithm {
+    Sha256,
+}
+
+/// The direction is either "client -> server" or "server -> client".
+///
+/// The direction information is included when creating keys and results in totally distinct keys.
+#[derive(Clone, Copy, Debug)]
+enum KeyDirection {
+    ClientToServer,
+    ServerToClient,
 }
 
 #[cfg(test)]
@@ -99,14 +95,14 @@ mod tests {
 
     #[test]
     fn test_key_streams_sha2_01() {
-        let k = [
+        let k = Secret::new(&[
             107, 228, 126, 33, 91, 152, 255, 218, 241, 220, 23, 167, 79, 146, 12, 100, 222, 142,
             141, 72, 246, 81, 24, 199, 127, 89, 24, 29, 124, 166, 187, 14,
-        ];
-        let h = [
+        ]);
+        let h = Secret::new(&[
             143, 162, 77, 88, 20, 122, 164, 90, 216, 15, 8, 149, 23, 47, 66, 157, 242, 12, 176, 63,
             153, 120, 103, 133, 17, 36, 10, 69, 6, 145, 250, 211,
-        ];
+        ]);
 
         let c1 = [
             35, 83, 168, 202, 23, 231, 195, 6, 115, 123, 255, 191, 43, 255, 229, 67, 98, 137, 190,
@@ -128,16 +124,14 @@ mod tests {
 
         let alg = KeyAlgorithm::Sha256;
 
-        let dir = KeyDirection::ClientToServer;
-        let key = KeyStream::new(dir, alg, k, SessionId::new(h.clone()), SessionId::new(h));
+        let key = KeyStream::new_c2s(alg, &k, &h, &h);
         let mut k1 = [0; 32];
         let mut k2 = [0; 32];
         key.encryption_32_32(&mut k1, &mut k2);
         assert_eq!(k1, c1, "c1");
         assert_eq!(k2, c2, "c2");
 
-        let dir = KeyDirection::ServerToClient;
-        let key = KeyStream::new(dir, alg, k, SessionId::new(h.clone()), SessionId::new(h));
+        let key = KeyStream::new_s2c(alg, &k, &h, &h);
         let mut k1 = [0; 32];
         let mut k2 = [0; 32];
         key.encryption_32_32(&mut k1, &mut k2);
@@ -147,15 +141,15 @@ mod tests {
 
     #[test]
     fn test_key_streams_sha2_02() {
-        let k = [
+        let k = Secret::new(&[
             207, 228, 126, 33, 91, 152, 255, 218, 241, 220, 23, 167, 79, 146, 12, 100, 222, 142,
             //  ^ first byte of k is > 127
             141, 72, 246, 81, 24, 199, 127, 89, 24, 29, 124, 166, 187, 14,
-        ];
-        let h = [
+        ]);
+        let h = Secret::new(&[
             143, 162, 77, 88, 20, 122, 164, 90, 216, 15, 8, 149, 23, 47, 66, 157, 242, 12, 176, 63,
             153, 120, 103, 133, 17, 36, 10, 69, 6, 145, 250, 211,
-        ];
+        ]);
 
         let c1 = [
             125, 246, 53, 208, 237, 52, 170, 30, 97, 138, 151, 151, 199, 53, 83, 108, 130, 235,
@@ -163,9 +157,7 @@ mod tests {
         ];
 
         let alg = KeyAlgorithm::Sha256;
-
-        let dir = KeyDirection::ClientToServer;
-        let key = KeyStream::new(dir, alg, k, SessionId::new(h.clone()), SessionId::new(h));
+        let key = KeyStream::new_c2s(alg, &k, &h.clone(), &h);
         let mut k1 = [0; 32];
         let mut k2 = [0; 32];
         key.encryption_32_32(&mut k1, &mut k2);

@@ -38,7 +38,7 @@ impl GlobalRequest<()> {
 
     pub fn interpret<T: Global>(self) -> Result<GlobalRequest<T>, Self> {
         if !T::NAME.is_empty() && T::NAME == &self.name {
-            if let Some(data) = SshCodec::decode(&self.data) {
+            if let Ok(data) = SshCodec::decode(&self.data) {
                 return Ok(GlobalRequest {
                     name: self.name,
                     data,
@@ -72,19 +72,17 @@ impl GlobalRequestWantReply<()> {
 
     pub fn interpret<T: GlobalWantReply>(self) -> Result<GlobalRequestWantReply<T>, Self> {
         if !T::NAME.is_empty() && T::NAME == &self.name {
-            if let Some(data) = SshCodec::decode(&self.data) {
+            if let Ok(data) = SshCodec::decode(&self.data) {
                 return Ok(GlobalRequestWantReply {
                     name: self.name,
                     data,
-                    repl: self.repl
+                    repl: self.repl,
                 });
             }
         }
         Err(self)
     }
 }
-
-
 
 impl<T: GlobalWantReply> GlobalRequestWantReply<T> {
     pub fn name(&self) -> &str {
@@ -96,6 +94,7 @@ impl<T: GlobalWantReply> GlobalRequestWantReply<T> {
 
     pub fn accept(self, data: T::ResponseData) {
         SshCodec::encode(&data)
+            .ok()
             .and_then(|data| self.repl.send(data).ok())
             .unwrap_or(())
     }

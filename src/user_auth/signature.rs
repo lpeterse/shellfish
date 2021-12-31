@@ -2,7 +2,7 @@ use super::method::*;
 use super::msg::*;
 use crate::identity::*;
 use crate::transport::Message;
-use crate::transport::SessionId;
+use crate::transport::Secret;
 use crate::util::codec::*;
 
 /// string    session identifier
@@ -14,7 +14,7 @@ use crate::util::codec::*;
 /// string    public key algorithm name
 /// string    public key to be used for authentication
 pub struct SignatureData<'a> {
-    pub session_id: &'a SessionId,
+    pub session_id: &'a Secret,
     pub user_name: &'a str,
     pub service_name: &'a str,
     pub identity: &'a Identity,

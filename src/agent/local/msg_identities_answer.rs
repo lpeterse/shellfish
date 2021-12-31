@@ -62,8 +62,8 @@ mod tests {
             121, 32, 49, 0, 0, 0, 2, 4, 5, 0, 0, 0, 10, 105, 100, 101, 110, 116, 105, 116, 121, 32,
             50,
         ];
-        let actual: Option<MsgIdentitiesAnswer> = SshCodec::decode(input.as_ref());
-        let expected = Some(MsgIdentitiesAnswer {
+        let actual = SshCodec::decode::<MsgIdentitiesAnswer>(input.as_ref());
+        let expected = Ok(MsgIdentitiesAnswer {
             identities: vec![
                 (Identity::from(vec![1, 2, 3]), "identity 1".into()),
                 (Identity::from(vec![4, 5]), "identity 2".into()),

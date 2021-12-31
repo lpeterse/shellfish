@@ -6,6 +6,12 @@ pub(crate) struct MsgChannelFailure {
     pub recipient_channel: u32,
 }
 
+impl MsgChannelFailure {
+    pub fn new(recipient_channel: u32) -> Self {
+        Self { recipient_channel }
+    }
+}
+
 impl Message for MsgChannelFailure {
     const NUMBER: u8 = 100;
 }

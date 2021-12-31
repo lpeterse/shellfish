@@ -1,23 +1,23 @@
-use super::channel::direct_tcpip::DirectTcpIpRequest;
-use super::channel::direct_tcpip::DirectTcpIpState;
+use super::channel::direct_tcpip::DirectTcpIp;
+use super::channel::session;
 use super::channel::session::*;
-use super::channel::state::ChannelState;
 use super::channel::OpenFailure;
-use super::channel::{direct_tcpip::DirectTcpIp, Channel};
+use super::channel::{Channel, ChannelState};
 use super::config::ConnectionConfig;
 use super::error::ConnectionError;
 use super::global::*;
 use super::handler::ConnectionHandler;
 use super::msg::*;
 use super::request::*;
+use crate::connection::channel::PollResult;
 use crate::ready;
+use crate::transport::Message;
 use crate::transport::{DisconnectReason, GenericTransport, Transport, TransportError};
 use crate::util::codec::*;
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::Mutex;
 use std::task::{Context, Poll};
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
@@ -31,9 +31,9 @@ pub struct ConnectionState {
     /// Underlying transport
     transport: GenericTransport,
     /// Next request to process
-    requests_head: Option<ConnectionRequest>,
+    requests_head: Option<Request>,
     /// Async bounded queue of requests to process
-    requests_queue: mpsc::Receiver<ConnectionRequest>,
+    requests_queue: mpsc::Receiver<Request>,
     /// Ordered list of transmitted global requests awaiting reply
     requests_replies: VecDeque<oneshot::Sender<Result<Vec<u8>, ()>>>,
     /// Next global request reply ready for transmission
@@ -43,12 +43,12 @@ pub struct ConnectionState {
     /// List of active channels (index is local channel id)
     channels: Vec<Option<Box<dyn ChannelState>>>,
     /// List of remote channel ids that still need to be rejected due to resource shortage
-    channels_rejections: VecDeque<u32>,
+    channels_reject: VecDeque<(u32, OpenFailure)>,
     /// Canary indicating whether all handles on this connection have been dropped
-    close: oneshot::Sender<()>,
+    close_tx: oneshot::Sender<()>,
     /// Distribution point for eventually occuring connection error
-    error: watch::Sender<Option<Arc<ConnectionError>>>,
-    error_: watch::Receiver<Option<Arc<ConnectionError>>>,
+    error_tx: watch::Sender<Option<Arc<ConnectionError>>>,
+    error_rx: watch::Receiver<Option<Arc<ConnectionError>>>,
 }
 
 impl ConnectionState {
@@ -57,10 +57,10 @@ impl ConnectionState {
         config: &Arc<ConnectionConfig>,
         handler: Box<dyn ConnectionHandler>,
         transport: GenericTransport,
-        requests: mpsc::Receiver<ConnectionRequest>,
-        close: oneshot::Sender<()>,
-        error: watch::Sender<Option<Arc<ConnectionError>>>,
-        error_: watch::Receiver<Option<Arc<ConnectionError>>>,
+        requests: mpsc::Receiver<Request>,
+        close_tx: oneshot::Sender<()>,
+        error_tx: watch::Sender<Option<Arc<ConnectionError>>>,
+        error_rx: watch::Receiver<Option<Arc<ConnectionError>>>,
     ) -> Self {
         Self {
             config: config.clone(),
@@ -72,10 +72,10 @@ impl ConnectionState {
             replies_head: None,
             replies_queue: VecDeque::new(),
             channels: Vec::new(),
-            channels_rejections: VecDeque::new(),
-            close,
-            error,
-            error_
+            channels_reject: VecDeque::new(),
+            close_tx,
+            error_tx,
+            error_rx,
         }
     }
 
@@ -117,7 +117,7 @@ impl ConnectionState {
     /// The function then returns a `disconnect by application` error which shall be handled and
     /// distributed by the caller. The connection task shall then be terminated.
     fn poll_close(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        if self.close.poll_closed(cx).is_ready() || self.handler.poll(cx).is_ready() {
+        if self.close_tx.poll_closed(cx).is_ready() || self.handler.poll(cx).is_ready() {
             let e = TransportError::DisconnectByUs(DisconnectReason::BY_APPLICATION);
             Poll::Ready(Err(e.into()))
         } else {
@@ -145,7 +145,7 @@ impl ConnectionState {
                     .channels
                     .get_mut($lid as usize)
                     .and_then(|x| x.as_mut())
-                    .ok_or(ConnectionError::ChannelIdInvalid)?
+                    .ok_or(ConnectionError::ChannelInvalid)?
             };
         }
         macro_rules! channel_remove {
@@ -154,7 +154,7 @@ impl ConnectionState {
                     .channels
                     .get_mut($lid as usize)
                     .and_then(|x| x.take())
-                    .ok_or(ConnectionError::ChannelIdInvalid)?
+                    .ok_or(ConnectionError::ChannelInvalid)?
             };
         }
         macro_rules! channel_replace {
@@ -163,166 +163,151 @@ impl ConnectionState {
                     .channels
                     .get_mut($lid as usize)
                     .and_then(|x| x.take())
-                    .ok_or(ConnectionError::ChannelIdInvalid)?;
+                    .ok_or(ConnectionError::ChannelInvalid)?;
                 $state.channels[$lid as usize] = Some($f(c)?);
             };
         }
 
-        loop {
-            // Poll the transport for the next message available.
-            // This is the loop's only exit point (except for errors).
-            let buf = match ready!(self.transport.rx_peek(cx))? {
-                None => return Poll::Ready(Ok(())),
-                Some(buf) => buf,
-            };
-            // Dispatch the different message types.
-            if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelOpen = msg;
-                if let Some(lid) = self.alloc_channel_id() {
-                    log::debug!("Channel {}: Received MSG_CHANNEL_OPEN ({})", lid, msg.name);
-                    // Create a new channel state object and call the handler with a corresponding
-                    // channel open request. The channel is not open until channel open confirmation
-                    // has been sent (happens when channel is polled later).
-                    let (s, r) = oneshot::channel();
-                    let lws = self.config.channel_max_buffer_size;
-                    let lps = self.config.channel_max_packet_size;
+        // Poll the transport for the next message available.
+        while let Some(buf) = ready!(self.transport.rx_peek(cx))? {
+            // Dispatch message (must not block; message MUST be dispatched)
+            match *buf.get(0).unwrap_or(&0) {
+                <MsgChannelOpen as Message>::NUMBER => {
+                    let msg: MsgChannelOpen = SshCodec::decode(buf)?;
+                    log::debug!("<< {:?}", msg);
+                    if let Some(lid) = self.alloc_channel_id() {
+                        match msg.name.as_str() {
+                            SessionClient::NAME => {
+                                let (cst, req) = session::open(&self.config, &msg, lid)?;
+                                self.handler.on_session_request(req);
+                                self.channels[lid as usize] = Some(cst);
+                            }
+                            DirectTcpIp::NAME => {
+                                let (cst, req) = DirectTcpIp::open_in(&self.config, &msg, lid)?;
+                                self.handler.on_direct_tcpip_request(req);
+                                self.channels[lid as usize] = Some(cst);
+                            }
+                            _ => {
+                                let e = OpenFailure::UNKNOWN_CHANNEL_TYPE;
+                                self.channels_reject.push_back((msg.sender_channel, e));
+                            }
+                        }
+                    } else {
+                        let e = OpenFailure::RESOURCE_SHORTAGE;
+                        self.channels_reject.push_back((msg.sender_channel, e));
+                    }
+                }
+                <MsgChannelOpenConfirmation as Message>::NUMBER => {
+                    let msg: MsgChannelOpenConfirmation = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
                     let rid = msg.sender_channel;
                     let rws = msg.initial_window_size;
                     let rps = msg.maximum_packet_size;
-                    match msg.name.as_str() {
-                        Session::NAME => {
-                            let cst = SessionServerState::new(lid, lws, lps, rid, rws, rps, r);
-                            let cst = Arc::new(Mutex::new(cst));
-                            let req = SessionRequest {
-                                chan: SessionServer(cst.clone()),
-                                resp: s,
-                            };
-                            self.handler.on_session_request(req);
-                            self.channels[lid as usize] = Some(Box::new(cst));
-                        }
-                        DirectTcpIp::NAME => {
-                            let cst =
-                                DirectTcpIpState::new_inbound(lid, lws, lps, rid, rws, rps, r);
-                            let cst = Arc::new(Mutex::new(cst));
-                            let req = DirectTcpIpRequest {
-                                params: SshCodec::decode(&msg.data)
-                                    .ok_or(TransportError::InvalidEncoding)?,
-                                channel: DirectTcpIp(cst.clone()),
-                                response: s,
-                            };
-                            self.handler.on_direct_tcpip_request(req);
-                            self.channels[lid as usize] = Some(Box::new(cst));
-                        }
-                        _ => {
-                            todo!() // FIXME
-                        }
+                    log::debug!("<< {:?}", msg);
+                    channel_replace!(self, lid, |x: Box<dyn ChannelState>| x
+                        .on_open_confirmation(rid, rws, rps));
+                }
+                <MsgChannelOpenFailure as Message>::NUMBER => {
+                    let msg: MsgChannelOpenFailure = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel_remove!(self, lid).on_open_failure(msg.reason)?;
+                }
+                <MsgChannelData as Message>::NUMBER => {
+                    let msg: MsgChannelData = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_data(msg.data)?;
+                }
+                <MsgChannelExtendedData as Message>::NUMBER => {
+                    let msg: MsgChannelExtendedData = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_ext_data(msg.data_type_code, msg.data)?;
+                }
+                <MsgChannelWindowAdjust as Message>::NUMBER => {
+                    let msg: MsgChannelWindowAdjust = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_window_adjust(msg.bytes_to_add)?;
+                }
+                <MsgChannelEof as Message>::NUMBER => {
+                    let msg: MsgChannelEof = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_eof()?;
+                }
+                <MsgChannelClose as Message>::NUMBER => {
+                    let msg: MsgChannelClose = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_close()?;
+                }
+                <MsgChannelRequest<()> as Message>::NUMBER => {
+                    let msg: MsgChannelRequest<&[u8]> = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    let typ = msg.request;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_request(typ, msg.specific, msg.want_reply)?;
+                }
+                <MsgChannelSuccess as Message>::NUMBER => {
+                    let msg: MsgChannelSuccess = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel_replace!(self, lid, |x: Box<dyn ChannelState>| x.on_success());
+                }
+                <MsgChannelFailure as Message>::NUMBER => {
+                    let msg: MsgChannelFailure = SshCodec::decode(buf)?;
+                    let lid = msg.recipient_channel;
+                    log::debug!("<< {:?}", msg);
+                    channel!(self, lid).on_failure()?;
+                }
+                <MsgGlobalRequest as Message>::NUMBER => {
+                    let msg: MsgGlobalRequest = SshCodec::decode(buf)?;
+                    log::debug!("<< {:?}", msg);
+                    if msg.want_reply {
+                        let (s, r) = oneshot::channel();
+                        self.replies_queue.push_back(r);
+                        let request =
+                            GlobalRequestWantReply::new(msg.name.into(), msg.data.into(), s);
+                        self.handler.on_request_want_reply(request);
+                    } else {
+                        let request = GlobalRequest::new(msg.name.into(), msg.data.into());
+                        self.handler.on_request(request);
                     }
-                } else {
-                    log::debug!("Channel _: Rejecting MSG_CHANNEL_OPEN ({})", msg.name);
-                    self.channels_rejections.push_back(msg.sender_channel);
                 }
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelOpenConfirmation = msg;
-                let lid = msg.recipient_channel;
-                let rid = msg.sender_channel;
-                let rws = msg.initial_window_size;
-                let rps = msg.maximum_packet_size;
-                log::debug!("Channel {}: Received MSG_CHANNEL_OPEN_CONFIRMATION", lid);
-                channel_replace!(self, lid, |x: Box<dyn ChannelState>| x
-                    .on_open_confirmation(rid, rws, rps));
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgOpenFailure = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_OPEN_FAILURE", lid);
-                channel_remove!(self, lid).on_open_failure(msg.reason)?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelData = msg;
-                let lid = msg.recipient_channel;
-                let len = msg.data.len();
-                log::debug!("Channel {}: Received MSG_CHANNEL_DATA ({} bytes)", lid, len);
-                channel!(self, lid).on_data(msg.data)?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelExtendedData = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_EXTENDED_DATA", lid);
-                channel!(self, lid).on_ext_data(msg.data_type_code, msg.data)?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelWindowAdjust = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_WINDOW_ADJUST", lid);
-                channel!(self, lid).on_window_adjust(msg.bytes_to_add)?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelEof = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_EOF", lid);
-                channel!(self, lid).on_eof()?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelClose = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_CLOSE", lid);
-                channel!(self, lid).on_close()?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelRequest<&[u8]> = msg;
-                let lid = msg.recipient_channel;
-                let typ = msg.request;
-                log::debug!("Channel {}: Received MSG_CHANNEL_REQUEST: {:?}", lid, typ);
-                channel!(self, lid).on_request(typ, msg.specific, msg.want_reply)?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelSuccess = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_SUCCESS", lid);
-                channel!(self, lid).on_success()?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgChannelFailure = msg;
-                let lid = msg.recipient_channel;
-                log::debug!("Channel {}: Received MSG_CHANNEL_FAILURE", lid);
-                channel!(self, lid).on_failure()?;
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgGlobalRequest = msg;
-                log::debug!("Received MSG_GLOBAL_REQUEST: {}", msg.name);
-                if msg.want_reply {
-                    let (s, r) = oneshot::channel();
-                    self.replies_queue.push_back(r);
-                    let request = GlobalRequestWantReply::new(msg.name.into(), msg.data.into(), s);
-                    self.handler.on_request_want_reply(request);
-                } else {
-                    let request = GlobalRequest::new(msg.name.into(), msg.data.into());
-                    self.handler.on_request(request);
+                <MsgRequestSuccess as Message>::NUMBER => {
+                    let msg: MsgRequestSuccess = SshCodec::decode(buf)?;
+                    log::debug!("<< {:?}", msg);
+                    let data = msg.data.into();
+                    self.requests_replies
+                        .pop_front()
+                        .ok_or(ConnectionError::GlobalReplyUnexpected)
+                        .map(|s| s.send(Ok(data)).unwrap_or(()))?;
                 }
-                Ok(())
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgRequestSuccess = msg;
-                log::debug!("Received MSG_REQUEST_SUCCESS");
-                let data = msg.data.into();
-                self.requests_replies
-                    .pop_front()
-                    .ok_or(ConnectionError::GlobalReplyUnexpected)
-                    .map(|s| s.send(Ok(data)).unwrap_or(()))
-            } else if let Some(msg) = SshCodec::decode(buf) {
-                let _: MsgRequestFailure = msg;
-                log::debug!("Received MSG_REQUEST_FAILURE");
-                self.requests_replies
-                    .pop_front()
-                    .ok_or(ConnectionError::GlobalReplyUnexpected)
-                    .map(|s| s.send(Err(())).unwrap_or(()))
-            } else {
-                unimplemented!() // FIXME
-            }?;
+                <MsgRequestFailure as Message>::NUMBER => {
+                    let msg: MsgRequestFailure = SshCodec::decode(buf)?;
+                    log::debug!("<< {:?}", msg);
+                    self.requests_replies
+                        .pop_front()
+                        .ok_or(ConnectionError::GlobalReplyUnexpected)
+                        .map(|s| s.send(Err(())).unwrap_or(()))?
+                }
+                x => {
+                    log::debug!("<< Unimplemented message type {}", x);
+                    // MSG_UNIMPLEMENTED(3) may be sent even during key re-exchange.
+                    // In case the following call returns `Pending` this can only be due to output
+                    // buffer congestion, thus a later retry here will succeed and not lead to a
+                    // deadlock situation like with other message types.
+                    ready!(self.transport.poll_send_unimplemented(cx)?);
+                }
+            }
 
             // Consume the message buffer after successful dispatch!
             self.transport.rx_consume()?;
         }
+
+        Poll::Ready(Ok(()))
     }
 
     /// Try sending ready global request replies (if any).
@@ -394,7 +379,7 @@ impl ConnectionState {
                 }
             };
             match cr {
-                ConnectionRequest::Global { name, data, reply } => {
+                Request::Global { name, data, reply } => {
                     let msg = MsgGlobalRequest {
                         name: &name,
                         data: &data.as_ref(),
@@ -403,7 +388,7 @@ impl ConnectionState {
                     match self.transport.poll_send(cx, &msg) {
                         Poll::Ready(r) => r?,
                         Poll::Pending => {
-                            let cr = ConnectionRequest::Global { name, data, reply };
+                            let cr = Request::Global { name, data, reply };
                             self.requests_head = Some(cr);
                             return Poll::Pending;
                         }
@@ -412,54 +397,20 @@ impl ConnectionState {
                         self.requests_replies.push_back(reply);
                     }
                 }
-                ConnectionRequest::OpenSession { reply } => {
+                Request::OpenSession { reply } => {
                     if let Some(lid) = self.alloc_channel_id() {
-                        let lws = self.config.channel_max_buffer_size as u32;
-                        let lps = self.config.channel_max_packet_size as u32;
-                        let msg = MsgChannelOpen {
-                            name: DirectTcpIp::NAME,
-                            sender_channel: lid,
-                            initial_window_size: lws,
-                            maximum_packet_size: lps,
-                            data: Vec::new(),
-                        };
-                        match self.transport.poll_send(cx, &msg) {
-                            Poll::Ready(r) => r?,
-                            Poll::Pending => {
-                                let cr = ConnectionRequest::OpenSession { reply };
-                                self.requests_head = Some(cr);
-                                return Poll::Pending;
-                            }
-                        }
-                        let cst =
-                            SessionClientState0::new(lid, lws, lps, reply, self.error_.clone());
-                        self.channels[lid as usize] = Some(Box::new(cst));
+                        let error_rx = self.error_rx.clone();
+                        let channel = SessionClient::open(&self.config, lid, error_rx, reply);
+                        self.channels[lid as usize] = Some(channel);
                     } else {
                         let e = OpenFailure::RESOURCE_SHORTAGE;
                         reply.send(Err(e)).unwrap_or(());
                     }
                 }
-                ConnectionRequest::OpenDirectTcpIp { data, reply } => {
+                Request::OpenDirectTcpIp { reply, params } => {
                     if let Some(lid) = self.alloc_channel_id() {
-                        let lws = self.config.channel_max_buffer_size as u32;
-                        let lps = self.config.channel_max_packet_size as u32;
-                        let msg = MsgChannelOpen {
-                            name: DirectTcpIp::NAME,
-                            sender_channel: lid,
-                            initial_window_size: lws,
-                            maximum_packet_size: lps,
-                            data: data.clone(),
-                        };
-                        match self.transport.poll_send(cx, &msg) {
-                            Poll::Ready(r) => r?,
-                            Poll::Pending => {
-                                let cr = ConnectionRequest::OpenDirectTcpIp { data, reply };
-                                self.requests_head = Some(cr);
-                                return Poll::Pending;
-                            }
-                        }
-                        let cst = DirectTcpIpState::new_outbound(lid, lws, lps, reply);
-                        self.channels[lid as usize] = Some(Box::new(Arc::new(Mutex::new(cst))));
+                        let channel = DirectTcpIp::open_out(&self.config, lid, reply, params)?;
+                        self.channels[lid as usize] = Some(channel);
                     } else {
                         let e = OpenFailure::RESOURCE_SHORTAGE;
                         reply.send(Err(e)).unwrap_or(());
@@ -482,31 +433,31 @@ impl ConnectionState {
     /// state get finally freed as soon as the last handle on it gets dropped which might not be
     /// the one that is dropped here depending on which side initiated the close procedure.
     fn poll_channels(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        while let Some(rid) = self.channels_rejections.front() {
-            let msg = MsgOpenFailure::new(*rid, OpenFailure::RESOURCE_SHORTAGE);
+        while let Some((rid, e)) = self.channels_reject.front() {
+            let msg = MsgChannelOpenFailure::new(*rid, *e);
             ready!(self.transport.poll_send(cx, &msg))?;
-            let _ = self.channels_rejections.pop_front();
+            let _ = self.channels_reject.pop_front();
         }
 
         let mut empty_tail_elements = 0;
 
         for channel in &mut self.channels {
-            let mut closed = false;
-            if let Some(ref mut channel) = channel {
-                empty_tail_elements = 0;
-                closed = ready!(channel.poll_with_transport(cx, &mut self.transport))?;
-            } else {
-                empty_tail_elements += 1;
+            if let Some(ref mut c) = channel {
+                match ready!(c.poll_with_transport(cx, &mut self.transport))? {
+                    PollResult::Noop => (),
+                    PollResult::Closed => *channel = None,
+                    PollResult::Replace(x) => *channel = Some(x),
+                }
             }
-            if closed {
-                // The channel is actually an `Arc`. We just detach it from the connection.
-                // It is freed as soon as the `ChannelHandle` gets dropped.
-                *channel = None;
+            if channel.is_none() {
+                empty_tail_elements += 1;
+            } else {
+                empty_tail_elements = 0;
             }
         }
 
+        // Truncate the channel list if it contains empty channel slots at the end.
         if empty_tail_elements > 0 {
-            // Truncate the channel list if it contains empty channel slots at the end.
             let keep = self.channels.len() - empty_tail_elements;
             self.channels.truncate(keep);
             self.channels.shrink_to_fit();
@@ -539,8 +490,14 @@ impl Future for ConnectionState {
     type Output = ();
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context) -> Poll<Self::Output> {
+        log::trace!("ConnectionState.poll()");
         let self_ = Pin::into_inner(self);
         if let Err(e) = ready!(self_.poll_everything(cx)) {
+            // In case an error occurs do the following in this order:
+            //   1. Replace and thereby drop the connection handler
+            //   2. Dispatch the error to all channels and drop the handles on them
+            //   3. Broadcast the error to all other users of the connection
+            //   4. Return `Poll::Ready` and thereby terminate the connection task
             let e = Arc::new(e);
             std::mem::replace(&mut self_.handler, Box::new(())).on_error(&e);
             for channel in &mut self_.channels {
@@ -548,7 +505,7 @@ impl Future for ConnectionState {
                     channel.on_error(&e);
                 }
             }
-            let _ = self_.error.send(Some(e));
+            let _ = self_.error_tx.send(Some(e));
             Poll::Ready(())
         } else {
             Poll::Pending

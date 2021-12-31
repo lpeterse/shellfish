@@ -29,21 +29,26 @@ mod tests {
     fn test_encode_01() {
         let mut buf = [0];
         let mut enc = RefEncoder::new(buf.as_mut());
-        assert_eq!(SshEncode::encode(&MsgIdentitiesRequest {}, &mut enc), Some(()));
+        assert_eq!(
+            SshEncode::encode(&MsgIdentitiesRequest {}, &mut enc),
+            Some(())
+        );
         assert_eq!([11], buf);
     }
 
     #[test]
     fn test_decode_01() {
         let buf = [11];
-        let res = Some(MsgIdentitiesRequest {});
+        let res = Ok(MsgIdentitiesRequest {});
         assert_eq!(res, SshCodec::decode(buf.as_ref()));
     }
 
     #[test]
     fn test_decode_02() {
         let buf = [0];
-        let res: Option<MsgIdentitiesRequest> = None;
-        assert_eq!(res, SshCodec::decode(buf.as_ref()));
+        assert_eq!(
+            SshCodec::decode::<MsgIdentitiesRequest>(buf.as_ref()).is_ok(),
+            false
+        );
     }
 }

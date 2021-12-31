@@ -1,42 +1,43 @@
-use super::super::ecdh::*;
 use super::Message;
 use crate::identity::*;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgKexEcdhReply<A: EcdhAlgorithm> {
+pub struct MsgKexEcdhReply {
     pub host_key: Identity,
-    pub dh_public: A::PublicKey,
+    pub dh_public: Vec<u8>,
     pub signature: Signature,
 }
 
-impl<A: EcdhAlgorithm> Message for MsgKexEcdhReply<A> {
+impl MsgKexEcdhReply {
+    pub fn new(host_key: Identity, dh_public: Vec<u8>, signature: Signature) -> Self {
+        Self {
+            host_key,
+            dh_public,
+            signature,
+        }
+    }
+}
+
+impl Message for MsgKexEcdhReply {
     const NUMBER: u8 = 31;
 }
 
-impl<A> SshEncode for MsgKexEcdhReply<A>
-where
-    A: EcdhAlgorithm,
-    A::PublicKey: SshEncode,
-{
+impl SshEncode for MsgKexEcdhReply {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push(&self.host_key)?;
-        e.push(&self.dh_public)?;
+        e.push_bytes_framed(&self.dh_public)?;
         e.push(&self.signature)
     }
 }
 
-impl<A: EcdhAlgorithm> SshDecode for MsgKexEcdhReply<A>
-where
-    A: EcdhAlgorithm,
-    A::PublicKey: SshDecode,
-{
+impl SshDecode for MsgKexEcdhReply {
     fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {
             host_key: d.take()?,
-            dh_public: d.take()?,
+            dh_public: d.take_bytes_framed()?.into(),
             signature: d.take()?,
         }
         .into()

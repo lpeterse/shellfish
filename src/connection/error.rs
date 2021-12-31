@@ -1,35 +1,37 @@
-use crate::transport::TransportError;
-use super::channel::OpenFailure;
-use tokio::sync::watch;
+use super::channel::{OpenFailure, RequestFailure};
+use crate::{transport::TransportError, util::codec::SshCodecError};
 use std::sync::Arc;
+use tokio::sync::watch;
 
 pub type ConnectionErrorWatch = watch::Receiver<Option<Arc<ConnectionError>>>;
 
 #[derive(Clone, Debug)]
 pub enum ConnectionError {
     IoError(std::sync::Arc<std::io::Error>),
+    CodecError(SshCodecError),
     TransportError(TransportError),
-    OpenFailure(OpenFailure),
-    ChannelOpenUnexpected,
-    ChannelOpenConfirmationUnexpected,
-    OpenFailureUnexpected,
-    ChannelWindowAdjustUnexpected,
-    ChannelWindowAdjustOverflow,
-    ChannelIdInvalid,
+    ChannelBufferSizeExceeded,
+    ChannelCloseUnexpected,
     ChannelDataUnexpected,
     ChannelEofUnexpected,
-    ChannelCloseUnexpected,
     ChannelExtendedDataUnexpected,
+    ChannelFailureUnexpected,
+    ChannelInvalid,
+    ChannelOpenConfirmationUnexpected,
+    ChannelOpenFailure(OpenFailure),
+    ChannelOpenFailureUnexpected,
+    ChannelOpenUnexpected,
+    ChannelPacketSizeExceeded,
+    ChannelPacketSizeInvalid,
+    ChannelPtyRejected,
     ChannelRequestFailure,
     ChannelRequestUnexpected,
-    ChannelFailureUnexpected,
     ChannelSuccessUnexpected,
+    ChannelTypeMismatch,
+    ChannelWindowAdjustOverflow,
+    ChannelWindowAdjustUnexpected,
     ChannelWindowSizeExceeded,
     ChannelWindowSizeOverflow,
-    ChannelMaxPacketSizeExceeded,
-    ChannelBufferSizeExceeded,
-    ChannelTypeMismatch,
-    ChannelPtyRejected,
     GlobalReplyUnexpected,
     ResourceExhaustion,
     Dropped,
@@ -41,6 +43,12 @@ impl From<std::io::Error> for ConnectionError {
     }
 }
 
+impl From<SshCodecError> for ConnectionError {
+    fn from(e: SshCodecError) -> Self {
+        Self::CodecError(e)
+    }
+}
+
 impl From<TransportError> for ConnectionError {
     fn from(e: TransportError) -> Self {
         Self::TransportError(e)
@@ -49,7 +57,13 @@ impl From<TransportError> for ConnectionError {
 
 impl From<OpenFailure> for ConnectionError {
     fn from(e: OpenFailure) -> Self {
-        Self::OpenFailure(e)
+        Self::ChannelOpenFailure(e)
+    }
+}
+
+impl <T> From<RequestFailure<T>> for ConnectionError {
+    fn from(_: RequestFailure<T>) -> Self {
+        Self::ChannelRequestFailure
     }
 }
 
