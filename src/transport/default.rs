@@ -52,8 +52,8 @@ impl<S: Socket> DefaultTransport<S> {
     /// The initial key exchange has been completed successfully when function returns.
     pub async fn accept(
         config: &Arc<TransportConfig>,
-        agent: &Arc<dyn AuthAgent>,
         socket: S,
+        agent: &Arc<dyn AuthAgent>,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(&config, socket);
         trx.tx_id(&config.identification).await?;

@@ -31,7 +31,7 @@ impl Server {
             let (s, addr) = tl.accept().await.map_err(fe)?;
             let ct = &self.config.transport;
             let ca = &self.config.auth_agent;
-            let t = DefaultTransport::accept(ct, ca, s).await?;
+            let t = DefaultTransport::accept(ct, s, ca).await?;
             log::warn!("ACCEPTED");
         }
         Ok(())
