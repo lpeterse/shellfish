@@ -2,7 +2,7 @@ use super::ciphers;
 use super::common_;
 use super::config::TransportConfig;
 use super::error::TransportError;
-use super::id::Identification;
+use super::ident::Identification;
 use super::keys::KeyAlgorithm;
 use super::msg::*;
 use super::CipherConfig;
@@ -10,7 +10,7 @@ use super::Curve25519Sha256;
 use super::Kex;
 use super::KexAlgorithm;
 use super::KexCookie;
-use super::KexEcdhHash;
+use super::KexHash;
 use super::KexMessage;
 use crate::agent::AuthAgent;
 use crate::agent::AuthAgentFuture;
@@ -69,15 +69,15 @@ impl ServerKex {
         config: &Arc<TransportConfig>,
         agent: &Arc<dyn AuthAgent>,
         client_id: Identification<String>,
-    ) -> Self {
-        Self {
+    ) -> Box<dyn Kex> {
+        Box::new(Self {
             config: config.clone(),
             agent: agent.clone(),
             client_id,
             session_id: None,
             state: None,
             output: VecDeque::new(),
-        }
+        })
     }
 }
 
@@ -97,7 +97,7 @@ impl Kex for ServerKex {
         Ok(())
     }
 
-    fn push_ecdh_init(&mut self, msg: MsgKexEcdhInit) -> Result<(), TransportError> {
+    fn push_ecdh_init(&mut self, msg: MsgEcdhInit) -> Result<(), TransportError> {
         let s = self.state.as_mut().ok_or(EIST)?;
         check(isset!(s, INIT_RCVD)).ok_or(EIST)?;
         check(nisset!(s, ECDH_RCVD)).ok_or(EIST)?;
@@ -168,7 +168,7 @@ impl Kex for ServerKex {
                         // Compute the shared secret
                         let k = Secret::new(dh_sec_srv.diffie_hellman(&dh_pub_cli).as_bytes());
                         // Compute the exchange hash over the data exchanged so far
-                        let h: Secret = KexEcdhHash::<_, _> {
+                        let h: Secret = KexHash::<_, _> {
                             client_id: &self.client_id,
                             server_id: &self.config.identification,
                             client_kex_init: &ki_cli,
@@ -202,7 +202,7 @@ impl Kex for ServerKex {
                 let shk = s.server_host_key.take().ok_or(EIST)?;
                 let sdp = s.server_ecdh_pub.take().ok_or(EIST)?;
                 let s2c = s.cipher_s2c.take().ok_or(EIST)?;
-                let msg1 = MsgKexEcdhReply::new(shk, sdp, sig);
+                let msg1 = MsgEcdhReply::new(shk, sdp, sig);
                 s.server_signature = None;
                 self.output.push_back(KexMessage::EcdhReply(Arc::new(msg1)));
                 self.output.push_back(KexMessage::NewKeys(s2c));
@@ -229,7 +229,7 @@ impl std::fmt::Debug for ServerKex {
 struct State {
     state: u8,
     client_init: Option<Arc<MsgKexInit<String>>>,
-    client_ecdh_init: Option<Arc<MsgKexEcdhInit>>,
+    client_ecdh_init: Option<Arc<MsgEcdhInit>>,
     server_init: Option<Arc<MsgKexInit<&'static str>>>,
     server_host_keys_fut: Option<AuthAgentFuture<Vec<(Identity, String)>>>,
     server_host_keys: Option<Vec<(Identity, String)>>,

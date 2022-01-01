@@ -12,10 +12,11 @@ pub enum TransportError {
     AgentError(AuthAgentError),
     AgentRefusedToSign,
     InvalidEncoding,
-    InvalidState,
+    InvalidEncryption,
+    InvalidMessageKexCritical,
     InvalidPacket,
     InvalidPacketLength,
-    InvalidEncryption,
+    InvalidState,
     InvalidSignature,
     InvalidIdentification,
     InvalidIdentity(HostVerificationError),
@@ -63,6 +64,9 @@ impl std::fmt::Display for TransportError {
             Self::InvalidEncoding => write!(f, "Invalid encoding"),
             Self::InvalidState => write!(f, "Invalid state (protocol error)"),
             Self::InvalidPacket => write!(f, "Invalid packet structure"),
+            Self::InvalidMessageKexCritical => {
+                write!(f, "Invalid message received (>49) while kex was critical")
+            }
             Self::InvalidPacketLength => write!(f, "Invalid packet length"),
             Self::InvalidEncryption => write!(f, "Invalid encryption (message integrity etc)"),
             Self::InvalidSignature => write!(f, "Invalid signature"),

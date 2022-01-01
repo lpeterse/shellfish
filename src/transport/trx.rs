@@ -1,4 +1,4 @@
-use super::id::CrLf;
+use super::ident::CrLf;
 use super::CipherContext;
 use super::Identification;
 use super::TransportConfig;

@@ -40,7 +40,7 @@ impl ClientKex {
         host_name: &str,
         host_port: u16,
         host_id: Identification<String>,
-    ) -> Self {
+    ) -> Box<dyn Kex> {
         let mut self_ = Self {
             config: config.clone(),
             host_verifier: host_verifier.clone(),
@@ -53,7 +53,7 @@ impl ClientKex {
             output: VecDeque::new(),
         };
         self_.init();
-        self_
+        Box::new(self_)
     }
 }
 
@@ -87,7 +87,7 @@ impl Kex for ClientKex {
                         let ecdh_secret = x25519_dalek::EphemeralSecret::new(&mut OsRng);
                         let ecdh_public = x25519_dalek::PublicKey::from(&ecdh_secret);
                         let ecdh_public = ecdh_public.as_bytes().to_vec();
-                        let ecdh_client = MsgKexEcdhInit::new(ecdh_public);
+                        let ecdh_client = MsgEcdhInit::new(ecdh_public);
                         let ecdh_client = Arc::new(ecdh_client);
                         let s = StateEcdhCurve25519Sha256 {
                             init_client,
@@ -105,7 +105,7 @@ impl Kex for ClientKex {
         }
     }
 
-    fn push_ecdh_reply(&mut self, msg: MsgKexEcdhReply) -> Result<(), TransportError> {
+    fn push_ecdh_reply(&mut self, msg: MsgEcdhReply) -> Result<(), TransportError> {
         match std::mem::replace(&mut self.state, State::Idle) {
             State::EcdhCurve25519Sha256(x) => {
                 // Compute the DH shared secret (create a new placeholder while
@@ -116,7 +116,7 @@ impl Kex for ClientKex {
                 let dh_public_server = x25519_dalek::PublicKey::from(dh_public_server);
                 let k = Secret::new(x.ecdh_secret.diffie_hellman(&dh_public_server).as_bytes());
                 // Compute the exchange hash over the data exchanged so far.
-                let h: Secret = KexEcdhHash::<_, _> {
+                let h: Secret = KexHash::<_, _> {
                     client_id: &self.config.identification,
                     server_id: &self.host_id,
                     client_kex_init: &x.init_client,

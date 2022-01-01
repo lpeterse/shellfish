@@ -1,8 +1,7 @@
 use super::super::config::TransportConfig;
-use super::super::cookie::KexCookie;
 use super::super::crypto::*;
 use super::super::error::TransportError;
-use super::super::kex::intersection;
+use super::super::kex::KexCookie;
 use super::Message;
 use crate::identity::*;
 use crate::util::codec::*;

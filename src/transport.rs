@@ -1,35 +1,29 @@
 pub(crate) mod config;
-pub(crate) mod cookie;
 pub(crate) mod crypto;
 pub(crate) mod disconnect;
-pub(crate) mod ecdh;
 pub(crate) mod error;
-pub(crate) mod id;
+pub(crate) mod ident;
 pub(crate) mod kex;
 pub(crate) mod keys;
 pub(crate) mod msg;
-pub(crate) mod transceiver;
+pub(crate) mod trx;
 
 pub(crate) use self::crypto::*;
 pub(crate) use self::disconnect::*;
-pub(crate) use self::ecdh::*;
 pub(crate) use self::kex::*;
 pub(crate) use self::msg::*;
 
 pub use self::config::TransportConfig;
 pub use self::error::TransportError;
-pub use self::id::Identification;
+pub use self::ident::Identification;
 
-use self::transceiver::*;
+use self::trx::*;
 use crate::agent::AuthAgent;
 use crate::host::HostVerifier;
 use crate::ready;
-use crate::util::codec::RefEncoder;
 use crate::util::codec::SshCodec;
-use crate::util::codec::SshCodecError;
 use crate::util::codec::SshDecode;
 use crate::util::codec::SshEncode;
-use crate::util::codec::SshEncoder;
 use crate::util::poll_fn;
 use crate::util::secret::Secret;
 use crate::util::socket::Socket;
@@ -38,6 +32,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::time::{sleep, Instant, Sleep};
+
+const MSG_NUMBER_TRANSPORT_MAX: u8 = 49;
 
 /// Implements the transport layer as described in RFC 4253.
 #[derive(Debug)]
@@ -58,7 +54,7 @@ pub struct Transport {
 impl Transport {
     /// Create a new transport acting as client.
     ///
-    /// The initial key exchange has been completed successfully when function returns.
+    /// The initial key exchange has completed successfully when function returns.
     pub async fn connect<S: Socket>(
         config: &Arc<TransportConfig>,
         socket: S,
@@ -70,15 +66,14 @@ impl Transport {
         trx.tx_id(&config.identification).await?;
         let id = trx.rx_id(true).await?;
         let kex = ClientKex::new(config, host_verifier, host_name, host_port, id);
-        let kex = Box::new(kex);
-        let mut transport = Self::new(config, trx, kex);
-        poll_fn(|cx| transport.poll_first_kex(cx)).await?;
-        Ok(transport)
+        let mut t = Self::new(config, trx, kex);
+        poll_fn(|cx| t.poll_first_kex(cx)).await?;
+        Ok(t)
     }
 
     /// Create a new transport acting as server.
     ///
-    /// The initial key exchange has been completed successfully when function returns.
+    /// The initial key exchange has completed successfully when function returns.
     pub async fn accept<S: Socket>(
         config: &Arc<TransportConfig>,
         socket: S,
@@ -88,24 +83,122 @@ impl Transport {
         trx.tx_id(&config.identification).await?;
         let id = trx.rx_id(false).await?;
         let kex = ServerKex::new(config, agent, id);
-        let kex = Box::new(kex);
-        let mut transport = Self::new(config, trx, kex);
-        poll_fn(|cx| transport.poll_first_kex(cx)).await?;
-        Ok(transport)
+        let mut t = Self::new(config, trx, kex);
+        poll_fn(|cx| t.poll_first_kex(cx)).await?;
+        Ok(t)
     }
 
-    /// Try to receive the next message.
+    /// Request a service by name.
     ///
-    /// Any message received MUST be dispatched _and_ [consumed](Self::consume).
-    /// It is critical to call this function in order to guarantee progress and drive internal
-    /// tasks like kex.
+    /// Service requests either succeed or the connection gets terminated with a disconnect message.
+    /// You cannot re-try with another service (which is why the method consumes `self`).
+    ///
+    /// Although any service might be requested by this method, in reality it is only really
+    /// useful for requesting the [ssh-userauth](crate::user_auth::UserAuth) service which in turn
+    /// requests another service. Requesting a service through this method means you're requesting
+    /// a public/anonymous service.
+    pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
+        let msg = MsgServiceRequest(service_name);
+        self.send(&msg).await?;
+        self.flush().await?;
+        log::debug!("Tx MSG_SERVICE_REQUEST");
+        self.receive::<MsgServiceAccept>().await?;
+        log::debug!("Rx MSG_SERVICE_ACCEPT");
+        Ok(self)
+    }
+
+    /// Send a message.
+    ///
+    /// This method shall only be used to send non-transport messages.
+    ///
+    /// Sending a message only enqueues it for transmission, but it is not guaranteed that it has
+    /// actually been transmitted when this function returns. Use [flush](Self::flush) in order
+    /// to ensure actual transmission (but use it wisely).
+    pub async fn send<M: Message + SshEncode>(&mut self, msg: &M) -> Result<(), TransportError> {
+        poll_fn(|cx| self.poll_send(cx, msg)).await
+    }
+
+    /// Receive a message.
+    ///
+    /// Only non-transport messages will be received (others are dispatched internally).
+    ///
+    /// The receive call blocks until either the next non-transport message arrives or an error
+    /// occurs.
+    pub async fn receive<M: SshDecode>(&mut self) -> Result<M, TransportError> {
+        poll_fn(|cx| self.poll_receive(cx)).await
+    }
+
+    /// Flush all output buffers.
+    ///
+    /// When the function returns without an error it is guaranteed that all messages that have
+    /// previously been enqueued with [send](Self::send) have been transmitted and all output
+    /// buffers are empty. Of course, this does not imply anything about successful reception of
+    /// those messages.
+    ///
+    /// Do not flush too deliberately! The transport will automatically transmit the output buffers
+    /// when you continue filling them by sending messages. Flush shall rather be used when
+    /// you sent something like a request and need to make sure it has been transmitted before
+    /// starting to wait for the response.
+    pub async fn flush(&mut self) -> Result<(), TransportError> {
+        poll_fn(|cx| self.poll_flush(cx)).await
+    }
+
+    /// Like [send](Self::send) but low-level.
+    pub fn poll_send<M: Message + SshEncode>(
+        &mut self,
+        cx: &mut Context,
+        msg: &M,
+    ) -> Poll<Result<(), TransportError>> {
+        if M::NUMBER > MSG_NUMBER_TRANSPORT_MAX && self.kex_tx_critical {
+            // Message must not be sent right now. Need to finish kex first..
+            let unconsumed = ready!(self.poll_receive_buf(cx))?.is_some();
+            // Most likely the `ready!` has returned pending. Otherwise we check again..
+            if self.kex_tx_critical {
+                // Kex still not finished..
+                return if unconsumed {
+                    // Unconsumed non-transport inbound message makes it impossible to finish
+                    // kex. This is considered an error condition that should have been avoided
+                    // by calling [poll_receive_buf] before. We must not return Pending here
+                    // as this would lead to the task never waking up again.
+                    Poll::Ready(Err(TransportError::InvalidMessageKexCritical))
+                } else {
+                    Poll::Pending // safe as to definition of [poll_receive_buf]
+                };
+            }
+        }
+        Self::poll_send_trx(&mut self.trx, cx, msg)
+    }
+
+    /// Like [receive](Self::poll) but low-level.
+    pub fn poll_receive<M: SshDecode>(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<M, TransportError>> {
+        if let Some(buf) = ready!(self.poll_receive_buf(cx))? {
+            let msg = SshCodec::decode(buf)?;
+            self.consume_receive_buf()?;
+            Poll::Ready(Ok(msg))
+        } else {
+            Poll::Pending // safe as to definition of [poll_receive_buf]
+        }
+    }
+
+    /// Try to receive the next message as a buffer reference.
+    ///
+    /// This method does _not_ remove the message from the input queue. It is necessary to call
+    /// [consume_buf](Self::consume_buf) once after the message has been processed (or it would be
+    /// returned again on the next call).
+    ///
+    /// It is critical to dispatch and consume all messages in order to driver internal tasks like kex!
     ///
     /// - Returns `Pending` during key exchange (will unblock as soon as kex is complete).
-    /// - Returns `Ready(Ok(Some(msg)))` for each inbound non-transport layer message.
-    /// - Returns `Ready(Ok(None))` if no message is available for now.
-    /// - Returns `Ready(Err(_))` for all errors (internal state is undefined afterwards and
-    ///   instance must not be used).
-    pub fn poll_next(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
+    /// - Returns `Ready(Ok(Some(_)))` for each inbound non-transport layer message.
+    /// - Returns `Ready(Ok(None))` if no message is available for now (MAY be escalated as [Poll::Pending]).
+    pub fn poll_receive_buf(
+        &mut self,
+        cx: &mut Context,
+    ) -> Poll<Result<Option<&[u8]>, TransportError>> {
+        log::debug!("poll_receive_buf");
         // Process all incoming messages as long as they belong to the transport layer.
         while let Poll::Ready(buf) = self.trx.rx_peek(cx)? {
             match *buf.get(0).ok_or(TransportError::InvalidPacket)? {
@@ -145,28 +238,28 @@ impl Transport {
                     self.trx.rx_consume()?;
                     self.kex_rx_critical = true;
                 }
-                MsgKexEcdhInit::NUMBER => {
+                MsgEcdhInit::NUMBER => {
                     log::debug!("Rx MSG_ECDH_INIT");
-                    let msg: MsgKexEcdhInit = SshCodec::decode(buf)?;
+                    let msg: MsgEcdhInit = SshCodec::decode(buf)?;
                     self.kex.push_ecdh_init(msg)?;
                     self.trx.rx_consume()?;
                 }
-                MsgKexEcdhReply::NUMBER => {
+                MsgEcdhReply::NUMBER => {
                     log::debug!("Rx MSG_ECDH_REPLY");
-                    let msg: MsgKexEcdhReply = SshCodec::decode(buf)?;
+                    let msg: MsgEcdhReply = SshCodec::decode(buf)?;
                     self.kex.push_ecdh_reply(msg)?;
                     self.trx.rx_consume()?;
                 }
-                MsgNewKeys::NUMBER => {
+                MsgNewkeys::NUMBER => {
                     log::debug!("Rx MSG_NEWKEYS");
                     let cipher = self.kex.push_new_keys()?;
                     self.trx.rx_cipher().update(cipher)?;
                     self.trx.rx_consume()?;
                     self.kex_rx_critical = false;
                 }
-                _ => {
-                    if self.kex_rx_critical {
-                        return Poll::Ready(Err(TransportError::InvalidState));
+                n => {
+                    if n > MSG_NUMBER_TRANSPORT_MAX && self.kex_rx_critical {
+                        return Poll::Ready(Err(TransportError::InvalidMessageKexCritical));
                     } else {
                         break;
                     }
@@ -183,20 +276,20 @@ impl Transport {
         while let Some(ref x) = queue.front() {
             match x {
                 KexMessage::Init(x) => {
-                    ready!(Self::tx_msg(&mut self.trx, cx, x.as_ref()))?;
+                    ready!(Self::poll_send_trx(&mut self.trx, cx, x.as_ref()))?;
                     log::debug!("Tx MSG_KEX_INIT");
                     self.kex_tx_critical = true;
                 }
                 KexMessage::EcdhInit(x) => {
-                    ready!(Self::tx_msg(&mut self.trx, cx, x.as_ref()))?;
+                    ready!(Self::poll_send_trx(&mut self.trx, cx, x.as_ref()))?;
                     log::debug!("Tx MSG_ECDH_INIT");
                 }
                 KexMessage::EcdhReply(x) => {
-                    ready!(Self::tx_msg(&mut self.trx, cx, x.as_ref()))?;
+                    ready!(Self::poll_send_trx(&mut self.trx, cx, x.as_ref()))?;
                     log::debug!("Tx MSG_ECDH_REPLY");
                 }
                 KexMessage::NewKeys(_) => {
-                    ready!(Self::tx_msg(&mut self.trx, cx, &MsgNewKeys))?;
+                    ready!(Self::poll_send_trx(&mut self.trx, cx, &MsgNewkeys))?;
                     log::debug!("Tx MSG_NEWKEYS");
                     self.kex_tx_critical = false;
                 }
@@ -209,8 +302,8 @@ impl Transport {
 
         // Flush the transceiver in case any kex messages have been added that require
         // actual transmission for generating progress.
-        // Flushing might block: In this case we escalate as the kex won't finish until all kex
-        // messages have been transmitted to the peer.
+        // Flushing might block: In this case we escalate pending as the kex won't finish
+        // until all kex messages have been transmitted to the peer.
         if flush {
             ready!(self.trx.tx_flush(cx))?;
         }
@@ -222,143 +315,32 @@ impl Transport {
         Poll::Ready(Ok(self.trx.rx_next()))
     }
 
-    /// Consume the current rx buffer (only after [Self::rx_peek]).
+    /// Consume the current receive buffer (only after [poll_receive_buf](Self::poll_receive_buf)).
     ///
-    /// The message shall have been decoded and processed before being cosumed.
-    pub fn consume_next(&mut self) -> Result<(), TransportError> {
+    /// The message must have been decoded and processed before.
+    pub fn consume_receive_buf(&mut self) -> Result<(), TransportError> {
         self.trx.rx_consume()
     }
 
-    /// Try to allocate buffer space for the next message to send.
-    ///
-    /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
-    /// be interrupted or if the output buffer is too full and must be flushed first.
-    pub fn poll_alloc(
-        &mut self,
-        cx: &mut Context,
-        len: usize,
-    ) -> Poll<Result<&mut [u8], TransportError>> {
-        if self.kex_tx_critical {
-            Poll::Pending
-        } else {
-            self.trx.tx_alloc(cx, len)
-        }
-    }
-
-    /// Commits the current tx buffer as ready for sending (only after `tx_alloc`).
-    ///
-    /// A message shall have been written to the tx buffer.
-    pub fn commit_alloc(&mut self) -> Result<(), TransportError> {
-        self.trx.tx_commit()
-    }
-
-    /// Try to flush all pending operations and output buffers.
+    /// Like [flush](Self::flush) but low-level.
     pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         self.trx.tx_flush(cx)
     }
 
-
-
-    /// Send a message.
-    ///
-    /// You may only send non-transport message or the behavior is undefined.
-    /// Sending a message only enqueues it for transmission, but it is not guaranteed that it has
-    /// been transmitted when this function returns. Use [flush](Self::flush) when you want all
-    /// queued messages to be transmitted (but use it wisely).
-    pub async fn send<M: SshEncode>(&mut self, msg: &M) -> Result<(), TransportError> {
-        poll_fn(|cx| {
-            let size = SshCodec::size(msg)?;
-            let buf = ready!(self.poll_alloc(cx, size))?;
-            SshCodec::encode_into(msg, buf)?;
-            self.commit_alloc()?;
-            Poll::Ready(Ok(()))
-        })
-        .await
-    }
-
-    /// Receive a message.
-    ///
-    /// You will only receive non-transport messages (others are dispatched internally).
-    /// The receive call blocks until either the next non-transport message arrives or an error
-    /// occurs.
-    pub async fn receive<M: SshDecode>(&mut self) -> Result<M, TransportError> {
-        poll_fn(|cx| {
-            if let Some(buf) = ready!(self.poll_next(cx))? {
-                let msg = SshCodec::decode(buf)?;
-                self.consume_next()?;
-                Poll::Ready(Ok(msg))
-            } else {
-                Poll::Pending
-            }
-        })
-        .await
-    }
-
-    /// Flush all output buffers.
-    ///
-    /// When the function returns without an error it is guaranteed that all messages that have
-    /// previously been enqueued with [send](Self::send) have been transmitted and all output
-    /// buffers are empty. Of course, this does not imply anything about successful reception of
-    /// those messages.
-    ///
-    /// Do not flush too deliberately! The transport will automatically transmit the output buffers
-    /// when you continue filling them by sending messages. Flush shall rather be used when
-    /// you sent something like a request and need to make sure it has been transmitted before
-    /// starting to wait for the response.
-    pub async fn flush(&mut self) -> Result<(), TransportError> {
-        poll_fn(|cx| self.poll_flush(cx)).await
-    }
-
-    /// Request a service by name.
-    ///
-    /// Service requests either succeed or the connection gets terminated with a disconnect message.
-    /// You cannot re-try with another service (which is why the method consumes `self`).
-    ///
-    /// Although any service might be requested by this method, in reality it is only really
-    /// useful for requesting the `ssh-userauth` service which in turn requests another service.
-    /// Requesting a service through this method means you're requesting a public/anonymous service.
-    pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
-        let msg = MsgServiceRequest(service_name);
-        self.send(&msg).await?;
-        log::debug!("Tx MSG_SERVICE_REQUEST");
-        self.flush().await?;
-        self.receive::<MsgServiceAccept>().await?;
-        log::debug!("Rx MSG_SERVICE_ACCEPT");
-        Ok(self)
-    }
-
-    pub fn poll_send<M: SshEncode>(
-        &mut self,
-        cx: &mut Context,
-        msg: &M,
-    ) -> Poll<Result<(), TransportError>> {
-        let size = SshCodec::size(msg)?;
-        let buf = ready!(self.poll_alloc(cx, size))?;
-        SshCodec::encode_into(msg, buf)?;
-        self.commit_alloc()?;
-        Poll::Ready(Ok(()))
-    }
-
     /// Return the connection's session id.
     ///
-    /// The session id is a result of the initial key exchange. It is static for the whole
-    /// lifetime of the connection.
-    pub fn session_id(&self) -> Result<&Secret, TransportError> {
-        self.kex.session_id().ok_or(TransportError::InvalidState)
+    /// The session id is a result of the initial key exchange.
+    /// It is static for the whole lifetime of the connection.
+    pub fn session_id(&self) -> &Secret {
+        // First kex is guaranteed to be completed after [Self::accept] and [Self::connect]
+        self.kex
+            .session_id()
+            .expect("called before first kex complete")
     }
 
-    fn tx_msg<Msg: SshEncode>(
-        trx: &mut Transceiver,
-        cx: &mut Context,
-        msg: &Msg,
-    ) -> Poll<Result<(), TransportError>> {
-        let size = SshCodec::size(msg)?;
-        let buf = ready!(trx.tx_alloc(cx, size))?;
-        let mut e = RefEncoder::new(buf);
-        e.push(msg).ok_or(SshCodecError::EncodingFailed)?;
-        trx.tx_commit()?;
-        Poll::Ready(Ok(()))
-    }
+    // ---------------------------------------------------------------------------------------------
+    //  PRIVATE METHODS
+    // ---------------------------------------------------------------------------------------------
 
     fn new(config: &Arc<TransportConfig>, trx: Transceiver, kex: Box<dyn Kex>) -> Self {
         Self {
@@ -395,11 +377,23 @@ impl Transport {
     }
 
     fn poll_first_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        let _ = ready!(self.poll_next(cx))?;
+        let _ = ready!(self.poll_receive_buf(cx))?;
         if self.kex.session_id().is_some() {
             Poll::Ready(Ok(()))
         } else {
             Poll::Pending
         }
+    }
+
+    fn poll_send_trx<Msg: SshEncode>(
+        trx: &mut Transceiver,
+        cx: &mut Context,
+        msg: &Msg,
+    ) -> Poll<Result<(), TransportError>> {
+        let size = SshCodec::size(msg)?;
+        let buf = ready!(trx.tx_alloc(cx, size))?;
+        SshCodec::encode_into(msg, buf)?;
+        trx.tx_commit()?;
+        Poll::Ready(Ok(()))
     }
 }

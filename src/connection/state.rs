@@ -169,7 +169,7 @@ impl ConnectionState {
         }
 
         // Poll the transport for the next message available.
-        while let Some(buf) = ready!(self.transport.poll_next(cx))? {
+        while let Some(buf) = ready!(self.transport.poll_receive_buf(cx))? {
             // Dispatch message (must not block; message MUST be dispatched)
             match *buf.get(0).unwrap_or(&0) {
                 <MsgChannelOpen as Message>::NUMBER => {
@@ -305,7 +305,7 @@ impl ConnectionState {
             }
 
             // Consume the message buffer after successful dispatch!
-            self.transport.consume_next()?;
+            self.transport.consume_receive_buf()?;
         }
 
         Poll::Ready(Ok(()))

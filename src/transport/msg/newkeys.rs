@@ -2,19 +2,19 @@ use super::Message;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgNewKeys;
+pub struct MsgNewkeys;
 
-impl Message for MsgNewKeys {
+impl Message for MsgNewkeys {
     const NUMBER: u8 = 21;
 }
 
-impl SshEncode for MsgNewKeys {
+impl SshEncode for MsgNewkeys {
     fn encode<E: SshEncoder>(&self, c: &mut E) -> Option<()> {
         c.push_u8(<Self as Message>::NUMBER)
     }
 }
 
-impl SshDecode for MsgNewKeys {
+impl SshDecode for MsgNewkeys {
     fn decode<'a, D: SshDecoder<'a>>(c: &mut D) -> Option<Self> {
         c.expect_u8(<Self as Message>::NUMBER)?;
         Some(Self)
@@ -27,13 +27,13 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgNewKeys {};
+        let msg = MsgNewkeys {};
         assert_eq!(&[21][..], &SshCodec::encode(&msg).unwrap()[..]);
     }
 
     #[test]
     fn test_decode_01() {
         let buf: [u8; 1] = [21];
-        let _: MsgNewKeys = SshCodec::decode(&buf[..]).unwrap();
+        let _: MsgNewkeys = SshCodec::decode(&buf[..]).unwrap();
     }
 }

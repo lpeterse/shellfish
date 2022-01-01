@@ -39,8 +39,8 @@ async fn test_kex_01() -> Result<(), Box<dyn std::error::Error>> {
     let trans1 = task1.await??;
     let trans2 = task2.await??;
 
-    let sid1 = trans1.session_id()?;
-    let sid2 = trans2.session_id()?;
+    let sid1 = trans1.session_id();
+    let sid2 = trans2.session_id();
 
     assert_eq!(sid1.as_ref(), sid2.as_ref());
     Ok(())

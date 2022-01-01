@@ -3,13 +3,13 @@ use crate::identity::*;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgKexEcdhReply {
+pub struct MsgEcdhReply {
     pub host_key: Identity,
     pub dh_public: Vec<u8>,
     pub signature: Signature,
 }
 
-impl MsgKexEcdhReply {
+impl MsgEcdhReply {
     pub fn new(host_key: Identity, dh_public: Vec<u8>, signature: Signature) -> Self {
         Self {
             host_key,
@@ -19,11 +19,11 @@ impl MsgKexEcdhReply {
     }
 }
 
-impl Message for MsgKexEcdhReply {
+impl Message for MsgEcdhReply {
     const NUMBER: u8 = 31;
 }
 
-impl SshEncode for MsgKexEcdhReply {
+impl SshEncode for MsgEcdhReply {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u8(<Self as Message>::NUMBER)?;
         e.push(&self.host_key)?;
@@ -32,7 +32,7 @@ impl SshEncode for MsgKexEcdhReply {
     }
 }
 
-impl SshDecode for MsgKexEcdhReply {
+impl SshDecode for MsgEcdhReply {
     fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
         Self {

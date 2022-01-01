@@ -4,7 +4,6 @@ mod error;
 pub use self::config::*;
 pub use self::error::*;
 
-use crate::agent::*;
 use crate::transport::Transport;
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -28,12 +27,11 @@ impl Server {
         let ba = self.config.socket.bind_addr;
         let tl = TcpListener::bind(ba).await.map_err(fe)?;
         loop {
-            let (s, addr) = tl.accept().await.map_err(fe)?;
+            let (s, _) = tl.accept().await.map_err(fe)?;
             let ct = &self.config.transport;
             let ca = &self.config.auth_agent;
-            let t = Transport::accept(ct, s, ca).await?;
+            let _ = Transport::accept(ct, s, ca).await?;
             log::warn!("ACCEPTED");
         }
-        Ok(())
     }
 }

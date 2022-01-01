@@ -1,11 +1,11 @@
 use super::msg::MsgKexInit;
 use crate::identity::*;
-use crate::transport::id::*;
+use crate::transport::ident::*;
 use crate::util::codec::*;
 use crate::util::secret::Secret;
 use sha2::{Digest, Sha256};
 
-pub struct KexEcdhHash<'a, T1 = String, T2 = String> {
+pub struct KexHash<'a, T1 = String, T2 = String> {
     pub client_id: &'a Identification<T1>,
     pub server_id: &'a Identification<T2>,
     pub client_kex_init: &'a MsgKexInit<T1>,
@@ -16,7 +16,7 @@ pub struct KexEcdhHash<'a, T1 = String, T2 = String> {
     pub dh_secret: &'a Secret,
 }
 
-impl<'a, T1: AsRef<str>, T2: AsRef<str>> KexEcdhHash<'a, T1, T2> {
+impl<'a, T1: AsRef<str>, T2: AsRef<str>> KexHash<'a, T1, T2> {
     #[must_use]
     pub fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_usize(SshCodec::size(self.client_id).ok()?)?;
@@ -103,7 +103,7 @@ mod tests {
             189, 219, 42, 55, 209, 120, 44, 65, 77, 213, 114, 209, 26, 149, 48, 254, 215, 115, 151,
             115, 252, 183, 106, 22, 136, 0, 252, 211, 108, 84, 154, 176,
         ];
-        let kex_hash: KexEcdhHash<_, _> = KexEcdhHash {
+        let kex_hash: KexHash<_, _> = KexHash {
             client_id: &client_id,
             server_id: &server_id,
             client_kex_init: &client_kex_init,

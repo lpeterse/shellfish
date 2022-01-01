@@ -55,9 +55,8 @@ impl UserAuth {
         user: &str,
         identity: Identity,
     ) -> Result<bool, UserAuthError> {
-        let session_id = transport.session_id()?;
         let data = SignatureData {
-            session_id,
+            session_id: transport.session_id(),
             user_name: user,
             service_name: service,
             identity: &identity,
