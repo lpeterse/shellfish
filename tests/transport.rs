@@ -6,7 +6,6 @@ use agent::*;
 use host::*;
 use shellfish::agent::AuthAgent;
 use shellfish::host::HostVerifier;
-use shellfish::transport::DefaultTransport;
 use shellfish::transport::Transport;
 use shellfish::transport::TransportConfig;
 use socket::*;
@@ -29,9 +28,9 @@ async fn test_kex_01() -> Result<(), Box<dyn std::error::Error>> {
     let host_verifier = HostVerifierForTesting::new(host_name, host_port, &host_identity);
     let host_verifier: Arc<dyn HostVerifier> = Arc::new(host_verifier);
 
-    let task1 = async move { DefaultTransport::accept(&config, sock1, &agent).await };
+    let task1 = async move { Transport::accept(&config, sock1, &agent).await };
     let task2 = async move {
-        DefaultTransport::connect(&config_, sock2, host_name, host_port, &host_verifier).await
+        Transport::connect(&config_, sock2, host_name, host_port, &host_verifier).await
     };
 
     let task1 = tokio::spawn(task1);

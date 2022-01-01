@@ -5,7 +5,7 @@ use super::state::State;
 use super::{DirectTcpIp, DirectTcpIpParams};
 use crate::connection::channel::PollResult;
 use crate::ready;
-use crate::transport::GenericTransport;
+use crate::transport::Transport;
 use crate::util::codec::SshCodec;
 use std::task::Context;
 use std::task::Poll;
@@ -54,7 +54,7 @@ impl ChannelState for StateOpeningOutbound {
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<PollResult, ConnectionError>> {
         if let Some(params) = &self.params {
             let prm = SshCodec::encode(params)?;

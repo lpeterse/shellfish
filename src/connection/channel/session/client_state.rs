@@ -7,7 +7,7 @@ use crate::connection::msg::{
 };
 use crate::connection::{ConnectionError, OpenFailure};
 use crate::ready;
-use crate::transport::GenericTransport;
+use crate::transport::Transport;
 use crate::util::check;
 use std::future::Future;
 use std::pin::Pin;
@@ -79,7 +79,7 @@ impl ChannelState for ClientState1 {
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<PollResult, ConnectionError>> {
         if self.params.is_some() {
             let msg = self.msg_open();
@@ -149,7 +149,7 @@ impl ClientState2 {
     fn poll_send_req(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<(), ConnectionError>> {
         // ) = self.req_send_head.open {
         //     match o {
@@ -179,7 +179,7 @@ impl ClientState2 {
     fn poll_send_rej(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<(), ConnectionError>> {
         panic!()
     }
@@ -254,7 +254,7 @@ impl ChannelState for ClientState2 {
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<PollResult, ConnectionError>> {
         loop {
             if self.close_send {
@@ -391,13 +391,13 @@ pub(crate) struct R2 {
 #[derive(Debug, Default)]
 pub(crate) struct R4 {
     param: Option<SessionReq2>,
-    reply: Option<SessionRes2>
+    reply: Option<SessionRes2>,
 }
 
 #[derive(Debug)]
 pub enum SessionRes2 {
     Unit(oneshot::Sender<Result<(), RequestFailure>>),
-    Proc(oneshot::Sender<Result<Process, RequestFailure>>)
+    Proc(oneshot::Sender<Result<Process, RequestFailure>>),
 }
 
 #[derive(Debug)]
@@ -406,7 +406,7 @@ pub enum SessionReq2 {
     Pty(PtySpecification),
     Shell,
     Exec(String),
-    Subsystem(String)
+    Subsystem(String),
 }
 
 #[derive(Debug)]

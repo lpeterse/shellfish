@@ -2,7 +2,7 @@ use super::super::super::super::connection::msg::*;
 use super::super::super::channel::{Channel, ChannelState, OpenFailure, PollResult};
 use super::super::super::error::ConnectionError;
 use super::DirectTcpIp;
-use crate::transport::GenericTransport;
+use crate::transport::Transport;
 use crate::util::buffer::Buffer;
 use crate::util::check;
 use std::io;
@@ -299,7 +299,7 @@ impl ChannelState for State {
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<PollResult, ConnectionError>> {
         let mut state = self.0.lock().unwrap();
         let mut evs = 0;

@@ -1,38 +1,38 @@
 use std::io::Result;
 use std::net::{IpAddr, SocketAddr};
 
-use crate::util::socket::Socket;
+use crate::util::socket::{flush, read_exact, write_all, Socket};
 
 pub async fn serve<S: Socket>(mut sock: S) -> Result<ConnectRequest<S>> {
     let e: std::io::ErrorKind = std::io::ErrorKind::InvalidInput;
     let mut buf: [u8; 255] = [0; 255];
     // Read the first 2 bytes: Version and number of auth methods
-    sock.read_exact(&mut buf[..2]).await?;
+    read_exact(&mut sock, &mut buf[..2]).await?;
     buf.get(0).filter(|x| **x == Version::V5.0).ok_or(e)?;
     let n: usize = *buf.get(1).ok_or(e)? as usize;
     // Read the announced number of auth methods
-    sock.read_exact(&mut buf[..n]).await?;
+    read_exact(&mut sock, &mut buf[..n]).await?;
     // If the client requests no authentication, send positive reply else terminate
     let pred = |x: &&u8| **x == AuthMethod::NO_AUTHENTICATION_REQUIRED.0;
     if buf[..n].iter().find(pred).is_some() {
         let response = [Version::V5.0, AuthMethod::NO_AUTHENTICATION_REQUIRED.0];
-        sock.write_all(response.as_ref()).await?;
-        sock.flush().await?;
+        write_all(&mut sock, response.as_ref()).await?;
+        flush(&mut sock).await?;
     } else {
         let response = [Version::V5.0, AuthMethod::NO_ACCEPTABLE_METHODS.0];
-        sock.write_all(response.as_ref()).await?;
-        sock.flush().await?;
+        write_all(&mut sock, response.as_ref()).await?;
+        flush(&mut sock).await?;
         Err(e)?
     }
     // Read the first 4 bytes of a request
-    sock.read_exact(&mut buf[..4]).await?;
+    read_exact(&mut sock, &mut buf[..4]).await?;
     buf.get(0).filter(|x| **x == Version::V5.0).ok_or(e)?;
     buf.get(2).filter(|x| **x == 0).ok_or(e)?;
     // Terminate unless this is connect request
     if Command(*buf.get(1).ok_or(e)?) != Command::CONNECT {
         let response = [Version::V5.0, Reply::COMMAND_NOT_SUPPORTED.0, 0];
-        sock.write_all(response.as_ref()).await?;
-        sock.flush().await?;
+        write_all(&mut sock, response.as_ref()).await?;
+        flush(&mut sock).await?;
         Err(e)?;
     }
     // Read the remaining request based on the address type
@@ -40,8 +40,8 @@ pub async fn serve<S: Socket>(mut sock: S) -> Result<ConnectRequest<S>> {
         AddrType::IP_V4 => {
             let mut addr: [u8; 4] = [0; 4];
             let mut port: [u8; 2] = [0; 2];
-            sock.read_exact(&mut addr).await?;
-            sock.read_exact(&mut port).await?;
+            read_exact(&mut sock, &mut addr).await?;
+            read_exact(&mut sock, &mut port).await?;
             let host = Host::Addr(IpAddr::V4(addr.into()));
             let port = u16::from_be_bytes(port);
             ConnectRequest::new(sock, host, port)
@@ -49,8 +49,8 @@ pub async fn serve<S: Socket>(mut sock: S) -> Result<ConnectRequest<S>> {
         AddrType::IP_V6 => {
             let mut addr: [u8; 16] = [0; 16];
             let mut port: [u8; 2] = [0; 2];
-            sock.read_exact(&mut addr).await?;
-            sock.read_exact(&mut port).await?;
+            read_exact(&mut sock, &mut addr).await?;
+            read_exact(&mut sock, &mut port).await?;
             let host = Host::Addr(IpAddr::V6(addr.into()));
             let port = u16::from_be_bytes(port);
             ConnectRequest::new(sock, host, port)
@@ -58,12 +58,12 @@ pub async fn serve<S: Socket>(mut sock: S) -> Result<ConnectRequest<S>> {
         AddrType::DOMAINNAME => {
             let mut n = [0];
             let mut port: [u8; 2] = [0; 2];
-            sock.read_exact(&mut n).await?;
+            read_exact(&mut sock, &mut n).await?;
             let n = *n.get(0).ok_or(e)? as usize;
             let mut name = Vec::with_capacity(n);
             name.resize_with(n, Default::default);
-            sock.read_exact(&mut name).await?;
-            sock.read_exact(&mut port).await?;
+            read_exact(&mut sock, &mut name).await?;
+            read_exact(&mut sock, &mut port).await?;
             let host = Host::Name(String::from_utf8(name).ok().ok_or(e)?);
             let port = u16::from_be_bytes(port);
             ConnectRequest::new(sock, host, port)
@@ -99,13 +99,13 @@ impl<S: Socket> ConnectRequest<S> {
             IpAddr::V6(_) => AddrType::IP_V6,
         };
         let x = [Version::V5.0, Reply::SUCCEEDED.0, 0, t.0];
-        sock.write_all(&x).await?;
+        write_all(&mut sock, &x).await?;
         match bind_addr.ip() {
-            IpAddr::V4(addr) => sock.write_all(&addr.octets()).await?,
-            IpAddr::V6(addr) => sock.write_all(&addr.octets()).await?,
+            IpAddr::V4(addr) => write_all(&mut sock, &addr.octets()).await?,
+            IpAddr::V6(addr) => write_all(&mut sock, &addr.octets()).await?,
         }
-        sock.write_all(&bind_addr.port().to_be_bytes()).await?;
-        sock.flush().await?;
+        write_all(&mut sock, &bind_addr.port().to_be_bytes()).await?;
+        flush(&mut sock).await?;
         Ok(sock)
     }
 }

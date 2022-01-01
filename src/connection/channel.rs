@@ -8,7 +8,7 @@ pub use self::open_failure::OpenFailure;
 pub use self::request_failure::RequestFailure;
 pub use self::session::SessionClient;
 use super::ConnectionError;
-use crate::transport::GenericTransport;
+use crate::transport::Transport;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 
@@ -117,7 +117,7 @@ pub trait ChannelState: Send + Sync + 'static {
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<PollResult, ConnectionError>> {
         drop(cx);
         drop(t);

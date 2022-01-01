@@ -1,6 +1,10 @@
-use super::*;
+use super::disconnect::DisconnectReason;
+use crate::agent::AuthAgentError;
+use crate::host::HostVerificationError;
 use crate::identity::SignatureError;
+use crate::util::codec::SshCodecError;
 use std::error::Error;
+use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub enum TransportError {
@@ -64,7 +68,9 @@ impl std::fmt::Display for TransportError {
             Self::InvalidSignature => write!(f, "Invalid signature"),
             Self::InvalidIdentification => write!(f, "Invalid identification"),
             Self::InvalidIdentity(e) => write!(f, "Invalid identity: {}", e),
-            Self::NoCommonServerHostKeyAlgorithm => write!(f, "No common server host key algorithm"),
+            Self::NoCommonServerHostKeyAlgorithm => {
+                write!(f, "No common server host key algorithm")
+            }
             Self::NoCommonCompressionAlgorithm => write!(f, "No common compression algorithm"),
             Self::NoCommonEncryptionAlgorithm => write!(f, "No common encryption algorithm"),
             Self::NoCommonKexAlgorithm => write!(f, "No common kex algorithm"),

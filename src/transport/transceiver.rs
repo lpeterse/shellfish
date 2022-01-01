@@ -18,10 +18,10 @@ use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Handles the low-level part of the wire-protocol including framing and cipher.
 #[derive(Debug)]
-pub struct Transceiver<S: Socket> {
+pub struct Transceiver {
     config: Arc<TransportConfig>,
     /// Underlying socket object for IO
-    socket: S,
+    socket: Box<dyn Socket>,
 
     /// Total number of bytes received
     rx_bytes: u64,
@@ -48,12 +48,12 @@ pub struct Transceiver<S: Socket> {
     tx_paclen: usize,
 }
 
-impl<S: Socket> Transceiver<S> {
+impl Transceiver {
     /// Create a new transceiver.
-    pub fn new(config: &Arc<TransportConfig>, socket: S) -> Self {
+    pub fn new<S: Socket>(config: &Arc<TransportConfig>, socket: S) -> Self {
         Self {
             config: config.clone(),
-            socket,
+            socket: Box::new(socket),
 
             rx_bytes: 0,
             rx_packets: 0,
@@ -244,8 +244,12 @@ impl<S: Socket> Transceiver<S> {
     /// Send the local identification string.
     pub async fn tx_id(&mut self, id: &Identification<&'static str>) -> Result<(), TransportError> {
         let data = SshCodec::encode(&CrLf(id))?;
-        self.socket.write_all(data.as_ref()).await?;
-        self.socket.flush().await?;
+        let mut buf = &data[..];
+        while !buf.is_empty() {
+            let n = poll_fn(|cx| Pin::new(&mut self.socket).poll_write(cx, &data)).await?;
+            buf = &buf[n..];
+        }
+        poll_fn(|cx| Pin::new(&mut self.socket).poll_flush(cx)).await?;
         Ok(())
     }
 

@@ -28,7 +28,7 @@ impl UserAuth {
 
     /// Request another service with user authentication.
     pub async fn request_connection<F: FnOnce(&Connection) -> Box<dyn ConnectionHandler>>(
-        transport: GenericTransport,
+        transport: Transport,
         config: &Arc<ConnectionConfig>,
         handle: F,
         user: &str,
@@ -49,7 +49,7 @@ impl UserAuth {
     }
 
     async fn try_pubkey(
-        transport: &mut GenericTransport,
+        transport: &mut Transport,
         agent: &Arc<dyn AuthAgent>,
         service: &str,
         user: &str,

@@ -1,13 +1,5 @@
 use shellfish::server::*;
-use shellfish::connection::*;
-use shellfish::util::socks5;
 use std::error::Error;
-use std::net::SocketAddr;
-use tokio::net::TcpListener;
-use tokio::net::TcpStream;
-use tokio::spawn;
-use tokio::sync::watch;
-use tokio::time::sleep;
 
 fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();

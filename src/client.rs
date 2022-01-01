@@ -53,8 +53,7 @@ impl Client {
         let cc = &self.config.connection;
         let hv = &self.config.host_verifier;
         let aa = &self.config.auth_agent;
-        let t = DefaultTransport::connect(tc, socket, host, port, hv).await?;
-        let t = GenericTransport::from(t);
+        let t = Transport::connect(tc, socket, host, port, hv).await?;
         Ok(UserAuth::request_connection(t, cc, handle, user, aa).await?)
     }
 }

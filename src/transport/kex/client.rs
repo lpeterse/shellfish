@@ -1,4 +1,5 @@
 use super::super::*;
+use crate::host::HostVerificationError;
 use crate::transport::keys::KeyAlgorithm;
 use crate::util::BoxFuture;
 use std::collections::VecDeque;

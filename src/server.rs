@@ -5,7 +5,7 @@ pub use self::config::*;
 pub use self::error::*;
 
 use crate::agent::*;
-use crate::transport::DefaultTransport;
+use crate::transport::Transport;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -31,7 +31,7 @@ impl Server {
             let (s, addr) = tl.accept().await.map_err(fe)?;
             let ct = &self.config.transport;
             let ca = &self.config.auth_agent;
-            let t = DefaultTransport::accept(ct, s, ca).await?;
+            let t = Transport::accept(ct, s, ca).await?;
             log::warn!("ACCEPTED");
         }
         Ok(())

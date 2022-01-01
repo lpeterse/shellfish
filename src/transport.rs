@@ -1,7 +1,6 @@
 pub(crate) mod config;
 pub(crate) mod cookie;
 pub(crate) mod crypto;
-pub(crate) mod default;
 pub(crate) mod disconnect;
 pub(crate) mod ecdh;
 pub(crate) mod error;
@@ -18,24 +17,83 @@ pub(crate) use self::kex::*;
 pub(crate) use self::msg::*;
 
 pub use self::config::TransportConfig;
-pub use self::default::DefaultTransport;
 pub use self::error::TransportError;
 pub use self::id::Identification;
 
-use crate::agent::*;
-use crate::host::*;
+use self::transceiver::*;
+use crate::agent::AuthAgent;
+use crate::host::HostVerifier;
 use crate::ready;
-use crate::util::codec::*;
+use crate::util::codec::RefEncoder;
+use crate::util::codec::SshCodec;
+use crate::util::codec::SshCodecError;
+use crate::util::codec::SshDecode;
+use crate::util::codec::SshEncode;
+use crate::util::codec::SshEncoder;
 use crate::util::poll_fn;
 use crate::util::secret::Secret;
-
-use std::convert::From;
-use std::fmt::Debug;
-use std::option::Option;
+use crate::util::socket::Socket;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use tokio::time::{sleep, Instant, Sleep};
 
-pub trait Transport: Debug + Send + Unpin + 'static {
+/// Implements the transport layer as described in RFC 4253.
+#[derive(Debug)]
+pub struct Transport {
+    config: Arc<TransportConfig>,
+    trx: Transceiver,
+    kex: Box<dyn Kex>,
+    kex_rx_critical: bool,
+    kex_tx_critical: bool,
+    /// Rekeying timeout (reset after successful kex)
+    kex_next_at_timeout: Pin<Box<Sleep>>,
+    /// Rekeying threshold (updated on kex init)
+    kex_next_at_tx_bytes: u64,
+    /// Rekeying threshold (updated on kex init)
+    kex_next_at_rx_bytes: u64,
+}
+
+impl Transport {
+    /// Create a new transport acting as client.
+    ///
+    /// The initial key exchange has been completed successfully when function returns.
+    pub async fn connect<S: Socket>(
+        config: &Arc<TransportConfig>,
+        socket: S,
+        host_name: &str,
+        host_port: u16,
+        host_verifier: &Arc<dyn HostVerifier>,
+    ) -> Result<Self, TransportError> {
+        let mut trx = Transceiver::new(config, socket);
+        trx.tx_id(&config.identification).await?;
+        let id = trx.rx_id(true).await?;
+        let kex = ClientKex::new(config, host_verifier, host_name, host_port, id);
+        let kex = Box::new(kex);
+        let mut transport = Self::new(config, trx, kex);
+        poll_fn(|cx| transport.poll_first_kex(cx)).await?;
+        Ok(transport)
+    }
+
+    /// Create a new transport acting as server.
+    ///
+    /// The initial key exchange has been completed successfully when function returns.
+    pub async fn accept<S: Socket>(
+        config: &Arc<TransportConfig>,
+        socket: S,
+        agent: &Arc<dyn AuthAgent>,
+    ) -> Result<Self, TransportError> {
+        let mut trx = Transceiver::new(&config, socket);
+        trx.tx_id(&config.identification).await?;
+        let id = trx.rx_id(false).await?;
+        let kex = ServerKex::new(config, agent, id);
+        let kex = Box::new(kex);
+        let mut transport = Self::new(config, trx, kex);
+        poll_fn(|cx| transport.poll_first_kex(cx)).await?;
+        Ok(transport)
+    }
+
     /// Try to receive the next message.
     ///
     /// Any message received MUST be dispatched _and_ [consumed](Self::consume).
@@ -47,60 +105,159 @@ pub trait Transport: Debug + Send + Unpin + 'static {
     /// - Returns `Ready(Ok(None))` if no message is available for now.
     /// - Returns `Ready(Err(_))` for all errors (internal state is undefined afterwards and
     ///   instance must not be used).
-    fn poll_next(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>>;
+    pub fn poll_next(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
+        // Process all incoming messages as long as they belong to the transport layer.
+        while let Poll::Ready(buf) = self.trx.rx_peek(cx)? {
+            match *buf.get(0).ok_or(TransportError::InvalidPacket)? {
+                MsgDisconnect::NUMBER => {
+                    // Try to interpret as MSG_DISCONNECT. If successful, convert it into an error
+                    // and let the callee handle the termination.
+                    let msg: MsgDisconnect = SshCodec::decode(buf)?;
+                    log::debug!("Rx MSG_DISCONNECT: {:?}", msg.reason);
+                    return Poll::Ready(Err(TransportError::DisconnectByPeer(msg.reason)));
+                }
+                MsgUnimplemented::NUMBER => {
+                    // Try to interpret as MSG_UNIMPLEMENTED. Throw error as long as there is no
+                    // need to handle it in a more sophisticated way.
+                    let msg: MsgUnimplemented = SshCodec::decode(buf)?;
+                    log::error!("Rx MSG_UNIMPLEMENTED: packet {}", msg.packet_number);
+                    return Poll::Ready(Err(TransportError::InvalidState));
+                }
+                MsgIgnore::NUMBER => {
+                    // Try to interpret as MSG_IGNORE. If successful, the message is (as the name
+                    // suggests) just ignored. Ignore messages may be introduced any time to impede
+                    // traffic analysis and for keep alive.
+                    log::debug!("Rx MSG_IGNORE");
+                    self.trx.rx_consume()?;
+                }
+                MsgDebug::NUMBER => {
+                    // Try to interpret as MSG_DEBUG. If successful, log as debug and continue.
+                    let msg: MsgDebug = SshCodec::decode(buf)?;
+                    log::debug!("Rx MSG_DEBUG: {:?}", msg.message);
+                    self.trx.rx_consume()?;
+                }
+                MsgKexInit::<String>::NUMBER => {
+                    // Try to interpret as MSG_KEX_INIT. If successful, pass it to the kex handler.
+                    // Unless the protocol is violated, kex is in progress afterwards (if not already).
+                    log::debug!("Rx MSG_KEX_INIT");
+                    let msg: MsgKexInit = SshCodec::decode(buf)?;
+                    self.kex.push_init(msg)?;
+                    self.trx.rx_consume()?;
+                    self.kex_rx_critical = true;
+                }
+                MsgKexEcdhInit::NUMBER => {
+                    log::debug!("Rx MSG_ECDH_INIT");
+                    let msg: MsgKexEcdhInit = SshCodec::decode(buf)?;
+                    self.kex.push_ecdh_init(msg)?;
+                    self.trx.rx_consume()?;
+                }
+                MsgKexEcdhReply::NUMBER => {
+                    log::debug!("Rx MSG_ECDH_REPLY");
+                    let msg: MsgKexEcdhReply = SshCodec::decode(buf)?;
+                    self.kex.push_ecdh_reply(msg)?;
+                    self.trx.rx_consume()?;
+                }
+                MsgNewKeys::NUMBER => {
+                    log::debug!("Rx MSG_NEWKEYS");
+                    let cipher = self.kex.push_new_keys()?;
+                    self.trx.rx_cipher().update(cipher)?;
+                    self.trx.rx_consume()?;
+                    self.kex_rx_critical = false;
+                }
+                _ => {
+                    if self.kex_rx_critical {
+                        return Poll::Ready(Err(TransportError::InvalidState));
+                    } else {
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Poll the kex machine: It only returns [Poll::Pending] if it is in a critical stage
+        // like signing and we shall not proceed with anything else until this unblocks.
+        // In this case we escalate `pending` all the way up.
+        self.init_kex_if_necessary(cx);
+        let queue = ready!(self.kex.poll(cx))?;
+        let mut flush = false;
+        while let Some(ref x) = queue.front() {
+            match x {
+                KexMessage::Init(x) => {
+                    ready!(Self::tx_msg(&mut self.trx, cx, x.as_ref()))?;
+                    log::debug!("Tx MSG_KEX_INIT");
+                    self.kex_tx_critical = true;
+                }
+                KexMessage::EcdhInit(x) => {
+                    ready!(Self::tx_msg(&mut self.trx, cx, x.as_ref()))?;
+                    log::debug!("Tx MSG_ECDH_INIT");
+                }
+                KexMessage::EcdhReply(x) => {
+                    ready!(Self::tx_msg(&mut self.trx, cx, x.as_ref()))?;
+                    log::debug!("Tx MSG_ECDH_REPLY");
+                }
+                KexMessage::NewKeys(_) => {
+                    ready!(Self::tx_msg(&mut self.trx, cx, &MsgNewKeys))?;
+                    log::debug!("Tx MSG_NEWKEYS");
+                    self.kex_tx_critical = false;
+                }
+            }
+            if let Some(KexMessage::NewKeys(x)) = queue.pop_front() {
+                self.trx.tx_cipher().update(x)?;
+            }
+            flush = true;
+        }
+
+        // Flush the transceiver in case any kex messages have been added that require
+        // actual transmission for generating progress.
+        // Flushing might block: In this case we escalate as the kex won't finish until all kex
+        // messages have been transmitted to the peer.
+        if flush {
+            ready!(self.trx.tx_flush(cx))?;
+        }
+
+        // Being here means that all transport messages have been consumed, all kex messages have
+        // been sent and flushed and that it is guaranteed that there is either an inbound
+        // non-transport message available or the socket has been polled for reading and the task
+        // will be woken as soon as more inbound data arrives.
+        Poll::Ready(Ok(self.trx.rx_next()))
+    }
 
     /// Consume the current rx buffer (only after [Self::rx_peek]).
     ///
     /// The message shall have been decoded and processed before being cosumed.
-    fn consume_next(&mut self) -> Result<(), TransportError>;
+    pub fn consume_next(&mut self) -> Result<(), TransportError> {
+        self.trx.rx_consume()
+    }
 
     /// Try to allocate buffer space for the next message to send.
     ///
     /// Returns `Pending` if any internal process (like kex) is in a critical stage that must not
     /// be interrupted or if the output buffer is too full and must be flushed first.
-    fn poll_alloc(
+    pub fn poll_alloc(
         &mut self,
         cx: &mut Context,
         len: usize,
-    ) -> Poll<Result<&mut [u8], TransportError>>;
+    ) -> Poll<Result<&mut [u8], TransportError>> {
+        if self.kex_tx_critical {
+            Poll::Pending
+        } else {
+            self.trx.tx_alloc(cx, len)
+        }
+    }
 
     /// Commits the current tx buffer as ready for sending (only after `tx_alloc`).
     ///
     /// A message shall have been written to the tx buffer.
-    fn commit_alloc(&mut self) -> Result<(), TransportError>;
+    pub fn commit_alloc(&mut self) -> Result<(), TransportError> {
+        self.trx.tx_commit()
+    }
 
     /// Try to flush all pending operations and output buffers.
-    fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>>;
-
-
-    /// Return the connection's session id.
-    ///
-    /// The session id is a result of the initial key exchange. It is static for the whole
-    /// lifetime of the connection.
-    fn session_id(&self) -> Result<&Secret, TransportError>;
-}
-
-/// A box wrapper around all types that implement [Transport] with extra async methods.
-///
-/// This is the type you should be working with in generic code like service extensions etc.
-/// Decoupling the real transport by a level of indirection is also useful for testing.
-///
-/// Serveral convenient async methods for sending and receiving are supplied. They are easy to work
-/// with, but do not offer features like direct buffer access which is required for highest
-/// performance. In such a case the re-exposed low-level [Transport] methods need to be used.
-#[derive(Debug)]
-pub struct GenericTransport(Box<dyn Transport>);
-
-impl GenericTransport {
-    /// Create a new boxed transport object.
-    ///
-    /// The passed transport should already be connected as this type does not offer methods
-    /// for the establishment of connections. Connected transports are role-agnostic: Both the
-    /// client and server sides behave exactly the same form a users perspective (just like
-    /// network sockets).
-    pub fn from<T: Transport>(transport: T) -> Self {
-        Self(Box::new(transport))
+    pub fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        self.trx.tx_flush(cx)
     }
+
+
 
     /// Send a message.
     ///
@@ -176,52 +333,73 @@ impl GenericTransport {
         msg: &M,
     ) -> Poll<Result<(), TransportError>> {
         let size = SshCodec::size(msg)?;
-        let buf = ready!(self.0.poll_alloc(cx, size))?;
+        let buf = ready!(self.poll_alloc(cx, size))?;
         SshCodec::encode_into(msg, buf)?;
-        self.0.commit_alloc()?;
+        self.commit_alloc()?;
         Poll::Ready(Ok(()))
     }
 
-    pub fn poll_send_unimplemented(
-        &mut self,
-        _cx: &mut Context,
-    ) -> Poll<Result<(), TransportError>> {
-        panic!("FIXME")
-    }
-}
-
-impl Transport for GenericTransport {
-    #[inline]
-    fn poll_next(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
-        self.0.poll_next(cx)
+    /// Return the connection's session id.
+    ///
+    /// The session id is a result of the initial key exchange. It is static for the whole
+    /// lifetime of the connection.
+    pub fn session_id(&self) -> Result<&Secret, TransportError> {
+        self.kex.session_id().ok_or(TransportError::InvalidState)
     }
 
-    #[inline]
-    fn consume_next(&mut self) -> Result<(), TransportError> {
-        self.0.consume_next()
-    }
-
-    #[inline]
-    fn poll_alloc(
-        &mut self,
+    fn tx_msg<Msg: SshEncode>(
+        trx: &mut Transceiver,
         cx: &mut Context,
-        len: usize,
-    ) -> Poll<Result<&mut [u8], TransportError>> {
-        self.0.poll_alloc(cx, len)
+        msg: &Msg,
+    ) -> Poll<Result<(), TransportError>> {
+        let size = SshCodec::size(msg)?;
+        let buf = ready!(trx.tx_alloc(cx, size))?;
+        let mut e = RefEncoder::new(buf);
+        e.push(msg).ok_or(SshCodecError::EncodingFailed)?;
+        trx.tx_commit()?;
+        Poll::Ready(Ok(()))
     }
 
-    #[inline]
-    fn commit_alloc(&mut self) -> Result<(), TransportError> {
-        self.0.commit_alloc()
+    fn new(config: &Arc<TransportConfig>, trx: Transceiver, kex: Box<dyn Kex>) -> Self {
+        Self {
+            config: config.clone(),
+            trx,
+            kex,
+            kex_rx_critical: true,
+            kex_tx_critical: true,
+            kex_next_at_timeout: Box::pin(sleep(config.kex_interval_duration)),
+            kex_next_at_tx_bytes: config.kex_interval_bytes,
+            kex_next_at_rx_bytes: config.kex_interval_bytes,
+        }
     }
 
-    #[inline]
-    fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        self.0.poll_flush(cx)
+    fn init_kex(&mut self) {
+        let txb = self.trx.tx_bytes();
+        let rxb = self.trx.rx_bytes();
+        let deadline = Instant::now() + self.config.kex_interval_duration;
+        self.kex_next_at_timeout.as_mut().reset(deadline);
+        self.kex_next_at_tx_bytes = txb + self.config.kex_interval_bytes;
+        self.kex_next_at_rx_bytes = rxb + self.config.kex_interval_bytes;
+        self.kex.init();
     }
 
-    #[inline]
-    fn session_id(&self) -> Result<&Secret, TransportError> {
-        self.0.session_id()
+    fn init_kex_if_necessary(&mut self, cx: &mut Context) {
+        let txb = self.trx.tx_bytes();
+        let rxb = self.trx.rx_bytes();
+        let a = Future::poll(Pin::new(&mut self.kex_next_at_timeout), cx).is_ready();
+        let b = txb > self.kex_next_at_tx_bytes;
+        let c = rxb > self.kex_next_at_rx_bytes;
+        if a || b || c {
+            self.init_kex()
+        }
+    }
+
+    fn poll_first_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+        let _ = ready!(self.poll_next(cx))?;
+        if self.kex.session_id().is_some() {
+            Poll::Ready(Ok(()))
+        } else {
+            Poll::Pending
+        }
     }
 }

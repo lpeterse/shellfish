@@ -4,7 +4,7 @@ use super::super::ChannelState;
 use super::state::State;
 use crate::connection::channel::PollResult;
 use crate::ready;
-use crate::transport::GenericTransport;
+use crate::transport::Transport;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::Context;
@@ -18,7 +18,7 @@ use tokio::sync::oneshot::Receiver;
 /// channel) _and_ the MSG_CHANNEL_OPEN_(SUCCESS|FAILURE) message has been sent, this object
 /// gets dropped and replaces itself with [State] which means the channel is now open for use.
 #[derive(Debug)]
-pub (crate) struct StateOpeningInbound {
+pub(crate) struct StateOpeningInbound {
     state: State,
     reply_rx: Receiver<Result<(), OpenFailure>>,
     reply_rxd: Option<Result<(), OpenFailure>>,
@@ -38,7 +38,7 @@ impl ChannelState for StateOpeningInbound {
     fn poll_with_transport(
         &mut self,
         cx: &mut Context,
-        t: &mut GenericTransport,
+        t: &mut Transport,
     ) -> Poll<Result<PollResult, ConnectionError>> {
         loop {
             match self.reply_rxd {

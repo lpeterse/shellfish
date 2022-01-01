@@ -12,7 +12,7 @@ use super::request::*;
 use crate::connection::channel::PollResult;
 use crate::ready;
 use crate::transport::Message;
-use crate::transport::{DisconnectReason, GenericTransport, Transport, TransportError};
+use crate::transport::{Transport, DisconnectReason, TransportError};
 use crate::util::codec::*;
 use std::collections::VecDeque;
 use std::future::Future;
@@ -29,7 +29,7 @@ pub struct ConnectionState {
     /// Callbacks for incoming events
     handler: Box<dyn ConnectionHandler>,
     /// Underlying transport
-    transport: GenericTransport,
+    transport: Transport,
     /// Next request to process
     requests_head: Option<Request>,
     /// Async bounded queue of requests to process
@@ -56,7 +56,7 @@ impl ConnectionState {
     pub fn new(
         config: &Arc<ConnectionConfig>,
         handler: Box<dyn ConnectionHandler>,
-        transport: GenericTransport,
+        transport: Transport,
         requests: mpsc::Receiver<Request>,
         close_tx: oneshot::Sender<()>,
         error_tx: watch::Sender<Option<Arc<ConnectionError>>>,
@@ -299,7 +299,8 @@ impl ConnectionState {
                     // In case the following call returns `Pending` this can only be due to output
                     // buffer congestion, thus a later retry here will succeed and not lead to a
                     // deadlock situation like with other message types.
-                    ready!(self.transport.poll_send_unimplemented(cx)?);
+                    //ready!(self.transport.poll_send_unimplemented(cx)?);
+                    todo!() // FIXME
                 }
             }
 

@@ -8,17 +8,17 @@ mod request;
 mod state;
 
 pub use self::channel::direct_tcpip::{DirectTcpIp, DirectTcpIpParams, DirectTcpIpRequest};
+pub use self::channel::session::{Process, SessionClient};
 pub use self::channel::{OpenFailure, RequestFailure};
 pub use self::config::ConnectionConfig;
 pub use self::error::ConnectionError;
 pub use self::global::{Global, GlobalRequest, GlobalRequestWantReply, GlobalWantReply};
 pub use self::handler::ConnectionHandler;
-pub use self::channel::session::{SessionClient, Process};
 
 use self::error::ConnectionErrorWatch;
 use self::request::Request;
 use self::state::ConnectionState;
-use crate::transport::GenericTransport;
+use crate::transport::Transport;
 use crate::util::codec::*;
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -56,7 +56,7 @@ impl Connection {
     /// are references to the connection.
     pub fn new<F: FnOnce(&Self) -> Box<dyn ConnectionHandler>>(
         config: &Arc<ConnectionConfig>,
-        transport: GenericTransport,
+        transport: Transport,
         handle: F,
     ) -> Self {
         let (r1, r2) = mpsc::channel(1);

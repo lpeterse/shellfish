@@ -1,11 +1,10 @@
-use crate::connection::channel::PollResult;
-
 use super::super::super::config::ConnectionConfig;
 use super::super::super::error::ConnectionError;
 use super::super::super::msg::*;
 use super::super::ChannelState;
 use super::super::OpenFailure;
 use super::server::SessionRequest;
+use crate::connection::channel::PollResult;
 use std::sync::Arc;
 use std::sync::Mutex;
 use tokio::sync::oneshot;
@@ -49,7 +48,7 @@ impl ChannelState for Arc<Mutex<SessionServerState>> {
     fn poll_with_transport(
         &mut self,
         cx: &mut std::task::Context,
-        t: &mut crate::transport::GenericTransport,
+        t: &mut crate::transport::Transport,
     ) -> std::task::Poll<Result<PollResult, crate::connection::ConnectionError>> {
         todo!()
     }
