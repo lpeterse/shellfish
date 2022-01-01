@@ -5,6 +5,7 @@ use crate::util::check;
 use crate::{identity::Identity, ready};
 use core::future::Future;
 use std::collections::VecDeque;
+use std::convert::TryInto;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -141,13 +142,14 @@ impl Kex for ServerKex {
 
                 match ka {
                     Some(Curve25519Sha256::NAME) => {
-                        let dh_sec_srv = X25519::secret_new();
-                        let dh_pub_srv = X25519::public_from_secret(&dh_sec_srv);
-                        let dh_pub_srv = X25519::public_as_bytes(&dh_pub_srv);
-                        let dh_pub_cli = &ei_cli.dh_public;
-                        let dh_pub_cli = X25519::public_from_bytes(dh_pub_cli).ok_or(EENC)?;
+                        use rand_core::OsRng;
+                        let dh_sec_srv = x25519_dalek::EphemeralSecret::new(&mut OsRng);
+                        let dh_pub_srv = x25519_dalek::PublicKey::from(&dh_sec_srv);
+                        let dh_pub_cli = TryInto::<[u8; 32]>::try_into(&ei_cli.dh_public[..]);
+                        let dh_pub_cli = dh_pub_cli.ok().ok_or(EENC)?;
+                        let dh_pub_cli = x25519_dalek::PublicKey::from(dh_pub_cli);
                         // Compute the shared secret
-                        let k = X25519::diffie_hellman(dh_sec_srv, &dh_pub_cli);
+                        let k = Secret::new(dh_sec_srv.diffie_hellman(&dh_pub_cli).as_bytes());
                         // Compute the exchange hash over the data exchanged so far
                         let h: Secret = KexEcdhHash::<_, _> {
                             client_id: &self.client_id,
@@ -156,7 +158,7 @@ impl Kex for ServerKex {
                             server_kex_init: &ki_srv,
                             server_host_key: hk,
                             dh_client_key: dh_pub_cli.as_bytes(),
-                            dh_server_key: dh_pub_srv,
+                            dh_server_key: dh_pub_srv.as_bytes(),
                             dh_secret: &k,
                         }
                         .sha256();
@@ -164,7 +166,7 @@ impl Kex for ServerKex {
                         let alg = KeyAlgorithm::Sha256;
                         let (c2s, s2c) = ciphers(common_, alg, ki_srv, ki_cli, &k, &h, &sid)?;
                         s.server_host_key = Some(hk.clone());
-                        s.server_ecdh_pub = Some(dh_pub_srv.into());
+                        s.server_ecdh_pub = Some(dh_pub_srv.to_bytes().into());
                         s.server_signature = Some(self.agent.signature(hk, h.as_ref(), 0));
                         s.cipher_c2s = Some(Box::new(c2s));
                         s.cipher_s2c = Some(Box::new(s2c));

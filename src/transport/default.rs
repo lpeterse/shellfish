@@ -243,15 +243,15 @@ impl<S: Socket> DefaultTransport<S> {
 }
 
 impl<S: Socket> Transport for DefaultTransport<S> {
-    fn rx_peek(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
+    fn poll_next(&mut self, cx: &mut Context) -> Poll<Result<Option<&[u8]>, TransportError>> {
         self.poll(cx)
     }
 
-    fn rx_consume(&mut self) -> Result<(), TransportError> {
+    fn consume_next(&mut self) -> Result<(), TransportError> {
         self.trx.rx_consume()
     }
 
-    fn tx_alloc(
+    fn poll_alloc(
         &mut self,
         cx: &mut Context,
         len: usize,
@@ -263,23 +263,12 @@ impl<S: Socket> Transport for DefaultTransport<S> {
         }
     }
 
-    fn tx_commit(&mut self) -> Result<(), TransportError> {
+    fn commit_alloc(&mut self) -> Result<(), TransportError> {
         self.trx.tx_commit()
     }
 
-    fn tx_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
+    fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
         self.trx.tx_flush(cx)
-    }
-
-    fn tx_disconnect(
-        &mut self,
-        cx: &mut Context,
-        reason: DisconnectReason,
-    ) -> Poll<Result<(), TransportError>> {
-        let msg = MsgDisconnect::new(reason);
-        ready!(Self::tx_msg(&mut self.trx, cx, &msg))?;
-        ready!(self.tx_flush(cx))?;
-        Poll::Ready(Ok(()))
     }
 
     fn session_id(&self) -> Result<&Secret, TransportError> {

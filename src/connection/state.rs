@@ -169,7 +169,7 @@ impl ConnectionState {
         }
 
         // Poll the transport for the next message available.
-        while let Some(buf) = ready!(self.transport.rx_peek(cx))? {
+        while let Some(buf) = ready!(self.transport.poll_next(cx))? {
             // Dispatch message (must not block; message MUST be dispatched)
             match *buf.get(0).unwrap_or(&0) {
                 <MsgChannelOpen as Message>::NUMBER => {
@@ -304,7 +304,7 @@ impl ConnectionState {
             }
 
             // Consume the message buffer after successful dispatch!
-            self.transport.rx_consume()?;
+            self.transport.consume_next()?;
         }
 
         Poll::Ready(Ok(()))
@@ -467,7 +467,7 @@ impl ConnectionState {
     }
 
     fn poll_flush(&mut self, cx: &mut Context) -> Poll<Result<(), ConnectionError>> {
-        self.transport.tx_flush(cx).map_err(Into::into)
+        self.transport.poll_flush(cx).map_err(Into::into)
     }
 
     fn alloc_channel_id(&mut self) -> Option<u32> {

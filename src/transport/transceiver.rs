@@ -1,5 +1,5 @@
+use super::id::CrLf;
 use super::CipherContext;
-use super::CrLf;
 use super::Identification;
 use super::TransportConfig;
 use super::TransportError;

@@ -2,9 +2,14 @@ use super::super::*;
 use crate::transport::keys::KeyAlgorithm;
 use crate::util::BoxFuture;
 use std::collections::VecDeque;
+use std::convert::TryInto;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+
+const EIST: TransportError = TransportError::InvalidState;
+const EENC: TransportError = TransportError::InvalidEncoding;
+const EAKX: TransportError = TransportError::NoCommonKexAlgorithm;
 
 /// The client side state machine for key exchange.
 pub struct ClientKex {
@@ -74,12 +79,13 @@ impl Kex for ClientKex {
                 let client_ka = &init_client.kex_algorithms;
                 let server_ka = &init_server.kex_algorithms;
                 let common_ka = common(client_ka, server_ka);
-                let common_ka = common_ka.ok_or(TransportError::NoCommonKexAlgorithm)?;
+                let common_ka = common_ka.ok_or(EAKX)?;
                 match common_ka {
                     Curve25519Sha256::NAME => {
-                        let ecdh_secret = X25519::secret_new();
-                        let ecdh_public = X25519::public_from_secret(&ecdh_secret);
-                        let ecdh_public = X25519::public_as_bytes(&ecdh_public).into();
+                        use rand_core::OsRng;
+                        let ecdh_secret = x25519_dalek::EphemeralSecret::new(&mut OsRng);
+                        let ecdh_public = x25519_dalek::PublicKey::from(&ecdh_secret);
+                        let ecdh_public = ecdh_public.as_bytes().to_vec();
                         let ecdh_client = MsgKexEcdhInit::new(ecdh_public);
                         let ecdh_client = Arc::new(ecdh_client);
                         let s = StateEcdhCurve25519Sha256 {
@@ -91,7 +97,7 @@ impl Kex for ClientKex {
                         self.state = State::EcdhCurve25519Sha256(Box::new(s));
                         Ok(())
                     }
-                    _ => Err(TransportError::NoCommonKexAlgorithm),
+                    _ => Err(EAKX),
                 }
             }
             _ => Err(TransportError::InvalidState),
@@ -103,10 +109,11 @@ impl Kex for ClientKex {
             State::EcdhCurve25519Sha256(x) => {
                 // Compute the DH shared secret (create a new placeholder while
                 // the actual secret gets consumed in the operation).
-                const EINSIG: TransportError = TransportError::InvalidSignature;
-                let dh_public_client = X25519::public_from_secret(&x.ecdh_secret);
-                let dh_public_server = X25519::public_from_bytes(&msg.dh_public).ok_or(EINSIG)?;
-                let k = X25519::diffie_hellman(x.ecdh_secret, &dh_public_server);
+                let dh_public_client = x25519_dalek::PublicKey::from(&x.ecdh_secret);
+                let dh_public_server = TryInto::<[u8; 32]>::try_into(msg.dh_public);
+                let dh_public_server = dh_public_server.ok().ok_or(EENC)?;
+                let dh_public_server = x25519_dalek::PublicKey::from(dh_public_server);
+                let k = Secret::new(x.ecdh_secret.diffie_hellman(&dh_public_server).as_bytes());
                 // Compute the exchange hash over the data exchanged so far.
                 let h: Secret = KexEcdhHash::<_, _> {
                     client_id: &self.config.identification,
@@ -135,14 +142,14 @@ impl Kex for ClientKex {
                 self.state = State::NewKeys(s2c);
                 Ok(())
             }
-            _ => Err(TransportError::InvalidState),
+            _ => Err(EIST),
         }
     }
 
     fn push_new_keys(&mut self) -> Result<Box<CipherConfig>, TransportError> {
         match std::mem::replace(&mut self.state, State::Idle) {
             State::NewKeys(cipher_config) => Ok(Box::new(cipher_config)),
-            _ => Err(TransportError::InvalidState),
+            _ => Err(EIST),
         }
     }
 
@@ -184,5 +191,5 @@ struct StateInit {
 struct StateEcdhCurve25519Sha256 {
     init_client: Arc<MsgKexInit<&'static str>>,
     init_server: MsgKexInit<String>,
-    ecdh_secret: <X25519 as EcdhAlgorithm>::EphemeralSecret,
+    ecdh_secret: x25519_dalek::EphemeralSecret,
 }

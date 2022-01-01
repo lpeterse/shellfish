@@ -1,6 +1,12 @@
 use crate::util::check;
 use crate::util::codec::*;
 
+/// SSH protocol identification string sent by both parties for version exchange.
+///
+/// The default instance contains the compile time constants "CARGO_PKG_NAME"
+/// and "CARGO_PKG_VERSION".
+///
+/// Example: `SSH-2.0-shellfish_0.1.0`
 #[derive(Clone, Debug, PartialEq)]
 pub struct Identification<T = String> {
     pub version: T,

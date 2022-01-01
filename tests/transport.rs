@@ -24,7 +24,7 @@ async fn test_kex_01() -> Result<(), Box<dyn std::error::Error>> {
     let agent: Arc<dyn AuthAgent> = Arc::new(agent);
 
     let host_name = "localhost";
-    let host_port = 16;
+    let host_port = 22;
     let host_identity = agent.identities().await?[0].0.clone();
     let host_verifier = HostVerifierForTesting::new(host_name, host_port, &host_identity);
     let host_verifier: Arc<dyn HostVerifier> = Arc::new(host_verifier);

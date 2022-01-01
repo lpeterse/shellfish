@@ -16,31 +16,37 @@ use std::collections::VecDeque;
 pub trait Kex: std::fmt::Debug + Send {
     /// Initialize a key exchange (unless already in progress).
     fn init(&mut self);
+
     /// Push a [MsgKexInit] from peer into the state machine.
     ///
     /// Will raise an error unless the key exchange is in idle state or expecting
     /// the peer's kex init message.
     fn push_init(&mut self, msg: MsgKexInit) -> Result<(), TransportError>;
+
     /// Push a [MsgKexEcdhInit] from peer into the state machine.
     ///
     /// Will raise an error if the state machine is not currently expecting this input.
     fn push_ecdh_init(&mut self, _msg: MsgKexEcdhInit) -> Result<(), TransportError> {
         Err(TransportError::InvalidState)
     }
+
     /// Push a [MsgKexEcdhReply] from peer into the state machine.
     ///
     /// Will raise an error if the state machine is not currently expecting this input.
     fn push_ecdh_reply(&mut self, _msg: MsgKexEcdhReply) -> Result<(), TransportError> {
         Err(TransportError::InvalidState)
     }
+
     /// Push a [MsgNewKeys] from peer into the state machine.
     ///
     /// Will raise an error if the state machine is not currently expecting this input.
     fn push_new_keys(&mut self) -> Result<Box<CipherConfig>, TransportError>;
+
     /// Get the session id.
     ///
     /// Will raise an error if called before the first key exchange has been completed.
     fn session_id(&self) -> Option<&Secret>;
+
     /// Poll internal tasks and get a mutable reference on the outgoing messages queue.
     ///
     /// The messages in the queue shall be send to the peer in strict order and be
