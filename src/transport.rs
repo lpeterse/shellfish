@@ -33,8 +33,6 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::time::{sleep, Instant, Sleep};
 
-const MSG_NUMBER_TRANSPORT_MAX: u8 = 49;
-
 /// Implements the transport layer as described in RFC 4253.
 #[derive(Debug)]
 pub struct Transport {
@@ -56,18 +54,23 @@ impl Transport {
     ///
     /// The initial key exchange has completed successfully when function returns.
     pub async fn connect<S: Socket>(
-        config: &Arc<TransportConfig>,
         socket: S,
+        config: &Arc<TransportConfig>,
+        host_verifier: &Arc<dyn HostVerifier>,
         host_name: &str,
         host_port: u16,
-        host_verifier: &Arc<dyn HostVerifier>,
+        service: &str,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(config, socket);
         trx.tx_id(&config.identification).await?;
         let id = trx.rx_id(true).await?;
         let kex = ClientKex::new(config, host_verifier, host_name, host_port, id);
         let mut t = Self::new(config, trx, kex);
-        poll_fn(|cx| t.poll_first_kex(cx)).await?;
+        t.send(&MsgServiceRequest(service)).await?;
+        t.flush().await?;
+        log::debug!("Tx MSG_SERVICE_REQUEST");
+        t.receive::<MsgServiceAccept>().await?;
+        log::debug!("Rx MSG_SERVICE_ACCEPT");
         Ok(t)
     }
 
@@ -75,36 +78,30 @@ impl Transport {
     ///
     /// The initial key exchange has completed successfully when function returns.
     pub async fn accept<S: Socket>(
-        config: &Arc<TransportConfig>,
         socket: S,
+        config: &Arc<TransportConfig>,
         agent: &Arc<dyn AuthAgent>,
+        service: &str,
     ) -> Result<Self, TransportError> {
         let mut trx = Transceiver::new(&config, socket);
         trx.tx_id(&config.identification).await?;
         let id = trx.rx_id(false).await?;
         let kex = ServerKex::new(config, agent, id);
         let mut t = Self::new(config, trx, kex);
-        poll_fn(|cx| t.poll_first_kex(cx)).await?;
-        Ok(t)
-    }
-
-    /// Request a service by name.
-    ///
-    /// Service requests either succeed or the connection gets terminated with a disconnect message.
-    /// You cannot re-try with another service (which is why the method consumes `self`).
-    ///
-    /// Although any service might be requested by this method, in reality it is only really
-    /// useful for requesting the [ssh-userauth](crate::user_auth::UserAuth) service which in turn
-    /// requests another service. Requesting a service through this method means you're requesting
-    /// a public/anonymous service.
-    pub async fn request_service(mut self, service_name: &str) -> Result<Self, TransportError> {
-        let msg = MsgServiceRequest(service_name);
-        self.send(&msg).await?;
-        self.flush().await?;
-        log::debug!("Tx MSG_SERVICE_REQUEST");
-        self.receive::<MsgServiceAccept>().await?;
-        log::debug!("Rx MSG_SERVICE_ACCEPT");
-        Ok(self)
+        let msg = t.receive::<MsgServiceRequest>().await?;
+        log::debug!("Rx MSG_SERVICE_REQUEST: {}", msg.0);
+        if msg.0 == service {
+            t.send(&MsgServiceAccept(service)).await?;
+            log::debug!("Rx MSG_SERVICE_ACCEPT: {}", service);
+            t.flush().await?;
+            Ok(t)
+        } else {
+            let reason = DisconnectReason::SERVICE_NOT_AVAILABLE;
+            t.send(&MsgDisconnect::new(reason)).await?;
+            log::debug!("Rx MSG_DISCONNECT: {}", reason);
+            t.flush().await?;
+            Err(TransportError::InvalidServiceRequest(msg.0))
+        }
     }
 
     /// Send a message.
@@ -149,7 +146,7 @@ impl Transport {
         cx: &mut Context,
         msg: &M,
     ) -> Poll<Result<(), TransportError>> {
-        if M::NUMBER > MSG_NUMBER_TRANSPORT_MAX && self.kex_tx_critical {
+        if Self::forbidden_while_kex(M::NUMBER) && self.kex_tx_critical {
             // Message must not be sent right now. Need to finish kex first..
             let unconsumed = ready!(self.poll_receive_buf(cx))?.is_some();
             // Most likely the `ready!` has returned pending. Otherwise we check again..
@@ -258,7 +255,7 @@ impl Transport {
                     self.kex_rx_critical = false;
                 }
                 n => {
-                    if n > MSG_NUMBER_TRANSPORT_MAX && self.kex_rx_critical {
+                    if Self::forbidden_while_kex(n) && self.kex_rx_critical {
                         return Poll::Ready(Err(TransportError::InvalidMessageKexCritical));
                     } else {
                         break;
@@ -376,15 +373,6 @@ impl Transport {
         }
     }
 
-    fn poll_first_kex(&mut self, cx: &mut Context) -> Poll<Result<(), TransportError>> {
-        let _ = ready!(self.poll_receive_buf(cx))?;
-        if self.kex.session_id().is_some() {
-            Poll::Ready(Ok(()))
-        } else {
-            Poll::Pending
-        }
-    }
-
     fn poll_send_trx<Msg: SshEncode>(
         trx: &mut Transceiver,
         cx: &mut Context,
@@ -395,5 +383,9 @@ impl Transport {
         SshCodec::encode_into(msg, buf)?;
         trx.tx_commit()?;
         Poll::Ready(Ok(()))
+    }
+
+    fn forbidden_while_kex(msg_number: u8) -> bool {
+        msg_number > 49 || msg_number == 5 || msg_number == 6
     }
 }

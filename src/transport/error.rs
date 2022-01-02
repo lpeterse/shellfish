@@ -17,6 +17,7 @@ pub enum TransportError {
     InvalidPacket,
     InvalidPacketLength,
     InvalidState,
+    InvalidServiceRequest(String),
     InvalidSignature,
     InvalidIdentification,
     InvalidIdentity(HostVerificationError),
@@ -70,6 +71,7 @@ impl std::fmt::Display for TransportError {
             Self::InvalidPacketLength => write!(f, "Invalid packet length"),
             Self::InvalidEncryption => write!(f, "Invalid encryption (message integrity etc)"),
             Self::InvalidSignature => write!(f, "Invalid signature"),
+            Self::InvalidServiceRequest(x) => write!(f, "Invalid service request: {}", x),
             Self::InvalidIdentification => write!(f, "Invalid identification"),
             Self::InvalidIdentity(e) => write!(f, "Invalid identity: {}", e),
             Self::NoCommonServerHostKeyAlgorithm => {

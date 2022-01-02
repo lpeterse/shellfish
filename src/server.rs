@@ -30,7 +30,7 @@ impl Server {
             let (s, _) = tl.accept().await.map_err(fe)?;
             let ct = &self.config.transport;
             let ca = &self.config.auth_agent;
-            let _ = Transport::accept(ct, s, ca).await?;
+            let _ = Transport::accept(s, ct, ca, "ssh-userauth").await?;
             log::warn!("ACCEPTED");
         }
     }

@@ -2,23 +2,23 @@ use super::Message;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct MsgServiceRequest<'a>(pub &'a str);
+pub struct MsgServiceRequest<T = String>(pub T);
 
-impl<'a> Message for MsgServiceRequest<'a> {
+impl<T> Message for MsgServiceRequest<T> {
     const NUMBER: u8 = 5;
 }
 
-impl<'a> SshEncode for MsgServiceRequest<'a> {
+impl SshEncode for MsgServiceRequest<&str> {
     fn encode<E: SshEncoder>(&self, c: &mut E) -> Option<()> {
         c.push_u8(<Self as Message>::NUMBER)?;
         c.push_str_framed(&self.0)
     }
 }
 
-impl<'a> SshDecodeRef<'a> for MsgServiceRequest<'a> {
-    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+impl SshDecode for MsgServiceRequest<String> {
+    fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.expect_u8(<Self as Message>::NUMBER)?;
-        d.take_str_framed().map(Self)
+        d.take_str_framed().map(String::from).map(Self)
     }
 }
 
@@ -28,7 +28,7 @@ mod tests {
 
     #[test]
     fn test_encode_01() {
-        let msg = MsgServiceRequest(&"service");
+        let msg = MsgServiceRequest::<&'static str>(&"service");
         assert_eq!(
             &[5, 0, 0, 0, 7, 115, 101, 114, 118, 105, 99, 101][..],
             &SshCodec::encode(&msg).unwrap()[..]

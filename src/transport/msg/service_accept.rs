@@ -2,15 +2,15 @@ use super::Message;
 use crate::util::codec::*;
 
 #[derive(Clone, Debug)]
-pub struct MsgServiceAccept<T = String>(T);
+pub struct MsgServiceAccept<T = String>(pub T);
 
-impl Message for MsgServiceAccept {
+impl <T> Message for MsgServiceAccept<T> {
     const NUMBER: u8 = 6;
 }
 
-impl SshEncode for MsgServiceAccept<&'static str> {
+impl SshEncode for MsgServiceAccept<&str> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(MsgServiceAccept::NUMBER)?;
+        e.push_u8(Self::NUMBER)?;
         e.push_str_framed(&self.0)
     }
 }

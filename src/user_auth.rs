@@ -34,7 +34,7 @@ impl UserAuth {
         user: &str,
         agent: &Arc<dyn AuthAgent>,
     ) -> Result<Connection, UserAuthError> {
-        let mut t = transport.request_service(Self::SSH_USERAUTH).await?;
+        let mut t = transport;
         let service = Self::SSH_CONNECTION;
         let identities = agent.identities().await?;
 

@@ -53,7 +53,8 @@ impl Client {
         let cc = &self.config.connection;
         let hv = &self.config.host_verifier;
         let aa = &self.config.auth_agent;
-        let t = Transport::connect(tc, socket, host, port, hv).await?;
+        let sv = UserAuth::SSH_USERAUTH;
+        let t = Transport::connect(socket, tc, hv, host, port, sv).await?;
         Ok(UserAuth::request_connection(t, cc, handle, user, aa).await?)
     }
 }
