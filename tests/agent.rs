@@ -11,6 +11,7 @@ pub struct AuthAgentForTesting {
     is_no_identities: bool,
     is_unable_to_sign: bool,
     is_invalid_signature: bool,
+    is_sign_error: bool
 }
 
 impl AuthAgentForTesting {
@@ -32,6 +33,7 @@ impl AuthAgentForTesting {
             is_no_identities: false,
             is_unable_to_sign: false,
             is_invalid_signature: false,
+            is_sign_error: false
         }
     }
 
@@ -47,6 +49,11 @@ impl AuthAgentForTesting {
 
     pub fn invalid_signature(mut self) -> Self {
         self.is_invalid_signature = true;
+        self
+    }
+
+    pub fn sign_error(mut self) -> Self {
+        self.is_sign_error = true;
         self
     }
 }
@@ -70,8 +77,10 @@ impl AuthAgent for AuthAgentForTesting {
 
     fn signature(&self, id: &Identity, data: &[u8], _: u32) -> AuthAgentFuture<Option<Signature>> {
         let delay = self.delay;
-        let sig = if self.is_unable_to_sign {
-            None
+        let sig = if self.is_sign_error {
+            Err(AuthAgentError::new(std::io::Error::new(std::io::ErrorKind::InvalidData.into(),"")))
+        } else if self.is_unable_to_sign {
+            Ok(None)
         } else if let Some(x) = self.identities.iter().find(|x| &x.0 == id) {
             use ed25519_dalek::Signer;
             let algo = "ssh-ed25519".to_string();
@@ -79,14 +88,14 @@ impl AuthAgent for AuthAgentForTesting {
             if self.is_invalid_signature {
                 blob[23] += 1;
             }
-            Some(Signature::new(algo, blob))
+            Ok(Some(Signature::new(algo, blob)))
         } else {
-            None
+            Ok(None)
         };
 
         Box::pin(async move {
             tokio::time::sleep(delay).await;
-            Ok(sig)
+            sig
         })
     }
 }

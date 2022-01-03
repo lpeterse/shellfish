@@ -195,3 +195,40 @@ async fn test_connect_agent_invalid_signature() -> Result<(), Box<dyn std::error
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_connect_agent_sign_error() -> Result<(), Box<dyn std::error::Error>> {
+    let (sock1, sock2) = Socket::new_tcp().await?;
+
+    let conf = TransportConfig::default();
+    let conf = Arc::new(conf);
+    let conf_ = conf.clone();
+
+    let agent = AuthAgentForTesting::new().sign_error();
+    let agent: Arc<dyn AuthAgent> = Arc::new(agent);
+
+    let identity = agent.identities().await?[0].0.clone();
+    let verifier = HostVerifierForTesting::new(HOST, PORT, &identity);
+    let verifier: Arc<dyn HostVerifier> = Arc::new(verifier);
+
+    let task1 = async move { Transport::accept(sock1, &conf, &agent, SRV).await };
+    let task2 = async move { Transport::connect(sock2, &conf_, &verifier, HOST, PORT, SRV).await };
+
+    let task1 = tokio::spawn(task1);
+    let task2 = tokio::spawn(task2);
+
+    let err1 = task1.await?.unwrap_err();
+    let err2 = task2.await?.unwrap_err();
+
+    match err1 {
+        TransportError::AgentError(_) => (),
+        e => panic!("{:?}", e)
+    }
+
+    match err2 {
+        TransportError::IoError(_) => (),
+        e => panic!("{:?}", e)
+    }
+
+    Ok(())
+}
