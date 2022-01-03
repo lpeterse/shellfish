@@ -9,11 +9,11 @@ pub(crate) mod msg;
 pub(crate) mod trx;
 
 pub(crate) use self::crypto::*;
-pub(crate) use self::disconnect::*;
 pub(crate) use self::kex::*;
 pub(crate) use self::msg::*;
 
 pub use self::config::TransportConfig;
+pub use self::disconnect::DisconnectReason;
 pub use self::error::TransportError;
 pub use self::ident::Identification;
 

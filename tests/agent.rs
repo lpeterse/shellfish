@@ -8,6 +8,9 @@ use shellfish::util::codec::*;
 pub struct AuthAgentForTesting {
     delay: std::time::Duration,
     identities: Vec<(Identity, String, ed25519::Keypair)>,
+    is_no_identities: bool,
+    is_unable_to_sign: bool,
+    is_invalid_signature: bool,
 }
 
 impl AuthAgentForTesting {
@@ -26,18 +29,39 @@ impl AuthAgentForTesting {
         Self {
             delay: std::time::Duration::from_millis(7),
             identities: vec![(identity, comment, keypair)],
+            is_no_identities: false,
+            is_unable_to_sign: false,
+            is_invalid_signature: false,
         }
+    }
+
+    pub fn no_identities(mut self) -> Self {
+        self.is_no_identities = true;
+        self
+    }
+
+    pub fn unable_to_sign(mut self) -> Self {
+        self.is_unable_to_sign = true;
+        self
+    }
+
+    pub fn invalid_signature(mut self) -> Self {
+        self.is_invalid_signature = true;
+        self
     }
 }
 
 impl AuthAgent for AuthAgentForTesting {
     fn identities(&self) -> AuthAgentFuture<Vec<(Identity, String)>> {
         let delay = self.delay;
-        let ids: Vec<_> = self
-            .identities
-            .iter()
-            .map(|(i, c, _)| (i.clone(), c.clone()))
-            .collect();
+        let ids: Vec<_> = if self.is_no_identities {
+            vec![]
+        } else  {
+            self.identities
+                .iter()
+                .map(|(i, c, _)| (i.clone(), c.clone()))
+                .collect()
+        };
         Box::pin(async move {
             tokio::time::sleep(delay).await;
             Ok(ids)
@@ -46,10 +70,15 @@ impl AuthAgent for AuthAgentForTesting {
 
     fn signature(&self, id: &Identity, data: &[u8], _: u32) -> AuthAgentFuture<Option<Signature>> {
         let delay = self.delay;
-        let sig = if let Some(x) = self.identities.iter().find(|x| &x.0 == id) {
+        let sig = if self.is_unable_to_sign {
+            None
+        } else if let Some(x) = self.identities.iter().find(|x| &x.0 == id) {
             use ed25519_dalek::Signer;
             let algo = "ssh-ed25519".to_string();
-            let blob = x.2.sign(data).to_bytes().to_vec();
+            let mut blob = x.2.sign(data).to_bytes().to_vec();
+            if self.is_invalid_signature {
+                blob[23] += 1;
+            }
             Some(Signature::new(algo, blob))
         } else {
             None
