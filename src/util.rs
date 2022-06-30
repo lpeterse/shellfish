@@ -4,7 +4,6 @@ pub mod codec;
 pub mod glob;
 pub mod socket;
 pub mod socks5;
-pub mod tcp;
 pub mod secret;
 
 use std::fmt;
