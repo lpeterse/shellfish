@@ -23,7 +23,7 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
         .arg(
             Arg::with_name("verbosity")
                 .help("Verbosity")
-                .short("v")
+                .short('v')
                 .multiple(true),
         )
         .subcommand(
@@ -80,7 +80,7 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
         .init();
 
     match config.subcommand() {
-        ("socks5", Some(config)) => {
+        Some(("socks5", config)) => {
             let user = value_t_or_exit!(config, "user", String);
             let host = value_t_or_exit!(config, "host", String);
             let port = value_t_or_exit!(config, "port", u16);

@@ -6,12 +6,11 @@ use crate::connection::msg::{
     MsgChannelClose, MsgChannelFailure, MsgChannelOpen, MsgChannelRequest,
 };
 use crate::connection::{ConnectionError, OpenFailure};
-use crate::ready;
 use crate::transport::Transport;
 use crate::util::check;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot::{self, Sender};
 
 // =================================================================================================

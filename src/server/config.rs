@@ -2,7 +2,6 @@ use crate::agent::AuthAgent;
 use crate::agent::LocalAgent;
 use crate::connection::ConnectionConfig;
 use crate::transport::*;
-use crate::util::tcp::*;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 
@@ -34,14 +33,12 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug)]
 pub struct SocketConfig {
     pub bind_addr: SocketAddr,
-    pub keepalive: Option<TcpKeepaliveConfig>,
 }
 
 impl Default for SocketConfig {
     fn default() -> Self {
         Self {
             bind_addr: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2200),
-            keepalive: Some(Default::default()),
         }
     }
 }

@@ -20,17 +20,15 @@ pub use self::ident::Identification;
 use self::trx::*;
 use crate::agent::AuthAgent;
 use crate::host::HostVerifier;
-use crate::ready;
 use crate::util::codec::SshCodec;
 use crate::util::codec::SshDecode;
 use crate::util::codec::SshEncode;
-use crate::util::poll_fn;
 use crate::util::secret::Secret;
 use crate::util::socket::Socket;
-use std::future::Future;
+use std::future::{poll_fn, Future};
 use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
+use std::task::{ready, Context, Poll};
 use tokio::time::{sleep, Instant, Sleep};
 
 /// Implements the transport layer as described in RFC 4253.
