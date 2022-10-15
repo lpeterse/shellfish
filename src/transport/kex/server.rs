@@ -14,15 +14,16 @@ use super::KexHash;
 use super::KexMessage;
 use crate::agent::AuthAgent;
 use crate::agent::AuthAgentFuture;
+use crate::identity::Identity;
 use crate::identity::Signature;
 use crate::util::check;
 use crate::util::secret::Secret;
-use crate::{identity::Identity, ready};
-use core::future::Future;
 use std::collections::VecDeque;
 use std::convert::TryInto;
+use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::task::ready;
 use std::task::Context;
 use std::task::Poll;
 

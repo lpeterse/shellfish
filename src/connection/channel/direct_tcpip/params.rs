@@ -14,6 +14,22 @@ pub struct DirectTcpIpParams {
     pub src_port: u16,
 }
 
+impl DirectTcpIpParams {
+    pub fn new<S: Into<String>, A: Into<IpAddr>>(
+        dst_host: S,
+        dst_port: u16,
+        src_addr: A,
+        src_port: u16,
+    ) -> Self {
+        Self {
+            dst_host: dst_host.into(),
+            dst_port,
+            src_addr: src_addr.into(),
+            src_port,
+        }
+    }
+}
+
 impl SshEncode for DirectTcpIpParams {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_str_framed(&self.dst_host)?;

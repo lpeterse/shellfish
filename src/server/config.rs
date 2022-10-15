@@ -2,7 +2,6 @@ use crate::agent::AuthAgent;
 use crate::agent::LocalAgent;
 use crate::connection::ConnectionConfig;
 use crate::transport::*;
-use crate::util::tcp::*;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
 
@@ -12,7 +11,6 @@ use std::sync::Arc;
 pub struct ServerConfig {
     pub socket: Arc<SocketConfig>,
     pub transport: Arc<TransportConfig>,
-    pub auth_agent: Arc<dyn AuthAgent>,
     pub connection: Arc<ConnectionConfig>,
 }
 
@@ -22,10 +20,6 @@ impl Default for ServerConfig {
             socket: Arc::new(SocketConfig::default()),
             transport: Arc::new(TransportConfig::default()),
             connection: Arc::new(ConnectionConfig::default()),
-            auth_agent: match LocalAgent::new_env() {
-                Some(agent) => Arc::new(agent),
-                None => Arc::new(()),
-            },
         }
     }
 }
@@ -34,14 +28,12 @@ impl Default for ServerConfig {
 #[derive(Clone, Debug)]
 pub struct SocketConfig {
     pub bind_addr: SocketAddr,
-    pub keepalive: Option<TcpKeepaliveConfig>,
 }
 
 impl Default for SocketConfig {
     fn default() -> Self {
         Self {
-            bind_addr: SocketAddr::new(Ipv4Addr::LOCALHOST.into(), 2200),
-            keepalive: Some(Default::default()),
+            bind_addr: SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 2200),
         }
     }
 }

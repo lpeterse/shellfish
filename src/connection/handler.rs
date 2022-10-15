@@ -1,7 +1,7 @@
 use super::channel::direct_tcpip::DirectTcpIpRequest;
 use super::channel::session::SessionRequest;
 use super::global::{GlobalRequest, GlobalRequestWantReply};
-use super::ConnectionError;
+use super::{ConnectionError, DirectTcpIp};
 use std::task::{Context, Poll};
 
 pub trait ConnectionHandler: Send + Sync + 'static {
@@ -14,7 +14,7 @@ pub trait ConnectionHandler: Send + Sync + 'static {
     }
 
     fn on_direct_tcpip_request(&mut self, request: DirectTcpIpRequest) {
-        log::error!("HANDLER ON_DIRECT_TCPIP_REQUEST {:?}", request)
+        log::error!("HANDLER ON_DIRECT_TCPIP_REQUEST {:?}", request);
     }
 
     fn on_session_request(&mut self, request: SessionRequest) {

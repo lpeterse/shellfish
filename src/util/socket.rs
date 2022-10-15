@@ -1,25 +1,14 @@
-use crate::util::poll_fn;
-use crate::util::tcp::*;
+use std::future::poll_fn;
 use std::pin::Pin;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
 use tokio::net::TcpStream;
 use tokio::net::UnixStream;
 
-#[derive(Clone, Debug)]
-pub struct SocketConfig {
-    pub tcp_keepalive: Option<TcpKeepaliveConfig>,
-}
+#[derive(Clone, Debug, Default)]
+pub struct SocketConfig {}
 
-impl Default for SocketConfig {
-    fn default() -> Self {
-        Self {
-            tcp_keepalive: Some(Default::default()),
-        }
-    }
-}
-
-pub trait Socket: std::fmt::Debug + AsyncRead + AsyncWrite + Unpin + Send + 'static {}
+pub trait Socket: std::fmt::Debug + AsyncRead + AsyncWrite + Unpin + Send + Sync + 'static {}
 
 impl Socket for TcpStream {}
 impl Socket for UnixStream {}

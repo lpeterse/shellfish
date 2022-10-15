@@ -1,4 +1,3 @@
-#![feature(future_poll_fn)]
 pub mod agent;
 pub mod client;
 pub mod connection;

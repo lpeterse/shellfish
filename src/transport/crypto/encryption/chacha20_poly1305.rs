@@ -1,14 +1,11 @@
 use super::super::super::keys::*;
 use super::*;
 use crate::util::check;
-use chacha20::cipher::{NewCipher, StreamCipher};
+use chacha20::cipher::{KeyIvInit, StreamCipher, KeyInit};
 use chacha20::ChaCha20Legacy;
-use generic_array::GenericArray;
-use poly1305::universal_hash::NewUniversalHash;
-use poly1305::{Poly1305, Tag};
+use generic_array::{GenericArray};
+use poly1305::{Poly1305};
 use zeroize::*;
-
-type PolyKey = GenericArray<u8, <Poly1305 as NewUniversalHash>::KeySize>;
 
 #[derive(Debug)]
 pub struct Chacha20Poly1305Context {
@@ -48,7 +45,7 @@ impl Chacha20Poly1305Context {
         chacha.apply_keystream(&mut buf.get_mut(idx_len).ok_or(ERR)?);
         // Compute Poly1305 key and create instance from the first 32 bytes of K2
         let mut chacha = ChaCha20Legacy::new((&self.k2).into(), (&nonce).into());
-        let mut poly_key: PolyKey = [0; 32].into();
+        let mut poly_key: poly1305::Key = [0; 32].into();
         chacha.apply_keystream(&mut poly_key);
         let poly = Poly1305::new(&poly_key);
         // Consume the rest of the 1st chacha block
@@ -57,8 +54,7 @@ impl Chacha20Poly1305Context {
         chacha.apply_keystream(buf.get_mut(idx_data).ok_or(ERR)?);
         // Compute and set the Poly1305 auth tag
         let mac = poly
-            .compute_unpadded(buf.get(idx_auth).ok_or(ERR)?)
-            .into_bytes();
+            .compute_unpadded(buf.get(idx_auth).ok_or(ERR)?);
         buf.get_mut(idx_mac)
             .ok_or(ERR)?
             .copy_from_slice(mac.as_ref());
@@ -76,16 +72,16 @@ impl Chacha20Poly1305Context {
         // Compute Poly1305 key and create instance from the first 32 bytes of K2
         let nonce: [u8; 8] = pc.to_be_bytes();
         let mut chacha = ChaCha20Legacy::new((&self.k2).into(), (&nonce).into());
-        let mut poly_key: PolyKey = [0; 32].into();
+        let mut poly_key: poly1305::Key = [0; 32].into();
         chacha.apply_keystream(&mut poly_key);
         let poly = Poly1305::new(&poly_key);
         // Consume remainder of 1st chacha block
         chacha.apply_keystream(&mut poly_key);
         // Compute and validate Poly1305 auth tag
-        let mac_observed = Tag::from(GenericArray::from_slice(buf.get(idx_mac).ok_or(ERR)?));
+        let mac_observed = GenericArray::from_slice(buf.get(idx_mac).ok_or(ERR)?);
         let mac_computed = poly.compute_unpadded(buf.get(idx_auth).ok_or(ERR)?);
         // Check message integrity
-        check(mac_computed == mac_observed).ok_or(ERR)?;
+        check(&mac_computed == mac_observed).ok_or(ERR)?;
         // Decrypt and return data area len
         chacha.apply_keystream(buf.get_mut(idx_data).ok_or(ERR)?);
         Ok(())

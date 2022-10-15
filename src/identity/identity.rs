@@ -7,7 +7,7 @@ use crate::util::codec::*;
 ///
 /// This is either just a key or a certificate.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Identity(Vec<u8>);
+pub struct Identity(pub Vec<u8>);
 
 /// A user or host public key.
 pub type PublicKey = Identity;
@@ -37,6 +37,12 @@ impl Identity {
 impl From<Vec<u8>> for Identity {
     fn from(x: Vec<u8>) -> Self {
         Self(x)
+    }
+}
+
+impl AsRef<[u8]> for Identity {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
     }
 }
 

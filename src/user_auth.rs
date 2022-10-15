@@ -2,8 +2,12 @@ mod error;
 mod method;
 mod msg;
 mod signature;
+mod session;
+mod server;
 
+pub use self::session::*;
 pub use self::error::*;
+pub use self::server::*;
 
 use self::method::*;
 use self::msg::*;
@@ -70,6 +74,7 @@ impl UserAuth {
             user_name: user,
             service_name: service,
             method: PublicKeyMethod {
+                algorithm: identity.algorithm().into(),
                 identity,
                 signature,
             },

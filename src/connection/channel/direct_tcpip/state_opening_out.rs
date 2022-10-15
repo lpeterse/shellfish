@@ -4,11 +4,9 @@ use super::super::ChannelState;
 use super::state::State;
 use super::{DirectTcpIp, DirectTcpIpParams};
 use crate::connection::channel::PollResult;
-use crate::ready;
 use crate::transport::Transport;
 use crate::util::codec::SshCodec;
-use std::task::Context;
-use std::task::Poll;
+use std::task::{ready, Context, Poll};
 use tokio::sync::oneshot::Sender;
 
 #[derive(Debug)]

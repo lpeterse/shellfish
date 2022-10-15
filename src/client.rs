@@ -46,9 +46,6 @@ impl Client {
     ) -> Result<Connection, ClientError> {
         let e = |e: std::io::Error| TransportError::from(e);
         let socket = TcpStream::connect((host, port)).await.map_err(e)?;
-        if let Some(ref keepalive) = self.config.socket.tcp_keepalive {
-            keepalive.apply(&socket).map_err(e)?;
-        }
         let tc = &self.config.transport;
         let cc = &self.config.connection;
         let hv = &self.config.host_verifier;

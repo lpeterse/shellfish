@@ -51,7 +51,7 @@ impl Connection {
     /// [Client::connect()](crate::client::Client::connect) instead).
     ///
     /// The connection spawns a separate handler task. The task and the inner connection state only
-    /// lives as long as the connection is alive. All operations on dead connection are supposed to
+    /// lives as long as the connection is alive. All operations on dead a connection are supposed to
     /// return the error which caused the connection to die. The error is preserved as long as there
     /// are references to the connection.
     pub fn new<F: FnOnce(&Self) -> Box<dyn ConnectionHandler>>(

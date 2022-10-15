@@ -7,13 +7,22 @@ pub struct MsgFailure<T = String> {
     pub partial_success: bool,
 }
 
-impl Message for MsgFailure {
+impl <T> Message for MsgFailure<T> {
     const NUMBER: u8 = 51;
+}
+
+impl <T> MsgFailure<T> {
+    pub fn new(partial_success: bool, methods: Vec<T>) -> Self {
+        Self {
+            methods,
+            partial_success
+        }
+    }
 }
 
 impl SshEncode for MsgFailure<&'static str> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
-        e.push_u8(MsgFailure::NUMBER)?;
+        e.push_u8(MsgFailure::<String>::NUMBER)?;
         e.push_name_list(&self.methods)?;
         e.push_bool(self.partial_success)
     }

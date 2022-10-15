@@ -1,6 +1,8 @@
 mod local;
+mod internal;
 
 pub use self::local::*;
+pub use self::internal::*;
 
 use crate::identity::*;
 use crate::util::*;

@@ -3,12 +3,10 @@ use super::super::open_failure::OpenFailure;
 use super::super::ChannelState;
 use super::state::State;
 use crate::connection::channel::PollResult;
-use crate::ready;
 use crate::transport::Transport;
 use std::future::Future;
 use std::pin::Pin;
-use std::task::Context;
-use std::task::Poll;
+use std::task::{Poll, Context, ready};
 use tokio::sync::oneshot::Receiver;
 
 /// This is the state in which a MSG_CHANNEL_OPEN message has been received and is open
