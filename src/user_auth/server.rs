@@ -1,81 +1,119 @@
-use crate::transport::Transport;
-use crate::util::codec::SshCodec;
-use super::method::{PasswordMethod, AuthMethod, PublicKeyMethod};
+use super::method::{AuthMethod, NoneMethod, PasswordMethod, PublicKeyMethod};
+use super::msg::{MsgFailure, MsgSuccess, MsgUserAuthBanner, MsgUserAuthPkOk, MsgUserAuthRequest_};
 use super::signature::SignatureData;
-use super::{UserAuthSession, UserAuthError, AuthResult};
-use super::msg::{MsgUserAuthBanner, MsgUserAuthRequest_, MsgUserAuthPkOk, MsgFailure, MsgSuccess};
+use super::{AuthResult, UserAuthError, UserAuthSession};
+use crate::transport::{Transport, MsgDisconnect, DisconnectReason};
+use crate::util::codec::SshCodec;
 
 pub async fn authenticate<Identity: Send + 'static>(
-    mut transport: Transport,
     mut session: Box<dyn UserAuthSession<Identity = Identity>>,
+    mut transport: Transport,
 ) -> Result<Identity, UserAuthError> {
-    // Send banner if configured
-    if let Some(banner) = session.banner().await {
+    let s = &mut session;
+    let t = &mut transport;
+
+    if let Some(banner) = s.banner().await {
         let msg = MsgUserAuthBanner::new(banner);
-        transport.send(&msg).await?;
-        transport.flush().await?;
+        t.send(&msg).await?;
+        t.flush().await?;
     }
 
-    // 
-    let identity = loop {
-        let mut fail_partial_success = false;
-        let mut fail_methods = vec![];
+    macro_rules! reply {
+        ( $x:expr ) => {
+            match $x {
+                AuthResult::Success { identity } => {
+                    send_success(t).await?;
+                    return Ok(identity);
+                }
+                AuthResult::Failure { partial_success } => {
+                    send_failure(t, partial_success, s.methods()).await?;
+                }
+                AuthResult::Disconnect => {
+                    send_disconnect(t).await?;
+                }
+            }
+        };
+    }
 
-        let msg = transport.receive::<MsgUserAuthRequest_>().await?;
+    loop {
+        let msg = t.receive::<MsgUserAuthRequest_>().await?;
+        let user = msg.user_name;
         match msg.method_name.as_str() {
+            NoneMethod::NAME => {
+                reply!(s.try_none(user).await)
+            }
             PasswordMethod::NAME => {
                 let m: PasswordMethod = SshCodec::decode(&msg.method_blob)?;
-                match session.try_password(msg.user_name, m.0).await {
-                    AuthResult::Success(id) => break id,
-                    AuthResult::Failure { methods, partial_success } => {
-                        fail_methods = methods;
-                        fail_partial_success = partial_success;
-                    }
-                }
+                let pass = m.0;
+                reply!(s.try_password(user, pass).await)
             }
             PublicKeyMethod::NAME => {
                 let m: PublicKeyMethod = SshCodec::decode(&msg.method_blob)?;
-                let user = msg.user_name;
                 let pkey = m.identity;
                 if let Some(sig) = m.signature {
-                    let data = SignatureData {
-                        session_id: transport.session_id(),
-                        user_name: &user,
-                        service_name: &msg.service_name,
-                        identity: &pkey,
-                    };
+                    let sid = t.session_id();
+                    let srv = &msg.service_name;
+                    let data = SignatureData::new(sid, srv, &user, &pkey);
                     let data = SshCodec::encode(&data)?;
                     if sig.verify(&pkey, &data).is_ok() {
-                        match session.try_publickey(user, pkey).await {
-                            AuthResult::Success(id) => break id,
-                            AuthResult::Failure { methods, partial_success } => {
-                                fail_methods = methods;
-                                fail_partial_success = partial_success;
-                            }
-                        }
+                        reply!(s.try_publickey(user, pkey).await)
+                    } else {
+                        send_failure(t, false, s.methods()).await?;
                     }
                 } else {
-                    if session.try_publickey_ok(user, pkey.clone()).await {
-                        let msg = MsgUserAuthPkOk {
-                            pk_algorithm: m.algorithm,
-                            pk_blob: pkey.0,
-                        };
-                        transport.send(&msg).await?;
-                        transport.flush().await?;
-                        continue;
+                    match s.try_publickey_ok(user, pkey.clone()).await {
+                        AuthResult::Success { .. } => {
+                            send_pk_ok(t, m.algorithm, pkey.0).await?;
+                        }
+                        AuthResult::Failure { .. } => {
+                            send_failure(t, false, s.methods()).await?;
+                        }
+                        AuthResult::Disconnect => {
+                            send_disconnect(t).await?;
+                        }
                     }
                 }
             }
-            _ => {}
+            _ => send_failure(t, false, s.methods()).await?,
         }
-        let msg = MsgFailure::new(fail_partial_success, fail_methods);
-        transport.send(&msg).await?;
-        transport.flush().await?;
-    };
+    }
+}
 
-    // Send success to client and return determined identity
+async fn send_pk_ok(
+    t: &mut Transport,
+    pk_algorithm: String,
+    pk_blob: Vec<u8>,
+) -> Result<(), UserAuthError> {
+    let msg = MsgUserAuthPkOk {
+        pk_algorithm,
+        pk_blob,
+    };
+    t.send(&msg).await?;
+    t.flush().await?;
+    Ok(())
+}
+
+async fn send_success(t: &mut Transport) -> Result<(), UserAuthError> {
     let msg = MsgSuccess;
-    transport.send(&msg).await?;
-    transport.flush().await?;
-    Ok(identity)
+    t.send(&msg).await?;
+    t.flush().await?;
+    Ok(())
+}
+
+async fn send_failure(
+    t: &mut Transport,
+    partial_success: bool,
+    methods: Vec<&'static str>,
+) -> Result<(), UserAuthError> {
+    let msg = MsgFailure::new(partial_success, methods);
+    t.send(&msg).await?;
+    t.flush().await?;
+    Ok(())
+}
+
+async fn send_disconnect(t: &mut Transport) -> Result<(), UserAuthError> {
+    let msg = MsgDisconnect::new(DisconnectReason::NO_MORE_AUTH_METHODS_AVAILABLE);
+    t.send(&msg).await?;
+    t.flush().await?;
+    Err(UserAuthError::NoMoreAuthMethods)
 }

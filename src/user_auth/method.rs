@@ -1,6 +1,8 @@
+mod none;
 mod password;
 mod publickey;
 
+pub use none::*;
 pub use password::*;
 pub use publickey::*;
 

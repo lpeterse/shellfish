@@ -14,7 +14,7 @@ pub struct InternalAgent {
 
 impl InternalAgent {
     pub fn new_random() -> Self {
-        let mut csprng = rand_core::OsRng{};
+        let mut csprng = rand_core::OsRng {};
         let keypair = ed25519::Keypair::generate(&mut csprng);
         let identity = SshCodec::encode(&SshEd25519PublicKey(keypair.public.as_bytes())).unwrap();
         let identity = Identity::from(identity);
@@ -30,11 +30,14 @@ impl AuthAgent for InternalAgent {
     }
 
     fn signature(&self, id: &Identity, data: &[u8], _: u32) -> AuthAgentFuture<Option<Signature>> {
-        // FIXME check key
-        use ed25519_dalek::Signer;
-        let algo = "ssh-ed25519".to_string();
-        let blob = self.keypair.sign(data).to_bytes().to_vec();
-        let sig = Ok(Some(Signature::new(algo, blob)));
+        let sig = if id == &self.identity {
+            use ed25519::Signer;
+            let algo = "ssh-ed25519".to_string();
+            let blob = self.keypair.sign(data).to_bytes().to_vec();
+            Ok(Some(Signature::new(algo, blob)))
+        } else {
+            Ok(None)
+        };
         Box::pin(async move { sig })
     }
 }

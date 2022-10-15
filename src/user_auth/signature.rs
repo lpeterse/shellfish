@@ -20,6 +20,22 @@ pub struct SignatureData<'a> {
     pub identity: &'a Identity,
 }
 
+impl<'a> SignatureData<'a> {
+    pub fn new(
+        session_id: &'a Secret,
+        service_name: &'a str,
+        user_name: &'a str,
+        identity: &'a Identity,
+    ) -> Self {
+        Self {
+            session_id,
+            user_name,
+            service_name,
+            identity,
+        }
+    }
+}
+
 impl<'a> SshEncode for SignatureData<'a> {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push(self.session_id)?;

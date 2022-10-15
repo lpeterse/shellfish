@@ -1,8 +1,10 @@
-use crate::util::BoxFuture;
 use crate::identity::Identity;
+use crate::util::BoxFuture;
 
 pub trait UserAuthSession: Send + Sync + 'static {
     type Identity: Send + 'static;
+
+    fn methods(&self) -> Vec<&'static str>;
 
     fn banner(&self) -> BoxFuture<Option<String>> {
         Box::pin(async { None })
@@ -10,7 +12,7 @@ pub trait UserAuthSession: Send + Sync + 'static {
 
     fn try_none(&mut self, username: String) -> BoxFuture<AuthResult<Self::Identity>> {
         let _ = username;
-        Box::pin(async { AuthResult::failure(vec![]) })
+        Box::pin(async { AuthResult::failure(false) })
     }
 
     fn try_publickey(
@@ -20,17 +22,13 @@ pub trait UserAuthSession: Send + Sync + 'static {
     ) -> BoxFuture<AuthResult<Self::Identity>> {
         let _ = username;
         let _ = pubkey;
-        Box::pin(async { AuthResult::failure(vec![]) })
+        Box::pin(async { AuthResult::failure(false) })
     }
 
-    fn try_publickey_ok(
-        &mut self,
-        username: String,
-        pubkey: Identity,
-    ) -> BoxFuture<bool> {
+    fn try_publickey_ok(&mut self, username: String, pubkey: Identity) -> BoxFuture<AuthResult<()>> {
         let _ = username;
         let _ = pubkey;
-        Box::pin(async { true })
+        Box::pin(async { AuthResult::failure(false) })
     }
 
     fn try_password(
@@ -40,29 +38,27 @@ pub trait UserAuthSession: Send + Sync + 'static {
     ) -> BoxFuture<AuthResult<Self::Identity>> {
         let _ = username;
         let _ = password;
-        Box::pin(async { AuthResult::failure(vec![]) })
+        Box::pin(async { AuthResult::failure(false) })
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum AuthResult<Identity> {
-    Success(Identity),
-    Failure {
-        methods: Vec<&'static str>,
-        partial_success: bool
-    }
+    Success { identity: Identity },
+    Failure { partial_success: bool },
+    Disconnect
 }
 
-impl <Identity> AuthResult<Identity> {
-    fn success(identity: Identity) -> Self {
-        Self::Success(identity)
+impl<Identity> AuthResult<Identity> {
+    pub fn success(identity: Identity) -> Self {
+        Self::Success { identity }
     }
 
-    fn failure(methods: Vec<&'static str>) -> Self {
-        Self::Failure { methods, partial_success: false }
+    pub fn failure(partial_success: bool) -> Self {
+        Self::Failure { partial_success }
     }
 
-    fn failure_partial_success(methods: Vec<&'static str>) -> Self {
-        Self::Failure { methods, partial_success: true }
+    pub fn disconnect() -> Self {
+        Self::Disconnect
     }
 }

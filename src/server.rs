@@ -90,7 +90,7 @@ async fn handle<Identity: 'static + Send>(
             return;
         }
     };
-    let identity = match authenticate(tp, ua).await {
+    let identity = match authenticate(ua, tp).await {
         Ok(x) => x,
         Err(e) => {
             log::warn!("{:?}", e);
