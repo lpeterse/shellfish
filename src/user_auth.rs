@@ -7,8 +7,8 @@ mod server;
 
 pub use self::session::*;
 pub use self::error::*;
-pub use self::server::*;
 
+use self::server::*;
 use self::method::*;
 use self::msg::*;
 use self::signature::*;
@@ -30,11 +30,19 @@ impl UserAuth {
     pub const SSH_USERAUTH: &'static str = "ssh-userauth";
     pub const SSH_CONNECTION: &'static str = "ssh-connection";
 
+    pub async fn authenticate<Identity: Send + 'static>(
+        auth_session: Box<dyn UserAuthSession<Identity = Identity>>,
+        transport: &mut Transport,
+        service: &'static str,
+    ) -> Result<Identity, UserAuthError> {
+        authenticate(auth_session, transport, service).await
+    }
+
     /// Request another service with user authentication.
-    pub async fn request_connection<F: FnOnce(&Connection) -> Box<dyn ConnectionHandler>>(
+    pub async fn request_connection(
         transport: Transport,
         config: &Arc<ConnectionConfig>,
-        handle: F,
+        handler: Box<dyn ConnectionHandler>,
         user: &str,
         agent: &Arc<dyn AuthAgent>,
     ) -> Result<Connection, UserAuthError> {
@@ -45,7 +53,7 @@ impl UserAuth {
         for (id, comment) in identities {
             log::debug!("Trying identity: {} ({})", comment, id.algorithm());
             if Self::try_pubkey(&mut t, &agent, service, user, id).await? {
-                return Ok(Connection::new(config, t, handle));
+                return Ok(Connection::new(config, t, handler));
             }
         }
 

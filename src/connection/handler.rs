@@ -1,7 +1,7 @@
 use super::channel::direct_tcpip::DirectTcpIpRequest;
 use super::channel::session::SessionRequest;
 use super::global::{GlobalRequest, GlobalRequestWantReply};
-use super::{ConnectionError, DirectTcpIp};
+use super::{ConnectionError};
 use std::task::{Context, Poll};
 
 pub trait ConnectionHandler: Send + Sync + 'static {

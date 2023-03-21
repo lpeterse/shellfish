@@ -6,7 +6,8 @@ pub(crate) mod session;
 pub use self::direct_tcpip::{DirectTcpIp, DirectTcpIpParams, DirectTcpIpRequest};
 pub use self::open_failure::OpenFailure;
 pub use self::request_failure::RequestFailure;
-pub use self::session::SessionClient;
+pub use self::session::{SessionClient, SessionHandler};
+
 use super::ConnectionError;
 use crate::transport::Transport;
 use std::sync::Arc;
@@ -114,7 +115,7 @@ pub trait ChannelState: Send + Sync + 'static {
     ///
     /// The handler shall perform all ready actions and register all relevant events with the
     /// supplied context. It shall return `true` if the channel got closed and shall be removed.
-    fn poll_with_transport(
+    fn poll(
         &mut self,
         cx: &mut Context,
         t: &mut Transport,
@@ -123,6 +124,9 @@ pub trait ChannelState: Send + Sync + 'static {
         drop(t);
         Poll::Ready(Ok(PollResult::Noop))
     }
+
+    /// Check whether the channel is closed an can be freed.
+    fn is_closed(&self) -> bool;
 }
 
 pub enum PollResult {

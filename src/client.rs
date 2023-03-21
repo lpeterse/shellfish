@@ -37,12 +37,12 @@ impl Client {
     ///
     /// A running `ssh-agent` is expected for key or certificate authentication (`SSH_AUTH_SOCK`
     /// environment variable).
-    pub async fn connect<F: FnOnce(&Connection) -> Box<dyn ConnectionHandler>>(
+    pub async fn connect(
         &self,
         user: &str,
         host: &str,
         port: u16,
-        handle: F,
+        handler: Box<dyn ConnectionHandler>,
     ) -> Result<Connection, ClientError> {
         let e = |e: std::io::Error| TransportError::from(e);
         let socket = TcpStream::connect((host, port)).await.map_err(e)?;
@@ -52,7 +52,7 @@ impl Client {
         let aa = &self.config.auth_agent;
         let sv = UserAuth::SSH_USERAUTH;
         let t = Transport::connect(socket, tc, hv, host, port, sv).await?;
-        Ok(UserAuth::request_connection(t, cc, handle, user, aa).await?)
+        Ok(UserAuth::request_connection(t, cc, handler, user, aa).await?)
     }
 }
 

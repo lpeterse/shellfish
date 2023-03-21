@@ -296,7 +296,7 @@ impl ChannelState for State {
         wake_outer!(state, EV_ERROR);
     }
 
-    fn poll_with_transport(
+    fn poll(
         &mut self,
         cx: &mut Context,
         t: &mut Transport,
@@ -363,6 +363,10 @@ impl ChannelState for State {
         } else {
             Poll::Ready(Ok(PollResult::Noop))
         }
+    }
+
+    fn is_closed(&self) -> bool {
+        panic!()
     }
 }
 

@@ -1,4 +1,4 @@
-use super::{Process, PtySpecification, SessionClient};
+use super::{PtySpecification, SessionClient, Process};
 use crate::connection::channel::RequestFailure;
 use crate::connection::channel::{Channel, ChannelState, PollResult};
 use crate::connection::error::ConnectionErrorWatch;
@@ -75,7 +75,7 @@ impl ChannelState for ClientState1 {
         Ok(())
     }
 
-    fn poll_with_transport(
+    fn poll(
         &mut self,
         cx: &mut Context,
         t: &mut Transport,
@@ -86,6 +86,10 @@ impl ChannelState for ClientState1 {
             self.params = None;
         }
         Poll::Ready(Ok(PollResult::Noop))
+    }
+
+    fn is_closed(&self) -> bool {
+        panic!()
     }
 }
 
@@ -250,7 +254,7 @@ impl ChannelState for ClientState2 {
         }
     }
 
-    fn poll_with_transport(
+    fn poll(
         &mut self,
         cx: &mut Context,
         t: &mut Transport,
@@ -335,6 +339,10 @@ impl ChannelState for ClientState2 {
             }
         }
     }
+
+    fn is_closed(&self) -> bool {
+        panic!()
+    }
 }
 
 #[derive(Debug)]
@@ -364,7 +372,7 @@ impl R1 {
     pub fn req_proc(
         &mut self,
         param: SessionReq2,
-    ) -> oneshot::Receiver<Result<Process, RequestFailure>> {
+    ) -> oneshot::Receiver<Result<Box<dyn Process>, RequestFailure>> {
         let (tx1, rx1) = oneshot::channel();
         let (tx2, rx2) = oneshot::channel();
         let Self(tx) = std::mem::replace(self, Self(tx1));
@@ -396,7 +404,7 @@ pub(crate) struct R4 {
 #[derive(Debug)]
 pub enum SessionRes2 {
     Unit(oneshot::Sender<Result<(), RequestFailure>>),
-    Proc(oneshot::Sender<Result<Process, RequestFailure>>),
+    Proc(oneshot::Sender<Result<Box<dyn Process>, RequestFailure>>),
 }
 
 #[derive(Debug)]
@@ -428,4 +436,8 @@ impl ClientState3 {
     }
 }
 
-impl ChannelState for ClientState3 {}
+impl ChannelState for ClientState3 {
+    fn is_closed(&self) -> bool {
+        panic!()
+    }
+}

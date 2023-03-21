@@ -12,6 +12,12 @@ impl SshEncode for () {
     }
 }
 
+impl SshEncode for u32 {
+    fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
+        e.push_u32be(*self)
+    }
+}
+
 impl SshEncode for String {
     fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
         e.push_str_framed(&self)
@@ -34,5 +40,11 @@ impl<A: SshEncode, B: SshEncode> SshEncode for (A, B) {
 impl SshEncode for Vec<u8> {
     fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
         e.push_bytes(&self)
+    }
+}
+
+impl <Y: SshEncode> SshEncode for &Y {
+    fn encode<T: SshEncoder>(&self, e: &mut T) -> Option<()> {
+        (*self).encode(e)
     }
 }

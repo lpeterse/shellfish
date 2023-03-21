@@ -33,7 +33,7 @@ impl StateOpeningInbound {
 }
 
 impl ChannelState for StateOpeningInbound {
-    fn poll_with_transport(
+    fn poll(
         &mut self,
         cx: &mut Context,
         t: &mut Transport,
@@ -61,5 +61,9 @@ impl ChannelState for StateOpeningInbound {
                 }
             }
         }
+    }
+
+    fn is_closed(&self) -> bool {
+        panic!()
     }
 }

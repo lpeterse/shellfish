@@ -35,14 +35,14 @@ mod tests {
     fn test_encode_01() {
         let msg = PasswordMethod("abcd".into());
         assert_eq!(
-            &[0, 0, 0, 4, 97, 98, 99, 100][..],
+            &[0, 0, 0, 0, 4, 97, 98, 99, 100][..],
             &SshCodec::encode(&msg).unwrap()[..]
         );
     }
 
     #[test]
     fn test_decode_01() {
-        let buf: [u8; 8] = [0, 0, 0, 4, 97, 98, 99, 100];
+        let buf: [u8; 9] = [0, 0, 0, 0, 4, 97, 98, 99, 100];
         let msg: PasswordMethod = SshCodec::decode(&buf[..]).unwrap();
         assert_eq!(msg.0, "abcd");
     }

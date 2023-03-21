@@ -10,7 +10,7 @@ keywords = ["ssh", "network", "async", "crypto", "tokio"]
 description = "A pure Rust SSH implementation"
 
 [dependencies]
-base64 = "^0.13"
+base64 = "^0.21"
 chacha20 = { version = "^0.9" }
 ed25519-dalek = { version = "^1.0" }
 generic-array = "^0.14"
@@ -30,11 +30,14 @@ tokio = { version = "1.21.1", features = [
     "time",
     "io-util",
     "sync",
-    "macros"
+    "macros",
+    "process"
 ] }
+libc = "^0.2"
 
 [dev-dependencies]
-clap = { version = "^3.2", default-features = false, features = ["std", "env"] }
+clap = { version = "^4.1", features = ["env", "derive"] }
+clap-verbosity-flag = "^2.0"
 env_logger = { version = "*", default-features = true }
 
 [profile.release]

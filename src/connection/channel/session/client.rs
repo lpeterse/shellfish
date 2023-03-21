@@ -72,7 +72,7 @@ impl SessionClient {
     }
 
     /// Execute a remote shell.
-    pub async fn shell(self) -> Result<Result<Process, RequestFailure<Self>>, ConnectionError> {
+    pub async fn shell(self) -> Result<Result<Box<dyn Process>, RequestFailure<Self>>, ConnectionError> {
         let mut s = self;
         let param = SessionReq2::Shell;
         let response = s.req_tx.req_proc(param);
@@ -80,7 +80,7 @@ impl SessionClient {
     }
 
     /// Execute a command.
-    pub async fn exec(self, command: &str) -> Result<Result<Process, RequestFailure<Self>>, ConnectionError> {
+    pub async fn exec(self, command: &str) -> Result<Result<Box<dyn Process>, RequestFailure<Self>>, ConnectionError> {
         let mut s = self;
         let param = SessionReq2::Exec(command.into());
         let response = s.req_tx.req_proc(param);
@@ -88,7 +88,7 @@ impl SessionClient {
     }
 
     /// Execute a subsystem.
-    pub async fn subsystem(self, subsystem: &str) -> Result<Result<Process, RequestFailure<Self>>, ConnectionError> {
+    pub async fn subsystem(self, subsystem: &str) -> Result<Result<Box<dyn Process>, RequestFailure<Self>>, ConnectionError> {
         let mut s = self;
         let param = SessionReq2::Subsystem(subsystem.into());
         let response = s.req_tx.req_proc(param);

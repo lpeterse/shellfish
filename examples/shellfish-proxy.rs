@@ -1,4 +1,4 @@
-use clap::{value_t_or_exit, App, AppSettings, Arg, SubCommand};
+use clap::*;
 use shellfish::client::*;
 use shellfish::connection::*;
 use shellfish::util::socks5;
@@ -10,82 +10,46 @@ use tokio::spawn;
 use tokio::sync::watch;
 use tokio::time::sleep;
 
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+
+    #[clap(flatten)]
+    verbose: clap_verbosity_flag::Verbosity,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Socks5 {
+        #[arg(short = 'H', long)]
+        host: String,
+        #[arg(short, long, default_value_t = 22)]
+        port: u16,
+        #[arg(short, long, env = "LOGNAME")]
+        user: String,
+        #[arg(short, long, default_value = "[::]:1080")]
+        bind: std::net::SocketAddr,
+        #[arg(short, long, env = "SSH_AUTH_SOCK")]
+        agent: String,
+    },
+}
+
 fn main() -> Result<(), Box<dyn Error>> {
     tokio::runtime::Runtime::new()?.block_on(main_async())
 }
 
 async fn main_async() -> Result<(), Box<dyn Error>> {
-    // Parse command line arguments
-    let config = App::new(env!("CARGO_PKG_NAME"))
-        .setting(AppSettings::ArgRequiredElseHelp)
-        .version(env!("CARGO_PKG_VERSION"))
-        .author(env!("CARGO_PKG_AUTHORS"))
-        .arg(
-            Arg::with_name("verbosity")
-                .help("Verbosity")
-                .short('v')
-                .multiple(true),
-        )
-        .subcommand(
-            SubCommand::with_name("socks5")
-                .about("SOCKS5 proxy with forwarding over SSH")
-                .arg(
-                    Arg::with_name("host")
-                        .help("SSH host name")
-                        .takes_value(true)
-                        .required(true),
-                )
-                .arg(
-                    Arg::with_name("port")
-                        .help("SSH host port")
-                        .takes_value(true)
-                        .long("port")
-                        .default_value("22"),
-                )
-                .arg(
-                    Arg::with_name("user")
-                        .help("SSH user name")
-                        .long("user")
-                        .takes_value(true)
-                        .env("LOGNAME"),
-                )
-                .arg(
-                    Arg::with_name("agent")
-                        .help("SSH agent socket")
-                        .long("agent")
-                        .takes_value(true)
-                        .env("SSH_AUTH_SOCK"),
-                )
-                .arg(
-                    Arg::with_name("bind")
-                        .help("SOCKS5 bind address")
-                        .long("bind")
-                        .takes_value(true)
-                        .default_value("127.0.0.1:1080"),
-                ),
-        )
-        .get_matches();
+    let cli = Cli::parse();
 
     // Setup logger
-    let log_level = match config.occurrences_of("verbosity") {
-        0 => log::LevelFilter::Warn,
-        1 => log::LevelFilter::Info,
-        2 => log::LevelFilter::Debug,
-        _ => log::LevelFilter::Trace,
-    };
-    println!("{:?}", log_level);
     env_logger::Builder::new()
-        .parse_default_env()
-        .filter_level(log_level)
+        .filter_level(cli.verbose.log_level_filter())
         .init();
 
-    match config.subcommand() {
-        Some(("socks5", config)) => {
-            let user = value_t_or_exit!(config, "user", String);
-            let host = value_t_or_exit!(config, "host", String);
-            let port = value_t_or_exit!(config, "port", u16);
-            let bind = value_t_or_exit!(config, "bind", String);
-
+    match cli.command {
+        Commands::Socks5 { host, port, user, bind, agent: _ } => {
             let pool = ConnectionPool::new(Client::default(), &user, &host, port);
             let listener: TcpListener = TcpListener::bind(&bind).await?;
             log::info!("Started listening on {}", bind);
@@ -105,7 +69,6 @@ async fn main_async() -> Result<(), Box<dyn Error>> {
                 });
             }
         }
-        _ => Ok(()),
     }
 }
 
@@ -144,7 +107,7 @@ impl ConnectionPool {
         spawn(async move {
             let mut delay = 1;
             loop {
-                match client.connect(&u, &h, port, |_| Box::new(())).await {
+                match client.connect(&u, &h, port, Box::new(())).await {
                     Err(e) => {
                         log::error!("Connection to {}@{}:{} failed: {}", u, h, p, e)
                     }

@@ -9,6 +9,7 @@ pub enum UserAuthError {
     AuthAgentError(AuthAgentError),
     TransportError(TransportError),
     NoMoreAuthMethods,
+    ServiceNotAvailable
 }
 
 impl From<SshCodecError> for UserAuthError {
@@ -38,6 +39,7 @@ impl std::fmt::Display for UserAuthError {
             Self::AuthAgentError(e) => write!(f, "Auth agent: {}", e),
             Self::TransportError(e) => write!(f, "Transport: {}", e),
             Self::NoMoreAuthMethods => write!(f, "No more auth methods"),
+            Self::ServiceNotAvailable => write!(f, "Service not available"),
         }
     }
 }

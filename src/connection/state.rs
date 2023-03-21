@@ -177,7 +177,7 @@ impl ConnectionState {
                     if let Some(lid) = self.alloc_channel_id() {
                         match msg.name.as_str() {
                             SessionClient::NAME => {
-                                let (cst, req) = session::open(&self.config, &msg, lid)?;
+                                let (cst, req) = SessionServerState::open(&self.config, &msg, lid)?;
                                 self.handler.on_session_request(req);
                                 self.channels[lid as usize] = Some(cst);
                             }
@@ -443,10 +443,14 @@ impl ConnectionState {
 
         for channel in &mut self.channels {
             if let Some(ref mut c) = channel {
-                match ready!(c.poll_with_transport(cx, &mut self.transport))? {
+                // FIXME: Don't replace!
+                match ready!(c.poll(cx, &mut self.transport))? {
                     PollResult::Noop => (),
-                    PollResult::Closed => *channel = None,
-                    PollResult::Replace(x) => *channel = Some(x),
+                    PollResult::Closed => (), //*channel = None,
+                    PollResult::Replace(x) => () //*channel = Some(x),
+                }
+                if c.is_closed() {
+                    *channel = None
                 }
             }
             if channel.is_none() {

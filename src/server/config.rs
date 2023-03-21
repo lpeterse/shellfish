@@ -1,10 +1,7 @@
-use crate::agent::AuthAgent;
-use crate::agent::LocalAgent;
 use crate::connection::ConnectionConfig;
 use crate::transport::*;
 use std::net::Ipv4Addr;
 use std::net::SocketAddr;
-
 use std::sync::Arc;
 
 #[derive(Clone, Debug)]
@@ -23,7 +20,6 @@ impl Default for ServerConfig {
         }
     }
 }
-
 
 #[derive(Clone, Debug)]
 pub struct SocketConfig {

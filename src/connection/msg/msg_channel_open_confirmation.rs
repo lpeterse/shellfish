@@ -10,6 +10,23 @@ pub(crate) struct MsgChannelOpenConfirmation<'a> {
     pub specific: &'a [u8],
 }
 
+impl<'a> MsgChannelOpenConfirmation<'a> {
+    pub fn new(
+        recipient_channel: u32,
+        sender_channel: u32,
+        initial_window_size: u32,
+        maximum_packet_size: u32,
+    ) -> Self {
+        Self {
+            recipient_channel,
+            sender_channel,
+            initial_window_size,
+            maximum_packet_size,
+            specific: &[],
+        }
+    }
+}
+
 impl<'a> Message for MsgChannelOpenConfirmation<'a> {
     const NUMBER: u8 = 91;
 }

@@ -8,7 +8,7 @@ mod request;
 mod state;
 
 pub use self::channel::direct_tcpip::{DirectTcpIp, DirectTcpIpParams, DirectTcpIpRequest};
-pub use self::channel::session::{Process, SessionClient};
+pub use self::channel::session::{Process, SessionClient, SessionRequest, SessionHandler, Exit, ExitStatus, ExitSignal};
 pub use self::channel::{OpenFailure, RequestFailure};
 pub use self::config::ConnectionConfig;
 pub use self::error::ConnectionError;
@@ -54,10 +54,10 @@ impl Connection {
     /// lives as long as the connection is alive. All operations on dead a connection are supposed to
     /// return the error which caused the connection to die. The error is preserved as long as there
     /// are references to the connection.
-    pub fn new<F: FnOnce(&Self) -> Box<dyn ConnectionHandler>>(
+    pub fn new(
         config: &Arc<ConnectionConfig>,
         transport: Transport,
-        handle: F,
+        handler: Box<dyn ConnectionHandler>,
     ) -> Self {
         let (r1, r2) = mpsc::channel(1);
         let (c1, c2) = oneshot::channel();
@@ -67,8 +67,7 @@ impl Connection {
             close_rx: Arc::new(Mutex::new(c2)),
             error_rx: e2.clone(),
         };
-        let hb = handle(&self_);
-        let cs = ConnectionState::new(config, hb, transport, r2, c1, e1, e2);
+        let cs = ConnectionState::new(config, handler, transport, r2, c1, e1, e2);
         drop(spawn(cs));
         self_
     }
@@ -162,12 +161,23 @@ impl Connection {
     /// disconnection process.
     ///
     /// Hint: Use [closed](Self::closed) in order to await actual disconnection.
-    pub fn close(&mut self) {
+    pub fn close(&self) {
         self.close_rx.lock().unwrap().close();
     }
 
     /// Wait for the connection being closed (does not actively close it!).
     pub async fn closed(&mut self) {
+        loop {
+            if self.error_rx.borrow().is_some() {
+                return;
+            }
+            if self.error_rx.changed().await.is_err() {
+                return;
+            }
+        }
+    }
+
+    pub async fn closed_fixme(mut self) {
         loop {
             if self.error_rx.borrow().is_some() {
                 return;

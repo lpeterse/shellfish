@@ -29,6 +29,12 @@ impl SshDecode for () {
     }
 }
 
+impl <'a> SshDecodeRef<'a> for &'a str {
+    fn decode<D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
+        d.take_str_framed()
+    }
+}
+
 impl SshDecode for String {
     fn decode<'a, D: SshDecoder<'a>>(d: &mut D) -> Option<Self> {
         d.take_str_framed().map(String::from)

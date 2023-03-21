@@ -1,3 +1,4 @@
+use crate::connection::{ExitStatus, ExitSignal};
 use crate::transport::Message;
 use crate::util::codec::*;
 
@@ -7,6 +8,28 @@ pub(crate) struct MsgChannelRequest<'a, T> {
     pub request: &'a str,
     pub want_reply: bool,
     pub specific: T,
+}
+
+impl <'a> MsgChannelRequest<'a, &'a ExitStatus> {
+    pub fn new_exit_status(rid: u32, status: &'a ExitStatus) -> Self {
+        Self {
+            recipient_channel: rid,
+            request: "exit-status",
+            want_reply: false,
+            specific: status
+        }
+    }
+}
+
+impl <'a> MsgChannelRequest<'a, &'a ExitSignal> {
+    pub fn new_exit_signal(rid: u32, signal: &'a ExitSignal) -> Self {
+        Self {
+            recipient_channel: rid,
+            request: "exit-status",
+            want_reply: false,
+            specific: signal
+        }
+    }
 }
 
 impl<'a, T> Message for MsgChannelRequest<'a, T> {

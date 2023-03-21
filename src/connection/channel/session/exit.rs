@@ -17,6 +17,16 @@ pub struct ExitSignal {
     message: String,
 }
 
+impl ExitSignal {
+    pub fn new<T: Into<String>>(signal: T) -> Self {
+        Self {
+            signal: signal.into(),
+            core_dumped: false,
+            message: String::new()
+        }
+    }
+}
+
 impl SshEncode for ExitStatus {
     fn encode<E: SshEncoder>(&self, e: &mut E) -> Option<()> {
         e.push_u32be(self.0)

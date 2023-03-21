@@ -1,27 +1,15 @@
 use super::exit::Exit;
+use std::fmt::Debug;
+use std::io::Error;
+use std::task::{Context, Poll};
+use tokio::io::ReadBuf;
 
-#[derive(Debug)]
-pub struct Stdin;
-
-#[derive(Debug)]
-pub struct Stdout;
-
-#[derive(Debug)]
-pub struct Stderr;
-
-#[derive(Debug)]
-pub struct Process {
-    pub stdin: Option<Stdin>,
-    pub stdout: Option<Stdout>,
-    pub stderr: Option<Stderr>,
-}
-
-impl Process {
-    async fn kill(&mut self) -> std::io::Result<()> {
-        todo!()
-    }
-
-    async fn wait(&mut self) -> std::io::Result<Exit> {
-        todo!()
-    }
+pub trait Process: Debug + Send + Sync + 'static {
+    fn kill(&mut self, signal: &str) -> Result<(), Error>; 
+    fn poll_stdin_write(&mut self, cx: &mut Context, buf: &[u8]) -> Poll<Result<usize, Error>>;
+    fn poll_stdin_flush(&mut self, cx: &mut Context) -> Poll<Result<(), Error>>;
+    fn poll_stdin_shutdown(&mut self, cx: &mut Context) -> Poll<Result<(), Error>>;
+    fn poll_stdout_read(&mut self, cx: &mut Context, buf: &mut ReadBuf) -> Poll<Result<(), Error>>;
+    fn poll_stderr_read(&mut self, cx: &mut Context, buf: &mut ReadBuf) -> Poll<Result<(), Error>>;
+    fn poll_exit_status(&mut self, cx: &mut Context) -> Poll<Exit>;
 }

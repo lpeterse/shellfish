@@ -2,15 +2,16 @@ use super::method::{AuthMethod, NoneMethod, PasswordMethod, PublicKeyMethod};
 use super::msg::{MsgFailure, MsgSuccess, MsgUserAuthBanner, MsgUserAuthPkOk, MsgUserAuthRequest_};
 use super::signature::SignatureData;
 use super::{AuthResult, UserAuthError, UserAuthSession};
-use crate::transport::{Transport, MsgDisconnect, DisconnectReason};
+use crate::transport::{DisconnectReason, MsgDisconnect, Transport};
 use crate::util::codec::SshCodec;
 
 pub async fn authenticate<Identity: Send + 'static>(
     mut session: Box<dyn UserAuthSession<Identity = Identity>>,
-    mut transport: Transport,
+    transport: &mut Transport,
+    service: &'static str,
 ) -> Result<Identity, UserAuthError> {
     let s = &mut session;
-    let t = &mut transport;
+    let t = transport;
 
     if let Some(banner) = s.banner().await {
         let msg = MsgUserAuthBanner::new(banner);
@@ -37,7 +38,13 @@ pub async fn authenticate<Identity: Send + 'static>(
 
     loop {
         let msg = t.receive::<MsgUserAuthRequest_>().await?;
+        let srv = msg.service_name;
         let user = msg.user_name;
+
+        if service != srv {
+            send_disconnect_service_not_available(t).await?;
+        }
+
         match msg.method_name.as_str() {
             NoneMethod::NAME => {
                 reply!(s.try_none(user).await)
@@ -52,8 +59,7 @@ pub async fn authenticate<Identity: Send + 'static>(
                 let pkey = m.identity;
                 if let Some(sig) = m.signature {
                     let sid = t.session_id();
-                    let srv = &msg.service_name;
-                    let data = SignatureData::new(sid, srv, &user, &pkey);
+                    let data = SignatureData::new(sid, &srv, &user, &pkey);
                     let data = SshCodec::encode(&data)?;
                     if sig.verify(&pkey, &data).is_ok() {
                         reply!(s.try_publickey(user, pkey).await)
@@ -116,4 +122,11 @@ async fn send_disconnect(t: &mut Transport) -> Result<(), UserAuthError> {
     t.send(&msg).await?;
     t.flush().await?;
     Err(UserAuthError::NoMoreAuthMethods)
+}
+
+async fn send_disconnect_service_not_available(t: &mut Transport) -> Result<(), UserAuthError> {
+    let msg = MsgDisconnect::new(DisconnectReason::SERVICE_NOT_AVAILABLE);
+    t.send(&msg).await?;
+    t.flush().await?;
+    Err(UserAuthError::ServiceNotAvailable)
 }

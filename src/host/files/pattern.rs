@@ -15,6 +15,8 @@ impl<'a> KnownHostsPattern<'a> {
     }
 
     fn test_hash(&self, name: &str) -> Option<()> {
+        use base64::Engine;
+        const BASE64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
         const ALG_HMAC_SHA1: usize = 1;
         let mut known = self.0.split('|');
         let _ = known.next().filter(|s| s.is_empty())?; // empty iff starts with pipe
@@ -29,8 +31,8 @@ impl<'a> KnownHostsPattern<'a> {
             // but might contain more than 16 bytes
             let mut k: [u8; 28] = [0; 28];
             let mut m: [u8; 28] = [0; 28];
-            let klen = base64::decode_config_slice(key, base64::STANDARD, &mut k).ok()?;
-            let mlen = base64::decode_config_slice(mac, base64::STANDARD, &mut m).ok()?;
+            let klen = BASE64.decode_slice(key, &mut k).ok()?;
+            let mlen = BASE64.decode_slice(mac, &mut m).ok()?;
             let mut hmac = Hmac::<Sha1>::new_from_slice(k.get(..klen)?).ok()?;
             hmac.update(name.as_ref());
             hmac.verify_slice(&m[..mlen]).ok()

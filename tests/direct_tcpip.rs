@@ -50,8 +50,8 @@ async fn new_connection_pair(
     let config = ConnectionConfig::default();
     let config = Arc::new(config);
     let (trans1, trans2) = new_transport_pair().await?;
-    let conn1 = Connection::new(&config, trans1, |_| Box::new(()));
-    let conn2 = Connection::new(&config, trans2, |_| handler);
+    let conn1 = Connection::new(&config, trans1, Box::new(()));
+    let conn2 = Connection::new(&config, trans2, handler);
     Ok((conn1, conn2))
 }
 
